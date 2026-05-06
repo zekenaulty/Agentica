@@ -1,8 +1,6 @@
 using Agentica.Clients.Llm;
 using Google.GenAI;
 using Google.GenAI.Types;
-using System.Net;
-using System.Net.Http;
 
 namespace Agentica.Clients.Gemini;
 
@@ -57,10 +55,10 @@ public sealed class GeminiLlmClient : ILlmClient
         }
         catch (Exception exception)
         {
-            var classification = ClassifyException(exception);
+            var classification = GeminiExceptionClassifier.Classify(exception);
             throw new LlmClientException(
                 ProviderName,
-                $"Gemini generation failed: {exception.Message}",
+                $"Gemini generation failed. provider={ProviderName}; errorKind={classification.ErrorKind}; statusCode={classification.StatusCode?.ToString() ?? "none"}; errorClass={classification.ErrorClass}; message={GeminiExceptionClassifier.SafeMessage(exception)}",
                 exception,
                 classification.ErrorKind,
                 classification.StatusCode,
@@ -94,85 +92,6 @@ public sealed class GeminiLlmClient : ILlmClient
 
         return new Client(apiKey: apiKey);
     }
-
-    private static GeminiErrorClassification ClassifyException(Exception exception)
-    {
-        var statusCode = FindStatusCode(exception);
-        if (statusCode is not null)
-        {
-            return new GeminiErrorClassification(
-                ErrorKind: ClassifyStatusCode(statusCode.Value),
-                StatusCode: statusCode,
-                ErrorClass: $"http_{statusCode.Value}");
-        }
-
-        var message = exception.ToString();
-        if (ContainsAny(message, "API key", "unauthenticated", "permission denied", "401", "403"))
-        {
-            return new GeminiErrorClassification(LlmClientErrorKind.Authentication, null, "authentication");
-        }
-
-        if (ContainsAny(message, "INVALID_ARGUMENT", "bad request", "400", "schema", "request payload"))
-        {
-            return new GeminiErrorClassification(LlmClientErrorKind.BadRequest, null, "bad_request");
-        }
-
-        if (ContainsAny(message, "RESOURCE_EXHAUSTED", "rate limit", "quota", "429"))
-        {
-            return new GeminiErrorClassification(LlmClientErrorKind.RateLimited, null, "rate_limited");
-        }
-
-        if (ContainsAny(message, "UNAVAILABLE", "DEADLINE_EXCEEDED", "timeout", "temporar", "operation was canceled"))
-        {
-            return new GeminiErrorClassification(LlmClientErrorKind.Transient, null, "transient");
-        }
-
-        if (exception is HttpRequestException)
-        {
-            return new GeminiErrorClassification(LlmClientErrorKind.Network, null, "network");
-        }
-
-        return new GeminiErrorClassification(LlmClientErrorKind.Unknown, null, exception.GetType().Name);
-    }
-
-    private static LlmClientErrorKind ClassifyStatusCode(int statusCode) =>
-        statusCode switch
-        {
-            401 or 403 => LlmClientErrorKind.Authentication,
-            400 or 404 or 422 => LlmClientErrorKind.BadRequest,
-            429 => LlmClientErrorKind.RateLimited,
-            500 or 502 or 503 or 504 => LlmClientErrorKind.ServerError,
-            _ => LlmClientErrorKind.Unknown
-        };
-
-    private static int? FindStatusCode(Exception exception)
-    {
-        if (exception is HttpRequestException httpRequestException &&
-            httpRequestException.StatusCode is { } httpStatusCode)
-        {
-            return (int)httpStatusCode;
-        }
-
-        foreach (var propertyName in new[] { "StatusCode", "Status", "Code" })
-        {
-            var property = exception.GetType().GetProperty(propertyName);
-            var value = property?.GetValue(exception);
-            if (value is int intValue)
-            {
-                return intValue;
-            }
-
-            if (value is HttpStatusCode statusCode)
-            {
-                return (int)statusCode;
-            }
-        }
-
-        return exception.InnerException is null ? null : FindStatusCode(exception.InnerException);
-    }
-
-    private static bool ContainsAny(string value, params string[] patterns) =>
-        patterns.Any(pattern => value.Contains(pattern, StringComparison.OrdinalIgnoreCase));
 
     private static GenerateContentConfig CreateConfig(LlmRequest request)
     {
@@ -216,9 +135,4 @@ public sealed class GeminiLlmClient : ILlmClient
 
         return string.Join(System.Environment.NewLine + System.Environment.NewLine, promptMessages);
     }
-
-    private sealed record GeminiErrorClassification(
-        LlmClientErrorKind ErrorKind,
-        int? StatusCode,
-        string ErrorClass);
 }

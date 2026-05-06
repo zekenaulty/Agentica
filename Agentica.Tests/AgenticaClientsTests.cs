@@ -240,6 +240,39 @@ public sealed class AgenticaClientsTests
     }
 
     [Fact]
+    public void Gemini_exception_classification_handles_ambiguous_status_code_members()
+    {
+        var exception = new AmbiguousProviderStatusException(
+            "provider returned a temporary server error");
+
+        var classification = GeminiExceptionClassifier.Classify(exception);
+
+        Assert.Equal(LlmClientErrorKind.ServerError, classification.ErrorKind);
+        Assert.Equal(503, classification.StatusCode);
+        Assert.Equal("http_503", classification.ErrorClass);
+    }
+
+    [Fact]
+    public async Task Retrying_llm_client_retries_server_error_then_returns_success()
+    {
+        var inner = new SequenceLlmClient(
+            new LlmClientException(
+                GeminiLlmClient.ProviderName,
+                "Gemini generation failed. provider=Gemini; errorKind=ServerError; statusCode=503; errorClass=http_503; message=provider returned a temporary server error",
+                errorKind: LlmClientErrorKind.ServerError,
+                statusCode: 503,
+                errorClass: "http_503"),
+            new LlmResponse("fake", "fake-model", PlanJson("query_state", "Query", "ReadOnly")));
+        var client = new RetryingLlmClient(inner, NoDelayRetries(maxAttempts: 3));
+
+        var response = await client.GenerateAsync(SimpleLlmRequest());
+
+        Assert.Equal(2, inner.CallCount);
+        Assert.Equal("2", response.Metadata?["llm.retry.attempts"]);
+        Assert.Contains("servererror:http_503:503", response.Metadata?["llm.retry.reasons"]);
+    }
+
+    [Fact]
     public async Task Retrying_llm_client_retries_transient_failure_then_returns_success()
     {
         var inner = new SequenceLlmClient(
@@ -555,6 +588,26 @@ public sealed class AgenticaClientsTests
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             throw new InvalidOperationException("Unreachable.");
         }
+    }
+
+    private class BaseProviderStatusException : Exception
+    {
+        public BaseProviderStatusException(string message)
+            : base(message)
+        {
+        }
+
+        public int StatusCode => 500;
+    }
+
+    private sealed class AmbiguousProviderStatusException : BaseProviderStatusException
+    {
+        public AmbiguousProviderStatusException(string message)
+            : base(message)
+        {
+        }
+
+        public new int StatusCode => 503;
     }
 
     private sealed class CountingTool : ITool

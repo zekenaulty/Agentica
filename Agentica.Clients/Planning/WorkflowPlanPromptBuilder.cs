@@ -111,6 +111,7 @@ public static class WorkflowPlanPromptBuilder
         Create only the next safe step or small safe slice justified by the observation.
         This refinement is an auditable thinking/planning turn. Do not include hidden chain-of-thought.
         Use a concise reason code, not prose.
+        Use observation only when no more specific reason code fits. Prefer the most specific accurate reason.
 
         Allowed refinement reason codes:
         - observation: ordinary update from new evidence

@@ -18,6 +18,9 @@ public sealed class AgenticaRunner
     private readonly IOutcomeReporter _outcomeReporter;
     private readonly ExecutionPolicy _policy;
     private readonly ICompletionEvaluator _completionEvaluator;
+    private readonly PlanExecutionValidator _planValidator;
+    private readonly PlanningRequestFactory _planningRequestFactory;
+    private readonly BlockedRetryRequestFactory _blockedRetryRequestFactory;
 
     public AgenticaRunner(
         IWorkflowPlanner planner,
@@ -33,6 +36,9 @@ public sealed class AgenticaRunner
         _outcomeReporter = outcomeReporter;
         _policy = policy ?? ExecutionPolicy.Default;
         _completionEvaluator = completionEvaluator ?? PlanExhaustionCompletionEvaluator.Instance;
+        _planValidator = new PlanExecutionValidator(_toolCatalog, _policy);
+        _planningRequestFactory = new PlanningRequestFactory(_toolCatalog, _policy);
+        _blockedRetryRequestFactory = new BlockedRetryRequestFactory(_policy);
     }
 
     public async Task<OutcomeEnvelope> RunAsync(RunRequest request, CancellationToken cancellationToken = default)
@@ -53,7 +59,7 @@ public sealed class AgenticaRunner
                 return AttachAttemptSummaries(envelope, attempts);
             }
 
-            currentRequest = CreateBlockedRetryRequest(originalRequest, envelope, attemptNumber + 1);
+            currentRequest = _blockedRetryRequestFactory.Create(originalRequest, envelope, attemptNumber + 1);
             attemptNumber++;
         }
     }
@@ -93,7 +99,7 @@ public sealed class AgenticaRunner
             try
             {
                 currentPlan = await _planner
-                    .CreatePlanAsync(CreatePlanningRequest(request, run), ct)
+                    .CreatePlanAsync(_planningRequestFactory.Create(request, run), ct)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -177,7 +183,7 @@ public sealed class AgenticaRunner
                     try
                     {
                         currentPlan = await _planner
-                            .CreatePlanAsync(CreatePlanningRequest(request, run), ct)
+                            .CreatePlanAsync(_planningRequestFactory.Create(request, run), ct)
                             .ConfigureAwait(false);
                     }
                     catch (OperationCanceledException)
@@ -289,7 +295,7 @@ public sealed class AgenticaRunner
                     try
                     {
                         refinedPlan = await _planner
-                            .RefinePlanAsync(CreatePlanningRequest(request, run), observation, ct)
+                            .RefinePlanAsync(_planningRequestFactory.Create(request, run), observation, ct)
                             .ConfigureAwait(false);
                     }
                     catch (OperationCanceledException)
@@ -367,66 +373,8 @@ public sealed class AgenticaRunner
         }
     }
 
-    public IReadOnlyList<ValidationIssue> ValidatePlan(WorkflowPlan plan)
-    {
-        var issues = new List<ValidationIssue>();
-
-        if (plan.Steps.Count == 0)
-        {
-            issues.Add(new ValidationIssue(
-                "plan.steps.required",
-                $"Plan '{plan.PlanId}' must include at least one step."));
-        }
-
-        foreach (var step in plan.Steps)
-        {
-            var registration = _toolCatalog.Resolve(step.ToolId);
-            if (registration is null)
-            {
-                issues.Add(new ValidationIssue(
-                    "plan.step.unknown_tool",
-                    $"Step '{step.StepId}' references unknown tool '{step.ToolId}'.",
-                    step.StepId));
-                continue;
-            }
-
-            if (registration.Descriptor.Kind != step.Kind)
-            {
-                issues.Add(new ValidationIssue(
-                    "plan.step.kind_mismatch",
-                    $"Step '{step.StepId}' kind '{step.Kind}' does not match tool kind '{registration.Descriptor.Kind}'.",
-                    step.StepId));
-            }
-
-            if (registration.Descriptor.Effect != step.Effect)
-            {
-                issues.Add(new ValidationIssue(
-                    "plan.step.effect_mismatch",
-                    $"Step '{step.StepId}' effect '{step.Effect}' does not match tool effect '{registration.Descriptor.Effect}'.",
-                    step.StepId));
-            }
-
-            if (!_policy.EffectiveEffectPolicy.Allows(registration.Descriptor.Effect))
-            {
-                issues.Add(new ValidationIssue(
-                    "plan.step.effect_not_allowed",
-                    $"Step '{step.StepId}' references tool effect '{registration.Descriptor.Effect}' which is not allowed by policy.",
-                    step.StepId));
-            }
-
-            if (step.Effect != ToolEffect.ReadOnly && step.Kind != ToolKind.Action)
-            {
-                issues.Add(new ValidationIssue(
-                    "plan.step.mutation_hidden",
-                    $"Step '{step.StepId}' has mutation effect but is not an action step.",
-                    step.StepId));
-            }
-
-            issues.AddRange(ToolInputValidator.Validate(step, registration.Descriptor.InputSchema));
-        }
-
-        return issues;
-    }
+    public IReadOnlyList<ValidationIssue> ValidatePlan(WorkflowPlan plan) =>
+        _planValidator.Validate(plan);
 
     private bool ShouldRefineAfterToolResult(PlanStep step, ToolResult result)
     {
@@ -447,24 +395,6 @@ public sealed class AgenticaRunner
         };
     }
 
-    private PlanningRequest CreatePlanningRequest(RunRequest request, AgenticaRun run)
-    {
-        var context = _policy.EffectivePlanningContext;
-        return new PlanningRequest(
-            request,
-            _toolCatalog.Descriptors,
-            Limit(run.Observations, context.MaxRecentObservations),
-            Limit(run.Receipts, context.MaxRecentReceipts));
-    }
-
-    private static IReadOnlyList<T> Limit<T>(IReadOnlyList<T> items, int? maxItems) =>
-        maxItems switch
-        {
-            null => items,
-            <= 0 => [],
-            _ => items.TakeLast(maxItems.Value).ToArray()
-        };
-
     private OutcomeEnvelope AttachAttemptSummaries(
         OutcomeEnvelope envelope,
         IReadOnlyList<RunAttemptSummary> attempts) =>
@@ -474,87 +404,6 @@ public sealed class AgenticaRunner
             {
                 RunAttempts = attempts.ToArray()
             }
-        };
-
-    private RunRequest CreateBlockedRetryRequest(
-        RunRequest originalRequest,
-        OutcomeEnvelope blockedEnvelope,
-        int nextAttemptNumber)
-    {
-        var context = originalRequest.Context is null
-            ? new Dictionary<string, object?>(StringComparer.Ordinal)
-            : new Dictionary<string, object?>(originalRequest.Context, StringComparer.Ordinal);
-
-        context.Remove("agentica.retry");
-        context["agentica.retry"] = CreateBlockedRetryContext(blockedEnvelope, nextAttemptNumber);
-
-        return originalRequest with
-        {
-            Origin = RequestOrigin.Agent,
-            Context = context
-        };
-    }
-
-    private IReadOnlyDictionary<string, object?> CreateBlockedRetryContext(
-        OutcomeEnvelope blockedEnvelope,
-        int nextAttemptNumber)
-    {
-        var context = _policy.EffectivePlanningContext;
-        var previousAttempt = new Dictionary<string, object?>(StringComparer.Ordinal)
-        {
-            ["runId"] = blockedEnvelope.Outcome.RunId,
-            ["status"] = blockedEnvelope.Outcome.Status.ToString(),
-            ["stopReason"] = blockedEnvelope.Outcome.StopReason.ToString(),
-            ["blockers"] = blockedEnvelope.Outcome.Blockers,
-            ["completedSteps"] = blockedEnvelope.Outcome.CompletedSteps,
-            ["completionEvidence"] = blockedEnvelope.Outcome.CompletionEvidence
-        };
-
-        return new Dictionary<string, object?>(StringComparer.Ordinal)
-        {
-            ["attemptNumber"] = nextAttemptNumber,
-            ["previousAttemptNumber"] = nextAttemptNumber - 1,
-            ["maxBlockedRetries"] = _policy.MaxBlockedRetries,
-            ["remainingBlockedRetries"] = Math.Max(0, _policy.MaxBlockedRetries - (nextAttemptNumber - 1)),
-            ["instruction"] = "The previous Agentica run ended blocked. Use the supplied status, blockers, recent observations, recent receipts, validation issues, and available tools to plan a bounded strategy to unblock or resume. Do not claim success; Agentica will validate and execute any proposed plan.",
-            ["previousAttempt"] = previousAttempt,
-            ["recentReceipts"] = Limit(blockedEnvelope.Receipts.Items, context.MaxRecentReceipts)
-                .Select(CreateReceiptContext)
-                .ToArray(),
-            ["recentObservations"] = Limit(blockedEnvelope.Details.Observations, context.MaxRecentObservations)
-                .Select(CreateObservationContext)
-                .ToArray(),
-            ["validationIssues"] = blockedEnvelope.Details.ValidationIssues
-                .Select(issue => new Dictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["code"] = issue.Code,
-                    ["message"] = issue.Message,
-                    ["stepId"] = issue.StepId
-                })
-                .ToArray()
-        };
-    }
-
-    private static IReadOnlyDictionary<string, object?> CreateReceiptContext(Receipt receipt) =>
-        new Dictionary<string, object?>(StringComparer.Ordinal)
-        {
-            ["receiptId"] = receipt.ReceiptId,
-            ["stepId"] = receipt.StepId,
-            ["toolId"] = receipt.ToolId,
-            ["status"] = receipt.Status.ToString(),
-            ["message"] = receipt.Message,
-            ["data"] = receipt.Data
-        };
-
-    private static IReadOnlyDictionary<string, object?> CreateObservationContext(Observation observation) =>
-        new Dictionary<string, object?>(StringComparer.Ordinal)
-        {
-            ["observationId"] = observation.ObservationId,
-            ["stepId"] = observation.StepId,
-            ["kind"] = observation.Kind.ToString(),
-            ["summary"] = observation.Summary,
-            ["data"] = observation.Data,
-            ["evidence"] = observation.Evidence
         };
 
     private OutcomeEnvelope Finish(
