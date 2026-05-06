@@ -1,0 +1,93 @@
+Agentica Source-Available Conceptual Reference License
+Version 1.0
+
+Copyright (c) 2026 Zeke / Zythis.
+All rights reserved.
+
+This repository and its contents are made visible for conceptual reference,
+review, discussion, and evaluation only. This is not an open-source license.
+
+1. Permission Granted
+
+Subject to the restrictions below, you may:
+
+- Read and inspect the source code.
+- Build and run the code locally for personal evaluation if you have lawful
+  access to this repository.
+- Discuss the concepts, architecture, and design ideas described in the
+  repository.
+- Reference the public concepts in your own thinking, writing, or architectural
+  discussion, provided you do not copy protected implementation expression.
+
+2. Restrictions
+
+You may not, without prior written permission from the copyright holder:
+
+- Copy, reproduce, publish, mirror, or redistribute the source code or any
+  substantial portion of it.
+- Modify, adapt, translate, or create derivative works from the source code.
+- Incorporate the source code into another project, product, service, package,
+  library, application, internal tool, commercial system, or hosted offering.
+- Use the source code in production, commercial, paid, unpaid, internal,
+  enterprise, consulting, client, educational-platform, SaaS, or service-bureau
+  work.
+- Sell, sublicense, rent, lease, assign, or otherwise transfer rights to the
+  source code.
+- Remove or alter copyright, license, attribution, or restriction notices.
+- Use the repository in a way that implies endorsement, partnership, or
+  permission beyond this license.
+
+3. Conceptual Reference Only
+
+The purpose of making this code visible is to communicate ideas and design
+direction. Visibility does not grant a right to reuse the implementation.
+
+General concepts, patterns, and ideas are provided for discussion and learning.
+The specific source code, structure, naming, documentation, tests, and other
+copyrightable expression remain reserved.
+
+4. Contributions
+
+Unless a separate written contribution agreement is accepted by the copyright
+holder, any submitted issue, suggestion, patch, pull request, comment, design
+note, or other contribution may be used, modified, or rejected by the copyright
+holder without obligation.
+
+Submitting a contribution does not grant you ownership, license rights, payment,
+royalties, attribution beyond ordinary project history, or any right to use this
+repository contrary to this license.
+
+5. No Patent, Trademark, Or Data Rights
+
+No patent license is granted.
+
+No trademark, trade name, service mark, logo, or branding rights are granted.
+
+No rights are granted to private data, prompts, model outputs, examples,
+workflows, or external systems referenced by the repository unless explicitly
+stated in writing.
+
+6. No Warranty
+
+THE SOFTWARE AND DOCUMENTATION ARE PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT
+WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
+NON-INFRINGEMENT, ACCURACY, AVAILABILITY, SECURITY, OR ERROR-FREE OPERATION.
+
+You are solely responsible for evaluating any concepts described here and for
+obtaining appropriate legal, security, and engineering review before using
+similar ideas in any project.
+
+7. Limitation Of Liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE COPYRIGHT HOLDER SHALL NOT BE LIABLE
+FOR ANY CLAIM, DAMAGES, LOSSES, COSTS, BUSINESS INTERRUPTION, DATA LOSS, LOST
+PROFITS, SECURITY INCIDENTS, OR OTHER LIABILITY ARISING FROM ACCESS TO,
+EVALUATION OF, DISCUSSION OF, OR ATTEMPTED USE OF THIS REPOSITORY.
+
+8. Permission Requests
+
+For permission to reuse, license, commercialize, redistribute, or otherwise use
+this code beyond conceptual reference, obtain prior written permission from the
+copyright holder.
+

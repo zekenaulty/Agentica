@@ -1,0 +1,574 @@
+using System.Reflection;
+using Agentica.Artifacts;
+using Agentica.Clients.Gemini;
+using Agentica.Clients.Llm;
+using Agentica.Clients.Planning;
+using Agentica.Execution;
+using Agentica.Events;
+using Agentica.Observations;
+using Agentica.Outcomes;
+using Agentica.Planning;
+using Agentica.Requests;
+using Agentica.Tools;
+
+namespace Agentica.Tests;
+
+public sealed class AgenticaClientsTests
+{
+    [Fact]
+    public void Runtime_project_does_not_reference_clients_project()
+    {
+        var references = typeof(AgenticaRunner).Assembly
+            .GetReferencedAssemblies()
+            .Select(assembly => assembly.Name)
+            .ToArray();
+
+        Assert.DoesNotContain("Agentica.Clients", references);
+    }
+
+    [Fact]
+    public void Clients_project_references_runtime_project()
+    {
+        var references = typeof(LlmWorkflowPlanner).Assembly
+            .GetReferencedAssemblies()
+            .Select(assembly => assembly.Name)
+            .ToArray();
+
+        Assert.Contains("Agentica", references);
+    }
+
+    [Fact]
+    public void Provider_neutral_llm_contracts_do_not_expose_google_sdk_types()
+    {
+        var llmTypes = typeof(ILlmClient).Assembly
+            .GetExportedTypes()
+            .Where(type => type.Namespace == "Agentica.Clients.Llm")
+            .ToArray();
+
+        foreach (var type in llmTypes)
+        {
+            foreach (var property in type.GetProperties(BindingFlags.Instance | BindingFlags.Public))
+            {
+                Assert.False(IsGoogleType(property.PropertyType), $"{type.Name}.{property.Name} exposes Google SDK type.");
+            }
+
+            foreach (var method in type.GetMethods(BindingFlags.Instance | BindingFlags.Public))
+            {
+                Assert.False(IsGoogleType(method.ReturnType), $"{type.Name}.{method.Name} returns Google SDK type.");
+                foreach (var parameter in method.GetParameters())
+                {
+                    Assert.False(IsGoogleType(parameter.ParameterType), $"{type.Name}.{method.Name} parameter {parameter.Name} exposes Google SDK type.");
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Llm_workflow_planner_maps_valid_initial_json_into_workflow_plan()
+    {
+        var planner = new LlmWorkflowPlanner(new FakeLlmClient(PlanJson("query_state", "Query", "ReadOnly")));
+
+        var plan = await planner.CreatePlanAsync(CreatePlanningRequest());
+
+        Assert.Equal("plan_model", plan.PlanId);
+        var step = Assert.Single(plan.Steps);
+        Assert.Equal("query_state", step.ToolId);
+        Assert.Equal(ToolKind.Query, step.Kind);
+        Assert.Equal(ToolEffect.ReadOnly, step.Effect);
+        Assert.Equal("current_state", step.Input["query"]);
+    }
+
+    [Fact]
+    public async Task Llm_workflow_planner_maps_valid_refinement_json_into_refined_plan()
+    {
+        var planner = new LlmWorkflowPlanner(new FakeLlmClient(RefinementJson("perform_action", "Action", "WritesLocalState")));
+
+        var refinedPlan = await planner.RefinePlanAsync(
+            CreatePlanningRequest(),
+            new Observation(
+                "observation_001",
+                "step_001",
+                ObservationKind.StateQuery,
+                "State is ready.",
+                new Dictionary<string, object?>(),
+                []));
+
+        Assert.Equal("plan_refined", refinedPlan.PlanId);
+        Assert.Equal(2, refinedPlan.Version);
+        var step = Assert.Single(refinedPlan.Steps);
+        Assert.Equal("perform_action", step.ToolId);
+        Assert.Equal(ToolKind.Action, step.Kind);
+        Assert.Equal(ToolEffect.WritesLocalState, step.Effect);
+    }
+
+    [Fact]
+    public async Task Invalid_model_json_fails_before_tool_execution()
+    {
+        var tool = new CountingTool("known_tool");
+        var catalog = ToolCatalog.Create(new ToolRegistration(
+            new ToolDescriptor("known_tool", "Known", ToolKind.Query, ToolEffect.ReadOnly),
+            tool));
+        var runner = CreateRunner(new LlmWorkflowPlanner(new FakeLlmClient("{not-json")), catalog);
+
+        var envelope = await runner.RunAsync(new RunRequest("Invalid JSON test"));
+
+        Assert.Equal(RunOutcomeStatus.PlanInvalid, envelope.Outcome.Status);
+        Assert.Contains(envelope.Details.ValidationIssues, issue => issue.Code == "planner.create.failed");
+        Assert.Equal(0, tool.ExecutionCount);
+        Assert.Empty(envelope.Receipts.Items);
+    }
+
+    [Fact]
+    public async Task Unknown_model_tool_id_fails_before_execution()
+    {
+        var tool = new CountingTool("known_tool");
+        var catalog = ToolCatalog.Create(new ToolRegistration(
+            new ToolDescriptor("known_tool", "Known", ToolKind.Query, ToolEffect.ReadOnly),
+            tool));
+        var runner = CreateRunner(new LlmWorkflowPlanner(new FakeLlmClient(PlanJson("missing_tool", "Query", "ReadOnly"))), catalog);
+
+        var envelope = await runner.RunAsync(new RunRequest("Unknown model tool test"));
+
+        Assert.Equal(RunOutcomeStatus.PlanInvalid, envelope.Outcome.Status);
+        Assert.Contains(envelope.Details.ValidationIssues, issue => issue.Code == "plan.step.unknown_tool");
+        Assert.Equal(0, tool.ExecutionCount);
+    }
+
+    [Fact]
+    public async Task Provider_unavailable_blocks_run_without_inventing_success()
+    {
+        var tool = new CountingTool("known_tool");
+        var catalog = ToolCatalog.Create(new ToolRegistration(
+            new ToolDescriptor("known_tool", "Known", ToolKind.Query, ToolEffect.ReadOnly),
+            tool));
+        var runner = CreateRunner(
+            new LlmWorkflowPlanner(new ThrowingLlmClient(new LlmClientException("fake", "Provider unavailable."))),
+            catalog);
+
+        var envelope = await runner.RunAsync(new RunRequest("Provider unavailable test"));
+
+        Assert.Equal(RunOutcomeStatus.Blocked, envelope.Outcome.Status);
+        Assert.Equal(StopReason.PlannerUnavailable, envelope.Outcome.StopReason);
+        Assert.NotEmpty(envelope.Outcome.Blockers);
+        Assert.Equal(0, tool.ExecutionCount);
+        Assert.Empty(envelope.Receipts.Items);
+    }
+
+    [Fact]
+    public async Task Model_hidden_mutation_step_remains_subject_to_runtime_validation()
+    {
+        var tool = new CountingTool("write_tool");
+        var catalog = ToolCatalog.Create(new ToolRegistration(
+            new ToolDescriptor("write_tool", "Write Tool", ToolKind.Action, ToolEffect.WritesLocalState),
+            tool));
+        var runner = CreateRunner(new LlmWorkflowPlanner(new FakeLlmClient(PlanJson("write_tool", "Query", "WritesLocalState"))), catalog);
+
+        var envelope = await runner.RunAsync(new RunRequest("Hidden mutation test"));
+
+        Assert.Equal(RunOutcomeStatus.PlanInvalid, envelope.Outcome.Status);
+        Assert.Contains(envelope.Details.ValidationIssues, issue => issue.Code == "plan.step.kind_mismatch");
+        Assert.Contains(envelope.Details.ValidationIssues, issue => issue.Code == "plan.step.mutation_hidden");
+        Assert.Equal(0, tool.ExecutionCount);
+    }
+
+    [Fact]
+    public void Gemini_thinking_options_map_to_budget_and_include_thoughts()
+    {
+        Assert.Equal(new GeminiThinkingConfigSnapshot(-1, true), GeminiThinkingOptionsMapper.Map(LlmThinkingOptions.Dynamic(includeThoughts: true)));
+        Assert.Equal(new GeminiThinkingConfigSnapshot(0, false), GeminiThinkingOptionsMapper.Map(LlmThinkingOptions.Off()));
+        Assert.Equal(new GeminiThinkingConfigSnapshot(4096, true), GeminiThinkingOptionsMapper.Map(LlmThinkingOptions.Budget(4096, includeThoughts: true)));
+    }
+
+    [Fact]
+    public async Task Thought_summaries_are_diagnostics_not_planning_proof()
+    {
+        var fakeClient = new FakeLlmClient(
+            new LlmResponse(
+                ProviderName: "fake",
+                ModelId: "fake-model",
+                Text: PlanJson("query_state", "Query", "ReadOnly"),
+                StructuredJson: PlanJson("query_state", "Query", "ReadOnly"),
+                ThoughtSummaries:
+                [
+                    new LlmThoughtSummary("diagnostic thinking summary", "fake")
+                ]));
+        var planner = new LlmWorkflowPlanner(fakeClient);
+
+        var plan = await planner.CreatePlanAsync(CreatePlanningRequest());
+
+        Assert.Single(plan.Steps);
+        Assert.DoesNotContain("diagnostic thinking summary", plan.Description, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Missing_gemini_api_key_produces_clear_provider_error_without_network()
+    {
+        var oldGeminiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+        var oldGoogleKey = Environment.GetEnvironmentVariable("GOOGLE_API_KEY");
+        var oldUseVertex = Environment.GetEnvironmentVariable("GOOGLE_GENAI_USE_VERTEXAI");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("GEMINI_API_KEY", null);
+            Environment.SetEnvironmentVariable("GOOGLE_API_KEY", null);
+            Environment.SetEnvironmentVariable("GOOGLE_GENAI_USE_VERTEXAI", null);
+
+            var client = new GeminiLlmClient(new GeminiClientOptions(ApiKey: null, UseVertexAi: false));
+
+            var exception = await Assert.ThrowsAsync<LlmClientException>(() =>
+                client.GenerateAsync(new LlmRequest(
+                    GeminiModelId.Flash25,
+                    [new LlmMessage(LlmMessageRole.User, "Return JSON.")],
+                    StructuredOutput: new LlmStructuredOutputOptions())));
+
+            Assert.Equal(GeminiLlmClient.ProviderName, exception.ProviderName);
+            Assert.Equal(LlmClientErrorKind.Authentication, exception.ErrorKind);
+            Assert.Contains("no Gemini API key", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("GEMINI_API_KEY", oldGeminiKey);
+            Environment.SetEnvironmentVariable("GOOGLE_API_KEY", oldGoogleKey);
+            Environment.SetEnvironmentVariable("GOOGLE_GENAI_USE_VERTEXAI", oldUseVertex);
+        }
+    }
+
+    [Fact]
+    public async Task Retrying_llm_client_retries_transient_failure_then_returns_success()
+    {
+        var inner = new SequenceLlmClient(
+            new LlmClientException("fake", "Temporary provider failure.", errorKind: LlmClientErrorKind.Transient, errorClass: "temporary"),
+            new LlmResponse("fake", "fake-model", PlanJson("query_state", "Query", "ReadOnly")));
+        var client = new RetryingLlmClient(inner, NoDelayRetries(maxAttempts: 3));
+
+        var response = await client.GenerateAsync(SimpleLlmRequest());
+
+        Assert.Equal(2, inner.CallCount);
+        Assert.Equal("2", response.Metadata?["llm.retry.attempts"]);
+        Assert.Contains("temporary", response.Metadata?["llm.retry.reasons"]);
+    }
+
+    [Fact]
+    public async Task Retrying_llm_client_retries_provider_side_operation_cancellation_then_returns_success()
+    {
+        var inner = new SequenceLlmClient(
+            new OperationCanceledException("Provider canceled before caller cancellation."),
+            new LlmResponse("fake", "fake-model", PlanJson("query_state", "Query", "ReadOnly")));
+        var client = new RetryingLlmClient(inner, NoDelayRetries(maxAttempts: 3));
+
+        var response = await client.GenerateAsync(SimpleLlmRequest());
+
+        Assert.Equal(2, inner.CallCount);
+        Assert.Equal("2", response.Metadata?["llm.retry.attempts"]);
+        Assert.Contains("operation_canceled_without_caller_cancellation", response.Metadata?["llm.retry.reasons"]);
+    }
+
+    [Fact]
+    public async Task Retrying_llm_client_does_not_retry_when_caller_token_is_cancelled()
+    {
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+        var inner = new SequenceLlmClient(new OperationCanceledException(cancellation.Token));
+        var client = new RetryingLlmClient(inner, NoDelayRetries(maxAttempts: 3));
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            client.GenerateAsync(SimpleLlmRequest(), cancellation.Token));
+
+        Assert.Equal(1, inner.CallCount);
+    }
+
+    [Fact]
+    public async Task Retrying_llm_client_enforces_call_timeout_window()
+    {
+        var inner = new HangingLlmClient();
+        var client = new RetryingLlmClient(
+            inner,
+            new LlmRetryOptions(
+                MaxAttempts: 3,
+                BaseDelay: TimeSpan.Zero,
+                MaxDelay: TimeSpan.Zero,
+                CallTimeout: TimeSpan.FromMilliseconds(25),
+                UseJitter: false));
+
+        var exception = await Assert.ThrowsAsync<LlmClientException>(() =>
+            client.GenerateAsync(SimpleLlmRequest()));
+
+        Assert.Equal(LlmClientErrorKind.Transient, exception.ErrorKind);
+        Assert.Equal("llm_call_timeout", exception.ErrorClass);
+        Assert.Equal(1, exception.Attempts);
+        Assert.Equal(1, inner.CallCount);
+    }
+
+    [Theory]
+    [InlineData(LlmClientErrorKind.Authentication)]
+    [InlineData(LlmClientErrorKind.BadRequest)]
+    public async Task Retrying_llm_client_does_not_retry_non_transient_client_errors(
+        LlmClientErrorKind errorKind)
+    {
+        var inner = new SequenceLlmClient(new LlmClientException(
+            "fake",
+            $"Non transient {errorKind}.",
+            errorKind: errorKind,
+            errorClass: errorKind.ToString()));
+        var client = new RetryingLlmClient(inner, NoDelayRetries(maxAttempts: 3));
+
+        var exception = await Assert.ThrowsAsync<LlmClientException>(() =>
+            client.GenerateAsync(SimpleLlmRequest()));
+
+        Assert.Equal(errorKind, exception.ErrorKind);
+        Assert.Equal(1, inner.CallCount);
+    }
+
+    [Fact]
+    public async Task Retries_exhausted_surface_planner_unavailable_with_attempt_count()
+    {
+        var tool = new CountingTool("known_tool");
+        var catalog = ToolCatalog.Create(new ToolRegistration(
+            new ToolDescriptor("known_tool", "Known", ToolKind.Query, ToolEffect.ReadOnly),
+            tool));
+        var llmClient = new RetryingLlmClient(
+            new AlwaysThrowingLlmClient(new LlmClientException(
+                "fake",
+                "Temporary outage.",
+                errorKind: LlmClientErrorKind.Transient,
+                errorClass: "temporary_outage")),
+            NoDelayRetries(maxAttempts: 3));
+        var runner = CreateRunner(
+            new LlmWorkflowPlanner(llmClient),
+            catalog,
+            new ExecutionPolicy(MaxSteps: 10, MaxRefinements: 2, MaxBlockedRetries: 0));
+
+        var envelope = await runner.RunAsync(new RunRequest("Provider retry exhaustion test"));
+
+        Assert.Equal(RunOutcomeStatus.Blocked, envelope.Outcome.Status);
+        Assert.Equal(StopReason.PlannerUnavailable, envelope.Outcome.StopReason);
+        Assert.Contains(envelope.Outcome.Blockers, blocker => blocker.Contains("after 3 attempt", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(envelope.Outcome.Blockers, blocker => blocker.Contains("provider=fake", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(0, tool.ExecutionCount);
+    }
+
+    private static bool IsGoogleType(Type type)
+    {
+        if (type.Namespace?.StartsWith("Google.", StringComparison.Ordinal) == true)
+        {
+            return true;
+        }
+
+        if (type.IsGenericType)
+        {
+            return type.GetGenericArguments().Any(IsGoogleType);
+        }
+
+        return type.HasElementType && type.GetElementType() is { } elementType && IsGoogleType(elementType);
+    }
+
+    private static PlanningRequest CreatePlanningRequest() =>
+        new(
+            new RunRequest("Create a two-step workflow that queries state and then acts"),
+            DemoTools.CreateCatalog().Descriptors,
+            [],
+            []);
+
+    private static AgenticaRunner CreateRunner(
+        IWorkflowPlanner planner,
+        ToolCatalog catalog,
+        ExecutionPolicy? policy = null) =>
+        new(
+            planner,
+            catalog,
+            new InMemoryEventSink(),
+            new DeterministicOutcomeReporter(),
+            policy ?? new ExecutionPolicy(MaxSteps: 10, MaxRefinements: 2));
+
+    private static LlmRequest SimpleLlmRequest() =>
+        new(
+            "fake-model",
+            [new LlmMessage(LlmMessageRole.User, "Return JSON.")],
+            StructuredOutput: new LlmStructuredOutputOptions());
+
+    private static LlmRetryOptions NoDelayRetries(int maxAttempts) =>
+        new(
+            MaxAttempts: maxAttempts,
+            BaseDelay: TimeSpan.Zero,
+            MaxDelay: TimeSpan.Zero,
+            CallTimeout: TimeSpan.FromMinutes(10),
+            UseJitter: false);
+
+    private static string PlanJson(string toolId, string kind, string effect) =>
+        $$"""
+        {
+          "planId": "plan_model",
+          "description": "Model produced plan.",
+          "steps": [
+            {
+              "stepId": "step_model",
+              "toolId": "{{toolId}}",
+              "kind": "{{kind}}",
+              "effect": "{{effect}}",
+              "input": {
+                "query": "current_state",
+                "action": "write_marker"
+              },
+              "reason": "Use the supplied tool."
+            }
+          ],
+          "completionCondition": "The selected tool completes."
+        }
+        """;
+
+    private static string RefinementJson(string toolId, string kind, string effect) =>
+        $$"""
+        {
+          "fromPlanId": "plan_model",
+          "reason": "observation",
+          "evidence": [
+            {
+              "kind": "observation",
+              "refId": "observation_001"
+            }
+          ],
+          "refinedPlan": {
+            "planId": "plan_refined",
+            "description": "Model refined plan.",
+            "steps": [
+              {
+                "stepId": "step_refined",
+                "toolId": "{{toolId}}",
+                "kind": "{{kind}}",
+                "effect": "{{effect}}",
+                "input": {
+                  "action": "write_marker"
+                },
+                "reason": "Use the observation."
+              }
+            ],
+            "completionCondition": "The action completes."
+          }
+        }
+        """;
+
+    private sealed class FakeLlmClient : ILlmClient
+    {
+        private readonly Queue<LlmResponse> _responses;
+
+        public FakeLlmClient(string structuredJson)
+            : this(new LlmResponse("fake", "fake-model", structuredJson, structuredJson))
+        {
+        }
+
+        public FakeLlmClient(params LlmResponse[] responses)
+        {
+            _responses = new Queue<LlmResponse>(responses);
+        }
+
+        public List<LlmRequest> Requests { get; } = [];
+
+        public Task<LlmResponse> GenerateAsync(
+            LlmRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            return Task.FromResult(_responses.Dequeue());
+        }
+    }
+
+    private sealed class ThrowingLlmClient : ILlmClient
+    {
+        private readonly Exception _exception;
+
+        public ThrowingLlmClient(Exception exception)
+        {
+            _exception = exception;
+        }
+
+        public Task<LlmResponse> GenerateAsync(
+            LlmRequest request,
+            CancellationToken cancellationToken = default) =>
+            Task.FromException<LlmResponse>(_exception);
+    }
+
+    private sealed class AlwaysThrowingLlmClient : ILlmClient
+    {
+        private readonly Exception _exception;
+
+        public AlwaysThrowingLlmClient(Exception exception)
+        {
+            _exception = exception;
+        }
+
+        public int CallCount { get; private set; }
+
+        public Task<LlmResponse> GenerateAsync(
+            LlmRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            return Task.FromException<LlmResponse>(_exception);
+        }
+    }
+
+    private sealed class SequenceLlmClient : ILlmClient
+    {
+        private readonly Queue<object> _results;
+
+        public SequenceLlmClient(params object[] results)
+        {
+            _results = new Queue<object>(results);
+        }
+
+        public int CallCount { get; private set; }
+
+        public Task<LlmResponse> GenerateAsync(
+            LlmRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            var result = _results.Dequeue();
+            return result switch
+            {
+                LlmResponse response => Task.FromResult(response),
+                Exception exception => Task.FromException<LlmResponse>(exception),
+                _ => Task.FromException<LlmResponse>(new InvalidOperationException("Unexpected fake LLM result."))
+            };
+        }
+    }
+
+    private sealed class HangingLlmClient : ILlmClient
+    {
+        public int CallCount { get; private set; }
+
+        public async Task<LlmResponse> GenerateAsync(
+            LlmRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("Unreachable.");
+        }
+    }
+
+    private sealed class CountingTool : ITool
+    {
+        private readonly string _toolId;
+
+        public CountingTool(string toolId)
+        {
+            _toolId = toolId;
+        }
+
+        public int ExecutionCount { get; private set; }
+
+        public Task<ToolResult> ExecuteAsync(ToolInvocation invocation, CancellationToken cancellationToken)
+        {
+            ExecutionCount++;
+            return Task.FromResult(new ToolResult(new Receipt(
+                AgenticaIds.New("receipt"),
+                invocation.StepId,
+                _toolId,
+                ReceiptStatus.Succeeded,
+                "Executed.",
+                DateTimeOffset.UtcNow,
+                new Dictionary<string, object?>())));
+        }
+    }
+}
