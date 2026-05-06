@@ -14,9 +14,9 @@ public sealed class MazeQuestBoard : IMazeQuestBoard
         new MazeQuestDescriptor(
             QuestId: "sun_gate_maze",
             Title: "The Sun Gate Maze",
-            Description: "Find the sun key, open the gate, and reach the exit through a fogged maze.",
-            Difficulty: "Easy",
-            EstimatedSteps: 24,
+            Description: "Find the sun key, weigh optional resource recovery, open the gate, and reach the exit through a fogged maze.",
+            Difficulty: "Medium",
+            EstimatedSteps: 36,
             DefaultSeed: 173)
     ];
 

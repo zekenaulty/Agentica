@@ -200,11 +200,19 @@ public sealed class MazeQuestSession
             State.Inventory.Add(questObject.ObjectId);
         }
 
+        var previousEnergy = State.Energy;
         UpdateProgressForObject(questObject, interaction: "take");
+        ApplyTakeSideEffects(questObject);
 
         var data = Snapshot("take");
         data["objectId"] = questObject.ObjectId;
         data["displayName"] = questObject.DisplayName;
+        if (questObject.Kind == MazeQuestObjectKind.ResourceCache)
+        {
+            data["previousEnergy"] = previousEnergy;
+            data["newEnergy"] = State.Energy;
+            data["energyRecovered"] = State.Energy - previousEnergy;
+        }
 
         var receipt = Receipt(invocation, ReceiptStatus.Succeeded, $"Took {questObject.DisplayName}.", data);
         return new ToolResult(receipt, Observation(invocation, receipt, $"{questObject.DisplayName} added to inventory.", data));
@@ -308,6 +316,7 @@ public sealed class MazeQuestSession
     {
         var incomplete = Stage.Quest.Objectives
             .Where(objective => objective.Kind != MazeObjectiveKind.Complete)
+            .Where(objective => objective.Required)
             .Where(objective => !State.CompletedObjectives.Contains(objective.ObjectiveId))
             .ToArray();
 
@@ -424,19 +433,30 @@ public sealed class MazeQuestSession
         }
     }
 
+    private void ApplyTakeSideEffects(MazeQuestObject questObject)
+    {
+        if (questObject.Kind == MazeQuestObjectKind.ResourceCache)
+        {
+            State.Energy = Math.Min(Stage.EnergyPolicy.MaxEnergy, State.Energy + 4);
+        }
+    }
+
     private Dictionary<string, object?> Snapshot(string action)
     {
         var runState = CurrentRunState;
         var completedObjectives = State.CompletedObjectives.Order(StringComparer.Ordinal).ToArray();
         var remainingObjectives = Stage.Quest.Objectives
             .Where(objective => objective.Kind != MazeObjectiveKind.Complete)
+            .Where(objective => objective.Required)
             .Where(objective => !State.CompletedObjectives.Contains(objective.ObjectiveId))
             .Select(objective => new Dictionary<string, object?>
             {
                 ["objectiveId"] = objective.ObjectiveId,
                 ["description"] = objective.Description,
                 ["kind"] = objective.Kind.ToString(),
-                ["targetId"] = objective.TargetId
+                ["targetId"] = objective.TargetId,
+                ["required"] = objective.Required,
+                ["priority"] = objective.Priority
             })
             .ToArray();
 
@@ -457,6 +477,7 @@ public sealed class MazeQuestSession
             ["remainingObjectives"] = remainingObjectives,
             ["activeObjectiveId"] = runState.ActiveObjectiveId,
             ["activeObjective"] = Stage.Quest.Objectives.FirstOrDefault(item => item.ObjectiveId == runState.ActiveObjectiveId),
+            ["objectiveBoard"] = MazeQuestAnalyzer.ObjectiveBoard(Stage, runState),
             ["objectiveProgress"] = new Dictionary<string, object?>
             {
                 ["completedCount"] = completedObjectives.Length,
@@ -516,6 +537,7 @@ public sealed class MazeQuestSession
 
         if (Stage.Quest.Objectives
             .Where(objective => objective.Kind != MazeObjectiveKind.Complete)
+            .Where(objective => objective.Required)
             .All(objective => State.CompletedObjectives.Contains(objective.ObjectiveId)))
         {
             actions.Add(Action(MazeQuestToolIds.CompleteObjective));

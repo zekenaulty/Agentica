@@ -50,10 +50,12 @@ public sealed class MazeQuestTemplateGenerator
     private MazeQuestTemplateResult BuildUnlock(MazeQuestDescriptor descriptor, IReadOnlyList<MazePoint> path)
     {
         var key = PointAt(path, 0.33);
+        var cache = PointAt(path, 0.5);
         var gate = PointAt(path, 0.66);
         var exit = path[^1];
         var objects = ObjectBuilder();
         Add(objects, "sun_key", MazeQuestObjectKind.Key, key, _decorators.DecorateObjectiveItem(MazeObjectiveItem.SunKey), null, "inventory", "dependency_order");
+        Add(objects, "focus_cache", MazeQuestObjectKind.ResourceCache, cache, _decorators.ResourceCache(), null, "optional", "resource_management");
         Add(objects, "sun_gate", MazeQuestObjectKind.Gate, gate, "sun gate", "sun_key", "blocked_recovery", "inventory_use");
         Add(objects, "exit", MazeQuestObjectKind.Exit, exit, "north exit", null, "terminal_evidence");
 
@@ -67,6 +69,11 @@ public sealed class MazeQuestTemplateGenerator
             objects,
             [
                 new MazeQuestObjective("find_sun_key", "Find the sun key.", MazeObjectiveKind.FindItem, "sun_key"),
+                new MazeQuestObjective("collect_focus_cache", "Optionally collect the focus cache if the route budget justifies it.", MazeObjectiveKind.CollectItem, "focus_cache")
+                {
+                    Required = false,
+                    Priority = 35
+                },
                 new MazeQuestObjective("unlock_sun_gate", "Unlock the sun gate.", MazeObjectiveKind.UnlockGate, "sun_gate"),
                 new MazeQuestObjective("reach_exit", "Reach the exit.", MazeObjectiveKind.ReachExit, "exit"),
                 new MazeQuestObjective("complete", "Complete the quest.", MazeObjectiveKind.Complete, "objective")

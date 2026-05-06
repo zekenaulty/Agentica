@@ -390,12 +390,14 @@ static string BuildMazeQuestObjective(MazeQuestStage stage) =>
     - Do not produce a full route from partial fog-of-war data.
     - Do not invent hidden map state, object ids, inventory, receipts, artifacts, or success.
     - Before mutation, use public observations from maze.get_state, maze.render_map, maze.sense_objective, and maze.evaluate_moves.
+    - Use objectiveBoard to weigh required objectives, optional objectives, priority, resource rewards, and current resource risk.
+    - moveEvaluations provide local legality, cost, risk, and frontier facts; they do not identify the best route.
     - For action inputs, copy exact values from legalActions or the tool input schema. Use lowercase cardinal directions only: north, east, south, west.
     - To move, call maze.move with input key direction set to north, east, south, or west.
     - To take an object, call maze.take with input key objectId set to the visible current-cell object id.
     - To use, unlock, activate, or deliver to a target, call maze.use with input key targetId set to the visible current-cell object id and include item only when the legal action or required item says to.
     - If a receipt is Refused, treat its reason/blocker and legalActions as the next planning facts, then recover with a query or legal alternative.
-    - Do not call {MazeQuestToolIds.CompleteObjective} until legalActions includes it or all non-complete objectives are receipt-backed as complete.
+    - Do not call {MazeQuestToolIds.CompleteObjective} until legalActions includes it or all required non-complete objectives are receipt-backed as complete.
     - The run succeeds only when {MazeQuestToolIds.CompleteObjective} emits the mazequest.objective_completed artifact.
     """;
 
@@ -617,7 +619,7 @@ static void PrintUsage()
     Console.Error.WriteLine("  Agentica.CLI quest list");
     Console.Error.WriteLine("  Agentica.CLI quest run <quest-id> [--planner deterministic|gemini] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--route observe|blocked] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--include-thoughts] [--log-run] [--log-dir <path>]");
     Console.Error.WriteLine("  Agentica.CLI mazequest list");
-    Console.Error.WriteLine("  Agentica.CLI mazequest preview <quest-id> [--seed <number>] [--type unlock|collect|delivery|explore|activate|puzzle|rescue|resource] [--width <odd 7-11>] [--height <odd 7-11>] [--visibility <1-4>] [--reveal] [--json]");
+    Console.Error.WriteLine("  Agentica.CLI mazequest preview <quest-id> [--seed <number>] [--type unlock|collect|delivery|explore|activate|puzzle|rescue|resource] [--width <odd 7-15>] [--height <odd 7-15>] [--visibility <1-4>] [--reveal] [--json]");
     Console.Error.WriteLine("  Agentica.CLI mazequest run [quest-id] [--planner deterministic|gemini] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--seed <number>] [--type unlock|collect|delivery|explore|activate|puzzle|rescue|resource] [--watch] [--narrator off|deterministic|gemini] [--turn-json] [--watch-delay-ms <ms>] [--timeout-seconds <seconds>] [--model <model-id>] [--narration-model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--include-thoughts] [--log-run] [--log-dir <path>]");
 }
 
@@ -1026,8 +1028,8 @@ internal sealed record MazeQuestPreviewOptions(
         string? questId = null;
         int? seed = null;
         MazeQuestArchetype? questType = null;
-        var width = 11;
-        var height = 11;
+        var width = 13;
+        var height = 13;
         var visibilityRadius = 2;
         var reveal = false;
         var json = false;
@@ -1198,8 +1200,8 @@ internal sealed record MazeQuestPreviewOptions(
             string.Empty,
             null,
             null,
-            Width: 11,
-            Height: 11,
+            Width: 13,
+            Height: 13,
             VisibilityRadius: 2,
             Reveal: false,
             Json: false,
@@ -1244,8 +1246,8 @@ internal sealed record MazeQuestRunOptions(
         var maxBlockedRetries = 2;
         int? seed = null;
         MazeQuestArchetype? questType = null;
-        var width = 11;
-        var height = 11;
+        var width = 13;
+        var height = 13;
         var visibilityRadius = 2;
         var watch = false;
         var narrator = MazeQuestNarratorKind.Deterministic;
@@ -1532,8 +1534,8 @@ internal sealed record MazeQuestRunOptions(
             MaxBlockedRetries: 2,
             Seed: null,
             QuestType: null,
-            Width: 11,
-            Height: 11,
+            Width: 13,
+            Height: 13,
             VisibilityRadius: 2,
             Watch: false,
             Narrator: MazeQuestNarratorKind.Deterministic,

@@ -18,8 +18,8 @@ public sealed record MazeQuestGenerationOptions(
 {
     public MazeQuestGenerationOptions Normalize()
     {
-        var width = NormalizeOdd(Width, min: 7, max: 11);
-        var height = NormalizeOdd(Height, min: 7, max: 11);
+        var width = NormalizeOdd(Width, min: 7, max: 15);
+        var height = NormalizeOdd(Height, min: 7, max: 15);
         var visibilityRadius = Math.Clamp(VisibilityRadius, 1, 4);
         return this with
         {
@@ -68,7 +68,12 @@ public sealed record MazeQuestObjective(
     string ObjectiveId,
     string Description,
     MazeObjectiveKind Kind,
-    string TargetId);
+    string TargetId)
+{
+    public bool Required { get; init; } = true;
+
+    public int Priority { get; init; } = 100;
+}
 
 public sealed record MazeQuestPlacements(
     MazePoint Start,
@@ -123,6 +128,7 @@ public sealed record MazeQuestRunState(
     IReadOnlyList<string> Inventory,
     IReadOnlySet<MazePoint> Discovered,
     IReadOnlySet<string> TriggeredHazards,
+    IReadOnlySet<string> CompletedObjectives,
     string ActiveObjectiveId)
 {
     public static MazeQuestRunState Create(MazeQuestStage stage)
@@ -142,6 +148,7 @@ public sealed record MazeQuestRunState(
             Inventory: [],
             Discovered: discovered,
             TriggeredHazards: new HashSet<string>(StringComparer.Ordinal),
+            CompletedObjectives: new HashSet<string>(StringComparer.Ordinal),
             ActiveObjectiveId: stage.Quest.Objectives[0].ObjectiveId);
     }
 }
@@ -192,11 +199,12 @@ public sealed class MazeQuestSessionState
             Inventory.ToArray(),
             Discovered.ToHashSet(),
             TriggeredHazards.ToHashSet(StringComparer.Ordinal),
+            CompletedObjectives.ToHashSet(StringComparer.Ordinal),
             ActiveObjectiveId(stage));
 
     public string ActiveObjectiveId(MazeQuestStage stage) =>
         stage.Quest.Objectives
-            .FirstOrDefault(objective => !CompletedObjectives.Contains(objective.ObjectiveId))
+            .FirstOrDefault(objective => objective.Required && !CompletedObjectives.Contains(objective.ObjectiveId))
             ?.ObjectiveId ?? "complete";
 }
 

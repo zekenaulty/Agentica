@@ -40,7 +40,7 @@ public sealed class MazeQuestDeterministicPlanner : IWorkflowPlanner
     private PlanStep NextStep(int stepNumber)
     {
         var objective = _session.Stage.Quest.Objectives.FirstOrDefault(item =>
-            ! _session.State.CompletedObjectives.Contains(item.ObjectiveId));
+            item.Required && !_session.State.CompletedObjectives.Contains(item.ObjectiveId));
 
         if (objective is null || objective.Kind == MazeObjectiveKind.Complete)
         {

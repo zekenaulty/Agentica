@@ -29,10 +29,6 @@ public static class MazeQuestAnalyzer
 
     public static IReadOnlyList<MazeMoveEvaluation> EvaluateMoves(MazeQuestStage stage, MazeQuestRunState state)
     {
-        var target = TargetFor(stage, state.ActiveObjectiveId);
-        var currentDistances = MazePathfinder.Distances(stage.Grid, state.Position);
-        var currentDistance = currentDistances.GetValueOrDefault(target, int.MaxValue / 2);
-
         return Directions.Select(direction =>
         {
             var next = state.Position.Translate(direction.Dx, direction.Dy);
@@ -61,15 +57,9 @@ public static class MazeQuestAnalyzer
                 return Blocked(direction.Direction, next, "insufficient_energy", requiredEnergy);
             }
 
-            var nextDistances = MazePathfinder.Distances(stage.Grid, next);
-            var nextDistance = nextDistances.GetValueOrDefault(target, int.MaxValue / 2);
-            var delta = nextDistance < currentDistance
-                ? "warmer"
-                : nextDistance > currentDistance
-                    ? "colder"
-                    : "same";
             var frontierGain = MazeVisibility.VisiblePoints(stage.Grid, next, stage.VisibilityRadius)
                 .Count(point => !state.Discovered.Contains(point));
+            var objectiveDelta = ObjectiveAffordance(stage, state, next, questObject, frontierGain);
 
             return new MazeMoveEvaluation(
                 Direction: direction.Direction,
@@ -78,9 +68,9 @@ public static class MazeQuestAnalyzer
                 Reason: "legal",
                 TerrainCost: requiredEnergy,
                 VisibleRisk: Math.Round(cell.HazardRisk, 2),
-                ObjectiveDelta: delta,
+                ObjectiveDelta: objectiveDelta,
                 FrontierGain: frontierGain,
-                Summary: SummaryFor(cell, delta, frontierGain));
+                Summary: SummaryFor(cell, objectiveDelta, frontierGain));
         }).ToArray();
     }
 
@@ -145,13 +135,16 @@ public static class MazeQuestAnalyzer
         var signal = SenseObjective(stage, state);
         var remainingObjectives = stage.Quest.Objectives
             .Where(objective => objective.Kind != MazeObjectiveKind.Complete)
+            .Where(objective => objective.Required)
             .Where(objective => !string.Equals(objective.ObjectiveId, "complete", StringComparison.Ordinal))
             .Select(objective => new Dictionary<string, object?>
             {
                 ["objectiveId"] = objective.ObjectiveId,
                 ["kind"] = objective.Kind.ToString(),
                 ["description"] = objective.Description,
-                ["targetId"] = objective.TargetId
+                ["targetId"] = objective.TargetId,
+                ["required"] = objective.Required,
+                ["priority"] = objective.Priority
             })
             .ToArray();
 
@@ -166,7 +159,9 @@ public static class MazeQuestAnalyzer
                 ["objectiveId"] = objective.ObjectiveId,
                 ["kind"] = objective.Kind.ToString(),
                 ["description"] = objective.Description,
-                ["targetId"] = objective.TargetId
+                ["targetId"] = objective.TargetId,
+                ["required"] = objective.Required,
+                ["priority"] = objective.Priority
             }).ToArray(),
             ["seed"] = stage.Seed,
             ["position"] = new Dictionary<string, object?>
@@ -192,6 +187,7 @@ public static class MazeQuestAnalyzer
             ["stepCount"] = state.StepCount,
             ["inventory"] = state.Inventory,
             ["activeObjectiveId"] = state.ActiveObjectiveId,
+            ["objectiveBoard"] = ObjectiveBoard(stage, state),
             ["remainingObjectives"] = remainingObjectives,
             ["objectiveProgress"] = new Dictionary<string, object?>
             {
@@ -206,6 +202,12 @@ public static class MazeQuestAnalyzer
             ["knownBlockers"] = EvaluateMoves(stage, state).Where(move => !move.Legal).ToArray()
         };
     }
+
+    public static IReadOnlyList<Dictionary<string, object?>> ObjectiveBoard(MazeQuestStage stage, MazeQuestRunState state) =>
+        stage.Quest.Objectives
+            .Where(objective => objective.Kind != MazeObjectiveKind.Complete)
+            .Select((objective, index) => ObjectiveBoardEntry(stage, state, objective, index))
+            .ToArray();
 
     public static string HazardKey(MazePoint point, MazeHazard hazard) =>
         $"{point.X},{point.Y}:{hazard}";
@@ -222,12 +224,114 @@ public static class MazeQuestAnalyzer
             FrontierGain: 0,
             Summary: $"Blocked by {reason}.");
 
-    private static string SummaryFor(MazeCell cell, string delta, int frontierGain)
+    private static string ObjectiveAffordance(
+        MazeQuestStage stage,
+        MazeQuestRunState state,
+        MazePoint next,
+        MazeQuestObject? questObject,
+        int frontierGain)
+    {
+        if (questObject is not null &&
+            stage.Quest.Objectives.Any(objective =>
+                !string.Equals(objective.ObjectiveId, "complete", StringComparison.Ordinal) &&
+                string.Equals(objective.TargetId, questObject.ObjectId, StringComparison.Ordinal)))
+        {
+            return string.Equals(questObject.ObjectId, ActiveTargetId(stage, state), StringComparison.Ordinal)
+                ? "reaches_active_objective_object"
+                : "reaches_known_objective_object";
+        }
+
+        if (frontierGain > 0)
+        {
+            return "expands_frontier";
+        }
+
+        return "local_traversal";
+    }
+
+    private static Dictionary<string, object?> ObjectiveBoardEntry(
+        MazeQuestStage stage,
+        MazeQuestRunState state,
+        MazeQuestObjective objective,
+        int index)
+    {
+        var priorRequiredIncomplete = stage.Quest.Objectives
+            .Where(item => item.Kind != MazeObjectiveKind.Complete)
+            .Take(index)
+            .Any(item => item.Required && !state.CompletedObjectives.Contains(item.ObjectiveId));
+        var status = state.CompletedObjectives.Contains(objective.ObjectiveId)
+            ? "completed"
+            : string.Equals(state.ActiveObjectiveId, objective.ObjectiveId, StringComparison.Ordinal)
+                ? "active"
+                : priorRequiredIncomplete
+                    ? "waiting"
+                    : "open";
+
+        if (stage.Objects.TryGetValue(objective.TargetId, out var target) &&
+            state.Inventory.Contains(target.ObjectId, StringComparer.Ordinal) &&
+            objective.Kind is MazeObjectiveKind.FindItem or MazeObjectiveKind.CollectItem or MazeObjectiveKind.RescueTarget)
+        {
+            status = "completed";
+        }
+
+        var distance = stage.Objects.TryGetValue(objective.TargetId, out var questObject)
+            ? MazePathfinder.Distances(stage.Grid, state.Position).GetValueOrDefault(questObject.Point, int.MaxValue / 2)
+            : int.MaxValue / 2;
+
+        return new Dictionary<string, object?>
+        {
+            ["objectiveId"] = objective.ObjectiveId,
+            ["description"] = objective.Description,
+            ["kind"] = objective.Kind.ToString(),
+            ["targetId"] = objective.TargetId,
+            ["required"] = objective.Required,
+            ["priority"] = objective.Priority,
+            ["status"] = status,
+            ["distanceBand"] = DistanceBand(distance),
+            ["knownCostBand"] = CostBand(distance),
+            ["reward"] = RewardFor(stage, objective.TargetId)
+        };
+    }
+
+    private static string SummaryFor(MazeCell cell, string objectiveDelta, int frontierGain)
     {
         var risk = cell.Hazard == MazeHazard.None
             ? "no visible hazard"
             : $"{cell.Hazard} risk {cell.HazardRisk:0.00}";
-        return $"{delta}; cost {cell.TraversalCost}; {risk}; reveals {frontierGain} cells.";
+        return $"{objectiveDelta}; cost {cell.TraversalCost}; {risk}; reveals {frontierGain} cells.";
+    }
+
+    private static string? ActiveTargetId(MazeQuestStage stage, MazeQuestRunState state) =>
+        stage.Quest.Objectives.FirstOrDefault(objective => objective.ObjectiveId == state.ActiveObjectiveId)?.TargetId;
+
+    private static string CostBand(int distance) =>
+        distance switch
+        {
+            <= 2 => "short",
+            <= 6 => "medium",
+            < int.MaxValue / 4 => "long",
+            _ => "unknown"
+        };
+
+    private static Dictionary<string, object?>? RewardFor(MazeQuestStage stage, string targetId)
+    {
+        if (!stage.Objects.TryGetValue(targetId, out var questObject))
+        {
+            return null;
+        }
+
+        var cell = stage.Grid[questObject.Point];
+        if (questObject.Kind == MazeQuestObjectKind.ResourceCache || cell.Reward == MazeReward.Energy)
+        {
+            return new Dictionary<string, object?> { ["energy"] = 4 };
+        }
+
+        if (cell.Reward == MazeReward.Health)
+        {
+            return new Dictionary<string, object?> { ["health"] = 2 };
+        }
+
+        return null;
     }
 
     private static MazePoint TargetFor(MazeQuestStage stage, string objectiveId)

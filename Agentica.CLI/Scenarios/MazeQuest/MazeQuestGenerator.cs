@@ -52,7 +52,9 @@ public sealed class MazeQuestGenerator
     {
         var route = new List<MazePoint> { placements.Start };
         var cursor = placements.Start;
-        foreach (var objective in quest.Objectives.Where(objective => objective.Kind != MazeObjectiveKind.Complete))
+        foreach (var objective in quest.Objectives
+            .Where(objective => objective.Kind != MazeObjectiveKind.Complete)
+            .Where(objective => objective.Required))
         {
             var target = objects.TryGetValue(objective.TargetId, out var questObject)
                 ? questObject.Point

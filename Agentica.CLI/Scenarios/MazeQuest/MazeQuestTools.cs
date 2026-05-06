@@ -79,7 +79,7 @@ public static class MazeQuestTools
             MazeQuestToolIds.RenderMap => "Returns the current fog-of-war ASCII map and legend. It never reveals hidden route data.",
             MazeQuestToolIds.Scan => "Refreshes local fog-of-war discovery around the current position. Use when local state is stale or available moves are unclear.",
             MazeQuestToolIds.SenseObjective => "Returns hot/cold, rough bearing, distance band, and confidence for the active objective. This is guidance, not a path oracle.",
-            MazeQuestToolIds.EvaluateMoves => "Returns local cardinal move legality, visible risk, terrain cost, objective delta, frontier gain, and blocker reasons. Use before choosing maze.move.",
+            MazeQuestToolIds.EvaluateMoves => "Returns local cardinal move legality, visible risk, terrain cost, coarse objective affordance, frontier gain, and blocker reasons. It does not choose the best route.",
             MazeQuestToolIds.Move => "Moves one cell in a legal cardinal direction. Input must be exactly one lowercase value from north, east, south, west copied from legalActions or moveEvaluations.",
             MazeQuestToolIds.Take => "Takes a visible object at the current cell into inventory. Input objectId must be copied exactly from a current legalActions entry.",
             MazeQuestToolIds.Use => "Uses, activates, unlocks, or delivers to a visible current-cell target object. Input targetId and optional item must be copied from legalActions, currentObject, or requiredItem.",
