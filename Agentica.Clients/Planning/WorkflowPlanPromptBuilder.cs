@@ -109,6 +109,19 @@ public static class WorkflowPlanPromptBuilder
         $$"""
         Refine the Agentica workflow plan using the new observation.
         Create only the next safe step or small safe slice justified by the observation.
+        This refinement is an auditable thinking/planning turn. Do not include hidden chain-of-thought.
+        Use a concise reason code, not prose.
+
+        Allowed refinement reason codes:
+        - observation: ordinary update from new evidence
+        - blocked: a receipt/refusal/blocker must be handled
+        - ambiguous_action: legal options exist but no action is clearly dominant
+        - low_confidence: current state is insufficient to safely act
+        - conflicting_signals: observations or tool guidance conflict
+        - completion_check: verify whether the task is already complete or can complete now
+        - continue: completion is not proven and another bounded slice is needed
+        - resource_risk: health, energy, cost, or risk makes blind action unsafe
+        - retry_unblock: a retry attempt is trying to clear the previous blocker
 
         Objective:
         {{request.Request.Objective}}
@@ -134,7 +147,7 @@ public static class WorkflowPlanPromptBuilder
         Required JSON shape:
         {
           "fromPlanId": "previous plan id if known",
-          "reason": "observation",
+          "reason": "observation|blocked|ambiguous_action|low_confidence|conflicting_signals|completion_check|continue|resource_risk|retry_unblock",
           "evidence": [
             {
               "kind": "observation",

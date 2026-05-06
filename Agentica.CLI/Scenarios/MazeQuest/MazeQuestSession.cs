@@ -137,13 +137,17 @@ public sealed class MazeQuestSession
                 {
                     ["direction"] = direction,
                     ["to"] = Point(move.To),
+                    ["currentEnergy"] = State.Energy,
+                    ["requiredEnergy"] = move.TerrainCost,
+                    ["restAvailable"] = CanRest(),
+                    ["restCharges"] = State.RestCharges,
                     ["legalAlternatives"] = legalAlternatives
                 });
         }
 
         State.Position = move.To;
         State.StepCount++;
-        State.Energy = Math.Max(0, State.Energy - Math.Max(1, move.TerrainCost));
+        State.Energy = Math.Max(0, State.Energy - move.TerrainCost);
         State.Discovered.UnionWith(MazeVisibility.VisiblePoints(Stage.Grid, State.Position, Stage.VisibilityRadius));
 
         ApplyHazard();
@@ -263,11 +267,39 @@ public sealed class MazeQuestSession
 
     private ToolResult Rest(ToolInvocation invocation)
     {
+        if (!CanRest())
+        {
+            return Refused(
+                invocation,
+                "rest_not_available",
+                "Rest is not available from the current resource state.",
+                new Dictionary<string, object?>
+                {
+                    ["restCharges"] = State.RestCharges,
+                    ["energy"] = State.Energy,
+                    ["maxEnergy"] = Stage.EnergyPolicy.MaxEnergy,
+                    ["health"] = State.Health,
+                    ["maxHealth"] = 8
+                });
+        }
+
+        var previousEnergy = State.Energy;
+        var previousHealth = State.Health;
+        var previousRestCharges = State.RestCharges;
+
         State.StepCount++;
-        State.Health = Math.Min(8, State.Health + 1);
-        State.Energy = Math.Min(8, State.Energy + 2);
+        State.RestCharges--;
+        State.Health = Math.Min(8, State.Health + Stage.EnergyPolicy.RestHealthGain);
+        State.Energy = Math.Min(Stage.EnergyPolicy.MaxEnergy, State.Energy + Stage.EnergyPolicy.RestEnergyGain);
 
         var data = Snapshot("rest");
+        data["previousEnergy"] = previousEnergy;
+        data["newEnergy"] = State.Energy;
+        data["previousHealth"] = previousHealth;
+        data["newHealth"] = State.Health;
+        data["restChargesBefore"] = previousRestCharges;
+        data["restChargesAfter"] = State.RestCharges;
+
         var receipt = Receipt(invocation, ReceiptStatus.Succeeded, "Rested briefly.", data);
         return new ToolResult(receipt, Observation(invocation, receipt, "Health and energy recovered slightly.", data));
     }
@@ -317,7 +349,7 @@ public sealed class MazeQuestSession
             return;
         }
 
-        var hazardKey = $"{State.Position.X},{State.Position.Y}:{CurrentCell.Hazard}";
+        var hazardKey = MazeQuestAnalyzer.HazardKey(State.Position, CurrentCell.Hazard);
         if (!State.TriggeredHazards.Add(hazardKey))
         {
             return;
@@ -326,10 +358,6 @@ public sealed class MazeQuestSession
         if (CurrentCell.Hazard is MazeHazard.Spike or MazeHazard.Trap)
         {
             State.Health = Math.Max(0, State.Health - 1);
-        }
-        else if (CurrentCell.Hazard == MazeHazard.Darkness)
-        {
-            State.Energy = Math.Max(0, State.Energy - 1);
         }
     }
 
@@ -422,6 +450,7 @@ public sealed class MazeQuestSession
             ["position"] = Point(State.Position),
             ["health"] = State.Health,
             ["energy"] = State.Energy,
+            ["resources"] = Resources(),
             ["stepCount"] = State.StepCount,
             ["inventory"] = State.Inventory.Order(StringComparer.Ordinal).ToArray(),
             ["completedObjectives"] = completedObjectives,
@@ -453,9 +482,13 @@ public sealed class MazeQuestSession
             Action(MazeQuestToolIds.RenderMap),
             Action(MazeQuestToolIds.Scan),
             Action(MazeQuestToolIds.SenseObjective),
-            Action(MazeQuestToolIds.EvaluateMoves),
-            Action(MazeQuestToolIds.Rest)
+            Action(MazeQuestToolIds.EvaluateMoves)
         };
+
+        if (CanRest())
+        {
+            actions.Add(Action(MazeQuestToolIds.Rest));
+        }
 
         foreach (var move in MazeQuestAnalyzer.EvaluateMoves(Stage, CurrentRunState).Where(move => move.Legal))
         {
@@ -505,6 +538,10 @@ public sealed class MazeQuestSession
             or MazeQuestObjectKind.DeliveryPickup
             or MazeQuestObjectKind.RescueTarget
             or MazeQuestObjectKind.ResourceCache;
+
+    private bool CanRest() =>
+        State.RestCharges > 0 &&
+        (State.Energy < Stage.EnergyPolicy.MaxEnergy || State.Health < 8);
 
     private MazeQuestObject? RequireCurrentObject(string objectId) =>
         CurrentObject is { } currentObject &&
@@ -575,6 +612,21 @@ public sealed class MazeQuestSession
             ["objectiveItem"] = cell.ObjectiveItem.ToString(),
             ["lockId"] = cell.LockId,
             ["displayName"] = cell.DisplayName
+        };
+
+    private Dictionary<string, object?> Resources() =>
+        new(StringComparer.Ordinal)
+        {
+            ["health"] = State.Health,
+            ["maxHealth"] = 8,
+            ["energy"] = State.Energy,
+            ["maxEnergy"] = Stage.EnergyPolicy.MaxEnergy,
+            ["restCharges"] = State.RestCharges,
+            ["restEnergyGain"] = Stage.EnergyPolicy.RestEnergyGain,
+            ["restHealthGain"] = Stage.EnergyPolicy.RestHealthGain,
+            ["enforceMoveEnergy"] = Stage.EnergyPolicy.EnforceMoveEnergy,
+            ["perfectRouteCost"] = Stage.EnergyPolicy.PerfectRouteCost,
+            ["energyPadding"] = Stage.EnergyPolicy.Padding
         };
 
     private static Receipt Receipt(

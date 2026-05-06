@@ -284,10 +284,10 @@ LLM-backed outcome reporting can live behind `IOutcomeReporter` in the Agentica 
 : Bounds the planner-visible history of observations and receipts. Full run details remain in `DetailEnvelope`; planner context shaping controls what is fed back into the next planning call.
 
 `WorkflowPlan`
-: Versioned plan contract. Contains steps, dependency edges, allowed refinement points, expected observations, expected receipts, and completion conditions.
+: Versioned plan contract. Contains steps, a description, and optional planner-provided `PlanningReason` metadata for auditability. The reason is not execution proof.
 
 `PlanStep`
-: One unit of planned work. A step may be a query/read step, action step, reasoning/planning step, validation step, or outcome step.
+: One unit of planned work. A step may include a concise planner-provided reason. The reason explains why the step was proposed; it does not authorize execution.
 
 `PlanStepInput`
 : Input refs and literal values for a step.
@@ -297,6 +297,9 @@ LLM-backed outcome reporting can live behind `IOutcomeReporter` in the Agentica 
 
 `PlanRefinement`
 : Explicit plan update caused by observations, blockers, failures, approvals, or changed preconditions.
+
+`PlanRefinementReasons`
+: Bounded reason-code vocabulary for auditable planning/refinement turns: `observation`, `blocked`, `ambiguous_action`, `low_confidence`, `conflicting_signals`, `completion_check`, `continue`, `resource_risk`, and `retry_unblock`.
 
 ### Tools
 

@@ -31,6 +31,7 @@ public sealed class MazeQuestGenerator
         var hazards = PickHazards(baseGrid, weights, template.Placements.Start, reservedPoints, random);
         var rewards = PickRewards(baseGrid, weights, reservedPoints, hazards.Keys, random);
         var grid = BuildDecoratedGrid(baseGrid, template.Objects, hazards, rewards, decorators);
+        var energyPolicy = BuildEnergyPolicy(grid, template.Quest, template.Placements, template.Objects);
 
         return new MazeQuestStage(
             Quest: template.Quest,
@@ -38,8 +39,62 @@ public sealed class MazeQuestGenerator
             Placements: template.Placements,
             Objects: template.Objects,
             Weights: weights,
+            EnergyPolicy: energyPolicy,
             VisibilityRadius: options.VisibilityRadius,
             Seed: options.Seed);
+    }
+
+    private static MazeQuestEnergyPolicy BuildEnergyPolicy(
+        MazeGrid grid,
+        MazeQuestDefinition quest,
+        MazeQuestPlacements placements,
+        IReadOnlyDictionary<string, MazeQuestObject> objects)
+    {
+        var route = new List<MazePoint> { placements.Start };
+        var cursor = placements.Start;
+        foreach (var objective in quest.Objectives.Where(objective => objective.Kind != MazeObjectiveKind.Complete))
+        {
+            var target = objects.TryGetValue(objective.TargetId, out var questObject)
+                ? questObject.Point
+                : objective.ObjectiveId == "reach_exit"
+                    ? placements.Exit
+                    : cursor;
+            var segment = MazePathfinder.ShortestPath(grid, cursor, target);
+            if (segment.Count > 1)
+            {
+                route.AddRange(segment.Skip(1));
+                cursor = target;
+            }
+        }
+
+        var triggeredHazards = new HashSet<string>(StringComparer.Ordinal);
+        var perfectRouteCost = route
+            .Skip(1)
+            .Sum(point => MoveEnergyCost(grid[point], triggeredHazards));
+        var padding = 5;
+        var initialEnergy = Math.Max(8, perfectRouteCost + padding);
+
+        return new MazeQuestEnergyPolicy(
+            InitialEnergy: initialEnergy,
+            MaxEnergy: initialEnergy,
+            RestEnergyGain: 2,
+            RestHealthGain: 1,
+            RestCharges: 2,
+            EnforceMoveEnergy: true,
+            PerfectRouteCost: perfectRouteCost,
+            Padding: padding);
+    }
+
+    private static int MoveEnergyCost(MazeCell cell, ISet<string> triggeredHazards)
+    {
+        var cost = Math.Max(1, cell.TraversalCost);
+        var hazardKey = $"{cell.Point.X},{cell.Point.Y}:{cell.Hazard}";
+        if (cell.Hazard == MazeHazard.Darkness && triggeredHazards.Add(hazardKey))
+        {
+            cost++;
+        }
+
+        return cost;
     }
 
     private static bool[,] CarveMaze(int width, int height, Random random)

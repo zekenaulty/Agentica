@@ -254,6 +254,8 @@ Agentica may bound planner-visible receipts and observations; it must not own fo
 
 If a run ends blocked, Agentica may start a bounded retry attempt. A retry is a fresh Agentica run with the same host tool catalog and host state, `RequestOrigin.Agent`, and an `agentica.retry` request context that describes only the immediately previous blocked attempt. This lets the planner reason about how to unblock or resume without carrying stale blockers forever. The retry still proposes a normal `WorkflowPlan`; Agentica still validates every tool, input, effect, receipt, and completion claim.
 
+Extra thinking turns must stay inside the normal planning envelope. If the planner needs more granular reasoning, it returns a normal `WorkflowPlan` or `PlanRefinement` with an auditable reason code such as `ambiguous_action`, `blocked`, `low_confidence`, `conflicting_signals`, `completion_check`, `continue`, `resource_risk`, or `retry_unblock`. There is no hidden chain-of-thought store, no unbounded reasoning loop, and no execution path that bypasses plan validation.
+
 ## Decision 010: First Proof Slice Event Story
 
 The first executable proof slice should produce this event shape:

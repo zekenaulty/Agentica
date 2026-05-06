@@ -7,4 +7,7 @@ public sealed record PlanStep(
     string ToolId,
     ToolKind Kind,
     ToolEffect Effect,
-    IReadOnlyDictionary<string, object?> Input);
+    IReadOnlyDictionary<string, object?> Input)
+{
+    public string? Reason { get; init; }
+}

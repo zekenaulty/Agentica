@@ -55,6 +55,12 @@ public static class MazeQuestAnalyzer
                 return Blocked(direction.Direction, next, $"requires_{requiredItem}");
             }
 
+            var requiredEnergy = RequiredEnergyFor(cell, state);
+            if (stage.EnergyPolicy.EnforceMoveEnergy && state.Energy < requiredEnergy)
+            {
+                return Blocked(direction.Direction, next, "insufficient_energy", requiredEnergy);
+            }
+
             var nextDistances = MazePathfinder.Distances(stage.Grid, next);
             var nextDistance = nextDistances.GetValueOrDefault(target, int.MaxValue / 2);
             var delta = nextDistance < currentDistance
@@ -70,12 +76,24 @@ public static class MazeQuestAnalyzer
                 To: next,
                 Legal: true,
                 Reason: "legal",
-                TerrainCost: cell.TraversalCost,
+                TerrainCost: requiredEnergy,
                 VisibleRisk: Math.Round(cell.HazardRisk, 2),
                 ObjectiveDelta: delta,
                 FrontierGain: frontierGain,
                 Summary: SummaryFor(cell, delta, frontierGain));
         }).ToArray();
+    }
+
+    public static int RequiredEnergyFor(MazeCell cell, MazeQuestRunState state)
+    {
+        var requiredEnergy = Math.Max(1, cell.TraversalCost);
+        if (cell.Hazard == MazeHazard.Darkness &&
+            !state.TriggeredHazards.Contains(HazardKey(cell.Point, cell.Hazard)))
+        {
+            requiredEnergy++;
+        }
+
+        return requiredEnergy;
     }
 
     public static IReadOnlyList<Dictionary<string, object?>> VisibleCells(MazeQuestStage stage, MazeQuestRunState state)
@@ -158,6 +176,19 @@ public static class MazeQuestAnalyzer
             },
             ["health"] = state.Health,
             ["energy"] = state.Energy,
+            ["resources"] = new Dictionary<string, object?>
+            {
+                ["health"] = state.Health,
+                ["maxHealth"] = 8,
+                ["energy"] = state.Energy,
+                ["maxEnergy"] = stage.EnergyPolicy.MaxEnergy,
+                ["restCharges"] = state.RestCharges,
+                ["restEnergyGain"] = stage.EnergyPolicy.RestEnergyGain,
+                ["restHealthGain"] = stage.EnergyPolicy.RestHealthGain,
+                ["enforceMoveEnergy"] = stage.EnergyPolicy.EnforceMoveEnergy,
+                ["perfectRouteCost"] = stage.EnergyPolicy.PerfectRouteCost,
+                ["energyPadding"] = stage.EnergyPolicy.Padding
+            },
             ["stepCount"] = state.StepCount,
             ["inventory"] = state.Inventory,
             ["activeObjectiveId"] = state.ActiveObjectiveId,
@@ -176,13 +207,16 @@ public static class MazeQuestAnalyzer
         };
     }
 
-    private static MazeMoveEvaluation Blocked(string direction, MazePoint to, string reason) =>
+    public static string HazardKey(MazePoint point, MazeHazard hazard) =>
+        $"{point.X},{point.Y}:{hazard}";
+
+    private static MazeMoveEvaluation Blocked(string direction, MazePoint to, string reason, int terrainCost = 0) =>
         new(
             Direction: direction,
             To: to,
             Legal: false,
             Reason: reason,
-            TerrainCost: 0,
+            TerrainCost: terrainCost,
             VisibleRisk: 0,
             ObjectiveDelta: "blocked",
             FrontierGain: 0,

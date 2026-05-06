@@ -52,7 +52,12 @@ public sealed class LlmWorkflowPlanner : IWorkflowPlanner
                 throw new LlmPlannerException("Planner refinement payload did not include refinedPlan.");
             }
 
-            return contract.RefinedPlan.ToWorkflowPlan(version: 2);
+            return contract.RefinedPlan.ToWorkflowPlan(version: 2) with
+            {
+                PlanningReason = PlanRefinementReasons.Normalize(
+                    contract.Reason,
+                    PlanRefinementReasons.Observation)
+            };
         }
         catch (JsonException exception)
         {

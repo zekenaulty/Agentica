@@ -16,7 +16,10 @@ public sealed class PlanningModeTests
     {
         var planner = new RefinementProbePlanner(
             initialPlan: Plan("plan_001", 1, Step("step_001", "observing_action", ToolKind.Action, ToolEffect.WritesLocalState)),
-            refinedPlan: Plan("plan_002", 2, Step("step_002", "complete_action", ToolKind.Action, ToolEffect.WritesLocalState)));
+            refinedPlan: Plan("plan_002", 2, Step("step_002", "complete_action", ToolKind.Action, ToolEffect.WritesLocalState)) with
+            {
+                PlanningReason = PlanRefinementReasons.LowConfidence
+            });
         var catalog = ToolCatalog.Create(
             Register("observing_action", ToolKind.Action, ToolEffect.WritesLocalState, new ObservationTool()),
             Register("complete_action", ToolKind.Action, ToolEffect.WritesLocalState, new ReceiptOnlyTool()));
@@ -27,7 +30,8 @@ public sealed class PlanningModeTests
         Assert.Equal(RunOutcomeStatus.Succeeded, envelope.Outcome.Status);
         Assert.Equal(1, planner.RefinementCount);
         Assert.Equal(["step_001", "step_002"], envelope.Outcome.CompletedSteps);
-        Assert.Single(envelope.Details.PlanRefinements);
+        var refinement = Assert.Single(envelope.Details.PlanRefinements);
+        Assert.Equal(PlanRefinementReasons.LowConfidence, refinement.Reason);
     }
 
     [Fact]

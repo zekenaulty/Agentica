@@ -317,9 +317,11 @@ public sealed class AgenticaRunner
                     run.PlanRefinements.Add(new PlanRefinement(
                         FromPlanId: currentPlan.PlanId,
                         ToPlanId: refinedPlan.PlanId,
-                        Reason: result.Receipt.Status is ReceiptStatus.Unavailable or ReceiptStatus.Refused
-                            ? "blocker"
-                            : "observation",
+                        Reason: PlanRefinementReasons.Normalize(
+                            refinedPlan.PlanningReason,
+                            result.Receipt.Status is ReceiptStatus.Unavailable or ReceiptStatus.Refused
+                                ? PlanRefinementReasons.Blocked
+                                : PlanRefinementReasons.Observation),
                         Evidence:
                         [
                             new EvidenceRef("observation", observation.ObservationId),

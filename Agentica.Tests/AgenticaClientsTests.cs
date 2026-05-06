@@ -81,7 +81,11 @@ public sealed class AgenticaClientsTests
     [Fact]
     public async Task Llm_workflow_planner_maps_valid_refinement_json_into_refined_plan()
     {
-        var planner = new LlmWorkflowPlanner(new FakeLlmClient(RefinementJson("perform_action", "Action", "WritesLocalState")));
+        var planner = new LlmWorkflowPlanner(new FakeLlmClient(RefinementJson(
+            "perform_action",
+            "Action",
+            "WritesLocalState",
+            PlanRefinementReasons.AmbiguousAction)));
 
         var refinedPlan = await planner.RefinePlanAsync(
             CreatePlanningRequest(),
@@ -95,10 +99,12 @@ public sealed class AgenticaClientsTests
 
         Assert.Equal("plan_refined", refinedPlan.PlanId);
         Assert.Equal(2, refinedPlan.Version);
+        Assert.Equal(PlanRefinementReasons.AmbiguousAction, refinedPlan.PlanningReason);
         var step = Assert.Single(refinedPlan.Steps);
         Assert.Equal("perform_action", step.ToolId);
         Assert.Equal(ToolKind.Action, step.Kind);
         Assert.Equal(ToolEffect.WritesLocalState, step.Effect);
+        Assert.Equal("Use the observation.", step.Reason);
     }
 
     [Fact]
@@ -416,11 +422,15 @@ public sealed class AgenticaClientsTests
         }
         """;
 
-    private static string RefinementJson(string toolId, string kind, string effect) =>
+    private static string RefinementJson(
+        string toolId,
+        string kind,
+        string effect,
+        string reason = PlanRefinementReasons.Observation) =>
         $$"""
         {
           "fromPlanId": "plan_model",
-          "reason": "observation",
+          "reason": "{{reason}}",
           "evidence": [
             {
               "kind": "observation",

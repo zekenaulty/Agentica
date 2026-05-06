@@ -65,6 +65,11 @@ public sealed record WorkflowPlanStepJsonContract(
             pair => JsonValueConverter.Convert(pair.Value),
             StringComparer.Ordinal) ?? new Dictionary<string, object?>(StringComparer.Ordinal);
 
-        return new PlanStep(StepId, ToolId, kind, effect, input);
+        return new PlanStep(StepId, ToolId, kind, effect, input)
+        {
+            Reason = string.IsNullOrWhiteSpace(Reason)
+                ? null
+                : Reason
+        };
     }
 }

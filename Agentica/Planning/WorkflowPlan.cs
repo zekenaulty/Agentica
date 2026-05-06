@@ -4,4 +4,7 @@ public sealed record WorkflowPlan(
     string PlanId,
     int Version,
     IReadOnlyList<PlanStep> Steps,
-    string Description);
+    string Description)
+{
+    public string? PlanningReason { get; init; }
+}

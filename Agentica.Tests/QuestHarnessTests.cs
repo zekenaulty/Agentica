@@ -83,7 +83,7 @@ public sealed class QuestHarnessTests
         Assert.Equal("locked_exit", firstReceipt.Data.GetValueOrDefault("reason"));
 
         var firstRefinement = envelope.Details.PlanRefinements[0];
-        Assert.Equal("blocker", firstRefinement.Reason);
+        Assert.Equal(PlanRefinementReasons.Blocked, firstRefinement.Reason);
         Assert.Contains(firstRefinement.Evidence, evidence => evidence.Kind == "receipt");
         Assert.Contains(envelope.Receipts.Items, receipt =>
             receipt.ToolId == QuestToolIds.CompleteObjective &&

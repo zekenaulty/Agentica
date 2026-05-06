@@ -42,8 +42,19 @@ public sealed record MazeQuestStage(
     MazeQuestPlacements Placements,
     IReadOnlyDictionary<string, MazeQuestObject> Objects,
     IReadOnlyDictionary<MazePoint, MazeCellWeights> Weights,
+    MazeQuestEnergyPolicy EnergyPolicy,
     int VisibilityRadius,
     int Seed);
+
+public sealed record MazeQuestEnergyPolicy(
+    int InitialEnergy,
+    int MaxEnergy,
+    int RestEnergyGain,
+    int RestHealthGain,
+    int RestCharges,
+    bool EnforceMoveEnergy,
+    int PerfectRouteCost,
+    int Padding);
 
 public sealed record MazeQuestDefinition(
     string QuestId,
@@ -107,9 +118,11 @@ public sealed record MazeQuestRunState(
     MazePoint Position,
     int Health,
     int Energy,
+    int RestCharges,
     int StepCount,
     IReadOnlyList<string> Inventory,
     IReadOnlySet<MazePoint> Discovered,
+    IReadOnlySet<string> TriggeredHazards,
     string ActiveObjectiveId)
 {
     public static MazeQuestRunState Create(MazeQuestStage stage)
@@ -123,10 +136,12 @@ public sealed record MazeQuestRunState(
         return new MazeQuestRunState(
             Position: stage.Placements.Start,
             Health: 8,
-            Energy: 8,
+            Energy: stage.EnergyPolicy.InitialEnergy,
+            RestCharges: stage.EnergyPolicy.RestCharges,
             StepCount: 0,
             Inventory: [],
             Discovered: discovered,
+            TriggeredHazards: new HashSet<string>(StringComparer.Ordinal),
             ActiveObjectiveId: stage.Quest.Objectives[0].ObjectiveId);
     }
 }
@@ -136,6 +151,8 @@ public sealed class MazeQuestSessionState
     public MazeQuestSessionState(MazeQuestStage stage)
     {
         Position = stage.Placements.Start;
+        Energy = stage.EnergyPolicy.InitialEnergy;
+        RestCharges = stage.EnergyPolicy.RestCharges;
         Discovered.UnionWith(MazeVisibility.VisiblePoints(stage.Grid, Position, stage.VisibilityRadius));
     }
 
@@ -144,6 +161,8 @@ public sealed class MazeQuestSessionState
     public int Health { get; set; } = 8;
 
     public int Energy { get; set; } = 8;
+
+    public int RestCharges { get; set; }
 
     public int StepCount { get; set; }
 
@@ -168,9 +187,11 @@ public sealed class MazeQuestSessionState
             Position,
             Health,
             Energy,
+            RestCharges,
             StepCount,
             Inventory.ToArray(),
             Discovered.ToHashSet(),
+            TriggeredHazards.ToHashSet(StringComparer.Ordinal),
             ActiveObjectiveId(stage));
 
     public string ActiveObjectiveId(MazeQuestStage stage) =>

@@ -125,6 +125,7 @@ Agentica exposes generic safety gates needed by richer host harnesses without im
 - `MaxPlanContinuations` lets the runner request bounded continuation plans when completion is not proven.
 - `MaxBlockedRetries` lets the runner start bounded retry attempts when a run ends blocked. Each retry is a new Agentica run attempt with `RequestOrigin.Agent` and a fresh `agentica.retry` context describing the immediately previous blocker.
 - `PlanningContextOptions` lets the planner see a bounded recent slice of observations and receipts while the outcome envelope keeps the full history.
+- Planner-provided refinement reasons keep extra thinking turns auditable without creating a separate reasoning subsystem. Allowed reason codes include `observation`, `blocked`, `ambiguous_action`, `low_confidence`, `conflicting_signals`, `completion_check`, `continue`, `resource_risk`, and `retry_unblock`.
 
 Maze cells, fog of war, hazards, rewards, quest objectives, and board presentation remain host concerns.
 

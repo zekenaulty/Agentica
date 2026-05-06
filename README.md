@@ -356,6 +356,7 @@ Agentica now exposes generic harness seams without importing host vocabulary:
 - `MaxPlanContinuations` allows bounded continuation planning when a plan is exhausted but completion evidence is missing.
 - `MaxBlockedRetries` allows bounded retry attempts after a blocked outcome. Retry attempts are fresh Agentica run attempts with `RequestOrigin.Agent` and an `agentica.retry` context describing the immediately previous blocker.
 - `PlanningContextOptions` lets hosts bound recent observations and receipts passed back to planners while preserving full run details in the envelope.
+- `PlanRefinementReasons` keeps extra thinking/planning turns auditable as normal refinement reasons such as `ambiguous_action`, `blocked`, `low_confidence`, `conflicting_signals`, `completion_check`, `continue`, `resource_risk`, or `retry_unblock`.
 
 These are Agentica concerns because every tool-using host needs them. Maze cells, fog of war, rooms, hazards, rewards, and quest objectives remain host/tool data.
 
@@ -423,6 +424,7 @@ Where the code is ahead of the original first slice:
 
 - `Agentica.Clients` and Gemini planning are already present.
 - Runtime input schemas, effect policy, evidence-gated completion, bounded continuation, blocked retry, and planner context shaping are implemented.
+- Planner-provided step reasons and refinement reason codes are preserved in the normal plan/refinement envelope.
 - CLI run logging and MazeQuest watch/turn envelopes are implemented.
 - Provider-call retry and 10-minute LLM generation call timeouts are implemented.
 
@@ -430,7 +432,7 @@ Where the code is still behind the product goal:
 
 - The LLM planner is present, but real MazeQuest solving is not yet proven as a stable green smoke test.
 - LLM outcome reporting is not yet the primary report path; deterministic/host reporters still carry most proof reporting.
-- Planning decisions are still `WorkflowPlan`/`PlanRefinement` shaped; richer model decisions such as "already complete", "cannot resume", or "ask for approval" are not first-class structured model outputs yet.
+- Planning decisions are intentionally still `WorkflowPlan`/`PlanRefinement` shaped; richer model decisions such as "already complete", "cannot resume", or "ask for approval" are not first-class structured model outputs yet.
 - Provider retry observability is currently response/exception metadata, not a runtime event stream.
 - The run logger is a CLI adapter, not a general recorder API.
 - MCP remains intentionally unimplemented.
