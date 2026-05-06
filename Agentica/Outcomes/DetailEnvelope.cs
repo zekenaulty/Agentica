@@ -1,4 +1,5 @@
 using Agentica.Artifacts;
+using Agentica.Execution;
 using Agentica.Events;
 using Agentica.Observations;
 using Agentica.Planning;
@@ -13,6 +14,7 @@ public sealed record DetailEnvelope(
     IReadOnlyList<PlanRefinement> PlanRefinements,
     IReadOnlyList<Observation> Observations,
     IReadOnlyList<Artifact> Artifacts,
+    IReadOnlyList<ExecutionBatch> Batches,
     IReadOnlyList<ExecutionEvent> Events,
     IReadOnlyList<ValidationIssue> ValidationIssues)
 {

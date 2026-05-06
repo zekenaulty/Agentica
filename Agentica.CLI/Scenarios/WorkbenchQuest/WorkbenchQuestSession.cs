@@ -115,6 +115,7 @@ public sealed class WorkbenchQuestSession
             "missing_mapping" => CheckMissingMapping(),
             "structured_doc_merge" => CheckStructuredDocMerge(),
             "word_ladder" => CheckWordLadder(),
+            "release_gate" => CheckReleaseGate(),
             _ => (false, $"FAIL unknown scenario checker: {Scenario.Descriptor.ScenarioId}")
         };
 
@@ -321,6 +322,43 @@ public sealed class WorkbenchQuestSession
         {
             return (false, $"FAIL word ladder\n  answer.json is not valid JSON: {exception.Message}");
         }
+    }
+
+    private (bool Passed, string Output) CheckReleaseGate()
+    {
+        var errors = new List<string>();
+        var frontend = State.Files["services/frontend.env"];
+        var backend = State.Files["services/backend.routes"];
+        var manifest = State.Files["release/manifest.txt"];
+
+        if (!frontend.Contains("API_BASE=/prod", StringComparison.Ordinal))
+        {
+            errors.Add("  services/frontend.env API_BASE expected /prod");
+        }
+
+        if (!backend.Contains("GET /health -> 200", StringComparison.Ordinal))
+        {
+            errors.Add("  services/backend.routes health route expected 200");
+        }
+
+        if (!manifest.Contains("CHANGELOG.md: included", StringComparison.Ordinal))
+        {
+            errors.Add("  release/manifest.txt must include CHANGELOG.md");
+        }
+
+        if (errors.Count == 0)
+        {
+            return (
+                true,
+                """
+                PASS release gate
+                  frontend API target, backend health route, and manifest entries are release-ready
+                """);
+        }
+
+        return (
+            false,
+            "FAIL release gate\n" + string.Join('\n', errors));
     }
 
     private ToolResult Diff(ToolInvocation invocation)

@@ -27,6 +27,11 @@ public sealed class WorkbenchQuestDeterministicPlanner : IWorkflowPlanner
 
     private WorkflowPlan NextPlan()
     {
+        if (string.Equals(_scenarioId, "release_gate", StringComparison.OrdinalIgnoreCase))
+        {
+            return NextReleaseGatePlan();
+        }
+
         var stepNumber = _nextStepNumber++;
         var step = _scenarioId switch
         {
@@ -47,6 +52,100 @@ public sealed class WorkbenchQuestDeterministicPlanner : IWorkflowPlanner
                 <= 4 => "insufficient_evidence",
                 5 => "mutation_risk",
                 6 => "failed_verification",
+                _ => "completion_check"
+            }
+        };
+    }
+
+    private WorkflowPlan NextReleaseGatePlan()
+    {
+        var stepNumber = _nextStepNumber;
+        PlanStep[] steps = stepNumber switch
+        {
+            1 =>
+            [
+                Step(stepNumber, WorkbenchQuestToolIds.ListFiles, ToolKind.Query, ToolEffect.ReadOnly)
+            ],
+            2 =>
+            [
+                Step(stepNumber, WorkbenchQuestToolIds.RunCheck, ToolKind.Query, ToolEffect.ReadOnly)
+            ],
+            3 =>
+            [
+                Step(3, WorkbenchQuestToolIds.ReadFile, ToolKind.Query, ToolEffect.ReadOnly, ("path", "services/frontend.env")) with
+                {
+                    BatchId = "release_evidence"
+                },
+                Step(4, WorkbenchQuestToolIds.ReadFile, ToolKind.Query, ToolEffect.ReadOnly, ("path", "services/backend.routes")) with
+                {
+                    BatchId = "release_evidence"
+                },
+                Step(5, WorkbenchQuestToolIds.ReadFile, ToolKind.Query, ToolEffect.ReadOnly, ("path", "release/manifest.txt")) with
+                {
+                    BatchId = "release_evidence"
+                }
+            ],
+            6 =>
+            [
+                Step(
+                    stepNumber,
+                    WorkbenchQuestToolIds.ApplyPatch,
+                    ToolKind.Action,
+                    ToolEffect.WritesLocalState,
+                    ("path", "services/frontend.env"),
+                    ("find", "API_BASE=/staging"),
+                    ("replace", "API_BASE=/prod"),
+                    ("rationale", "Release requirements require the frontend API target to use /prod."))
+            ],
+            7 =>
+            [
+                Step(
+                    stepNumber,
+                    WorkbenchQuestToolIds.ApplyPatch,
+                    ToolKind.Action,
+                    ToolEffect.WritesLocalState,
+                    ("path", "services/backend.routes"),
+                    ("find", "GET /health -> 404"),
+                    ("replace", "GET /health -> 200"),
+                    ("rationale", "Release requirements require the health route to pass with 200."))
+            ],
+            8 =>
+            [
+                Step(
+                    stepNumber,
+                    WorkbenchQuestToolIds.ApplyPatch,
+                    ToolKind.Action,
+                    ToolEffect.WritesLocalState,
+                    ("path", "release/manifest.txt"),
+                    ("find", "CHANGELOG.md: missing"),
+                    ("replace", "CHANGELOG.md: included"),
+                    ("rationale", "Release requirements require CHANGELOG.md to be included."))
+            ],
+            9 =>
+            [
+                Step(stepNumber, WorkbenchQuestToolIds.RunCheck, ToolKind.Query, ToolEffect.ReadOnly)
+            ],
+            _ =>
+            [
+                Step(stepNumber, WorkbenchQuestToolIds.Complete, ToolKind.Action, ToolEffect.WritesLocalState)
+            ]
+        };
+
+        _nextStepNumber = stepNumber == 3
+            ? 6
+            : stepNumber + 1;
+
+        return new WorkflowPlan(
+            PlanId: $"workbench_plan_{stepNumber:000}",
+            Version: stepNumber,
+            Steps: steps,
+            Description: "Deterministic WorkbenchQuest plan slice.")
+        {
+            PlanningReason = stepNumber switch
+            {
+                <= 5 => "insufficient_evidence",
+                <= 8 => "mutation_risk",
+                9 => "failed_verification",
                 _ => "completion_check"
             }
         };

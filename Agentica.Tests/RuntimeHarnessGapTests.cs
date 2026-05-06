@@ -202,6 +202,204 @@ public sealed class RuntimeHarnessGapTests
         Assert.DoesNotContain("First blocker.", blockers);
     }
 
+    [Fact]
+    public async Task Readonly_batch_steps_execute_in_parallel_and_record_batch_receipts()
+    {
+        var gate = new BatchGate(expectedCount: 2);
+        var catalog = ToolCatalog.Create(
+            new ToolRegistration(
+                new ToolDescriptor("workbench.check_a", "Check A", ToolKind.Query, ToolEffect.ReadOnly),
+                new GateTool(gate)),
+            new ToolRegistration(
+                new ToolDescriptor("workbench.check_b", "Check B", ToolKind.Query, ToolEffect.ReadOnly),
+                new GateTool(gate)));
+        var runner = CreateRunner(
+            new StaticPlanner(Plan(
+                Step("step_a", "workbench.check_a", ToolKind.Query, ToolEffect.ReadOnly) with { BatchId = "checks" },
+                Step("step_b", "workbench.check_b", ToolKind.Query, ToolEffect.ReadOnly) with { BatchId = "checks" })),
+            catalog,
+            policy: new ExecutionPolicy(MaxSteps: 4, MaxRefinements: 0, PlanningMode: PlanningMode.PlanOnly));
+
+        var envelope = await runner.RunAsync(Request());
+
+        Assert.Equal(RunOutcomeStatus.Succeeded, envelope.Outcome.Status);
+        Assert.Equal(["step_a", "step_b"], envelope.Outcome.CompletedSteps);
+        Assert.Equal(2, envelope.Receipts.Items.Count);
+        var batch = Assert.Single(envelope.Details.Batches);
+        Assert.Equal("checks", batch.BatchId);
+        Assert.Equal(["step_a", "step_b"], batch.StepIds);
+        Assert.Contains(envelope.Details.Events, item => item.Type == "batch.started");
+        Assert.Contains(envelope.Details.Events, item => item.Type == "batch.completed");
+    }
+
+    [Fact]
+    public async Task Plan_validation_rejects_unknown_and_forward_dependencies()
+    {
+        var tool = new CountingTool();
+        var catalog = ToolCatalog.Create(new ToolRegistration(
+            new ToolDescriptor("workbench.read", "Workbench Read", ToolKind.Query, ToolEffect.ReadOnly),
+            tool));
+        var runner = CreateRunner(
+            new StaticPlanner(Plan(
+                Step("step_001", "workbench.read", ToolKind.Query, ToolEffect.ReadOnly) with { DependsOn = ["missing_step"] },
+                Step("step_002", "workbench.read", ToolKind.Query, ToolEffect.ReadOnly) with { DependsOn = ["step_003"] },
+                Step("step_003", "workbench.read", ToolKind.Query, ToolEffect.ReadOnly))),
+            catalog);
+
+        var envelope = await runner.RunAsync(Request());
+
+        Assert.Equal(RunOutcomeStatus.PlanInvalid, envelope.Outcome.Status);
+        Assert.Contains(envelope.Details.ValidationIssues, issue => issue.Code == "plan.step.dependency.unknown");
+        Assert.Contains(envelope.Details.ValidationIssues, issue => issue.Code == "plan.step.dependency.order");
+        Assert.Equal(0, tool.ExecutionCount);
+    }
+
+    [Fact]
+    public async Task Plan_validation_rejects_mutation_steps_inside_batches()
+    {
+        var tool = new CountingTool();
+        var catalog = ToolCatalog.Create(new ToolRegistration(
+            new ToolDescriptor("workbench.patch", "Workbench Patch", ToolKind.Action, ToolEffect.WritesLocalState),
+            tool));
+        var runner = CreateRunner(
+            new StaticPlanner(Plan(
+                Step("step_patch", "workbench.patch", ToolKind.Action, ToolEffect.WritesLocalState) with { BatchId = "patches" })),
+            catalog);
+
+        var envelope = await runner.RunAsync(Request());
+
+        Assert.Equal(RunOutcomeStatus.PlanInvalid, envelope.Outcome.Status);
+        Assert.Contains(envelope.Details.ValidationIssues, issue => issue.Code == "plan.batch.readonly_only");
+        Assert.Equal(0, tool.ExecutionCount);
+    }
+
+    [Fact]
+    public async Task Plan_validation_rejects_batches_that_exceed_parallelism()
+    {
+        var tool = new CountingTool();
+        var catalog = ToolCatalog.Create(new ToolRegistration(
+            new ToolDescriptor("workbench.read", "Workbench Read", ToolKind.Query, ToolEffect.ReadOnly),
+            tool));
+        var runner = CreateRunner(
+            new StaticPlanner(Plan(
+                Step("step_a", "workbench.read", ToolKind.Query, ToolEffect.ReadOnly) with { BatchId = "reads" },
+                Step("step_b", "workbench.read", ToolKind.Query, ToolEffect.ReadOnly) with { BatchId = "reads" })),
+            catalog,
+            policy: new ExecutionPolicy(MaxSteps: 4, MaxParallelism: 1));
+
+        var envelope = await runner.RunAsync(Request());
+
+        Assert.Equal(RunOutcomeStatus.PlanInvalid, envelope.Outcome.Status);
+        Assert.Contains(envelope.Details.ValidationIssues, issue => issue.Code == "plan.batch.parallelism");
+        Assert.Equal(0, tool.ExecutionCount);
+    }
+
+    [Fact]
+    public async Task Plan_validation_rejects_batch_internal_dependencies()
+    {
+        var tool = new CountingTool();
+        var catalog = ToolCatalog.Create(new ToolRegistration(
+            new ToolDescriptor("workbench.read", "Workbench Read", ToolKind.Query, ToolEffect.ReadOnly),
+            tool));
+        var runner = CreateRunner(
+            new StaticPlanner(Plan(
+                Step("step_a", "workbench.read", ToolKind.Query, ToolEffect.ReadOnly) with { BatchId = "reads" },
+                Step("step_b", "workbench.read", ToolKind.Query, ToolEffect.ReadOnly) with
+                {
+                    BatchId = "reads",
+                    DependsOn = ["step_a"]
+                })),
+            catalog);
+
+        var envelope = await runner.RunAsync(Request());
+
+        Assert.Equal(RunOutcomeStatus.PlanInvalid, envelope.Outcome.Status);
+        Assert.Contains(envelope.Details.ValidationIssues, issue => issue.Code == "plan.batch.internal_dependency");
+        Assert.Equal(0, tool.ExecutionCount);
+    }
+
+    [Fact]
+    public async Task Refined_plan_can_depend_on_a_completed_prior_plan_step()
+    {
+        var planner = new DependencyRefinementPlanner(_ => Plan(
+            Step("step_002", "hexquest.commit_patch", ToolKind.Action, ToolEffect.WritesLocalState) with
+            {
+                DependsOn = ["step_001"]
+            }));
+        var catalog = ToolCatalog.Create(
+            new ToolRegistration(
+                new ToolDescriptor("hexquest.validate_patch", "HexQuest Validate Patch", ToolKind.Query, ToolEffect.ReadOnly),
+                new ObservationTool()),
+            new ToolRegistration(
+                new ToolDescriptor("hexquest.commit_patch", "HexQuest Commit Patch", ToolKind.Action, ToolEffect.WritesLocalState),
+                new ArtifactTool("hexquest.objective_completed")));
+        var runner = CreateRunner(
+            planner,
+            catalog,
+            policy: new ExecutionPolicy(MaxSteps: 4, MaxRefinements: 1, PlanningMode: PlanningMode.Stepwise),
+            completionEvaluator: EvidenceCompletionEvaluator.ForArtifactKind("hexquest.objective_completed"));
+
+        var envelope = await runner.RunAsync(Request());
+
+        Assert.Equal(RunOutcomeStatus.Succeeded, envelope.Outcome.Status);
+        Assert.Equal(["step_001", "step_002"], envelope.Outcome.CompletedSteps);
+        Assert.Equal(["step_001"], planner.RefinementCompletedStepIds);
+        Assert.Equal(["step_001"], envelope.Details.PlanVersions[1].Steps[0].DependsOn);
+    }
+
+    [Fact]
+    public async Task Refined_plan_rejects_dependency_that_is_not_in_current_plan_or_completed_steps()
+    {
+        var commitTool = new CountingTool();
+        var planner = new DependencyRefinementPlanner(_ => Plan(
+            Step("step_002", "hexquest.commit_patch", ToolKind.Action, ToolEffect.WritesLocalState) with
+            {
+                DependsOn = ["step_missing"]
+            }));
+        var catalog = ToolCatalog.Create(
+            new ToolRegistration(
+                new ToolDescriptor("hexquest.validate_patch", "HexQuest Validate Patch", ToolKind.Query, ToolEffect.ReadOnly),
+                new ObservationTool()),
+            new ToolRegistration(
+                new ToolDescriptor("hexquest.commit_patch", "HexQuest Commit Patch", ToolKind.Action, ToolEffect.WritesLocalState),
+                commitTool));
+        var runner = CreateRunner(
+            planner,
+            catalog,
+            policy: new ExecutionPolicy(MaxSteps: 4, MaxRefinements: 1, PlanningMode: PlanningMode.Stepwise));
+
+        var envelope = await runner.RunAsync(Request());
+
+        Assert.Equal(RunOutcomeStatus.PlanInvalid, envelope.Outcome.Status);
+        Assert.Contains(envelope.Details.ValidationIssues, issue => issue.Code == "plan.step.dependency.unknown");
+        Assert.Equal(0, commitTool.ExecutionCount);
+    }
+
+    [Fact]
+    public async Task Refined_plan_rejects_reusing_a_completed_step_id()
+    {
+        var commitTool = new CountingTool();
+        var planner = new DependencyRefinementPlanner(_ => Plan(
+            Step("step_001", "hexquest.commit_patch", ToolKind.Action, ToolEffect.WritesLocalState)));
+        var catalog = ToolCatalog.Create(
+            new ToolRegistration(
+                new ToolDescriptor("hexquest.validate_patch", "HexQuest Validate Patch", ToolKind.Query, ToolEffect.ReadOnly),
+                new ObservationTool()),
+            new ToolRegistration(
+                new ToolDescriptor("hexquest.commit_patch", "HexQuest Commit Patch", ToolKind.Action, ToolEffect.WritesLocalState),
+                commitTool));
+        var runner = CreateRunner(
+            planner,
+            catalog,
+            policy: new ExecutionPolicy(MaxSteps: 4, MaxRefinements: 1, PlanningMode: PlanningMode.Stepwise));
+
+        var envelope = await runner.RunAsync(Request());
+
+        Assert.Equal(RunOutcomeStatus.PlanInvalid, envelope.Outcome.Status);
+        Assert.Contains(envelope.Details.ValidationIssues, issue => issue.Code == "plan.step.reused_completed_id");
+        Assert.Equal(0, commitTool.ExecutionCount);
+    }
+
     private static RunRequest Request() =>
         new("Navigate the host-provided test surface.", RequestOrigin.User);
 
@@ -356,6 +554,32 @@ public sealed class RuntimeHarnessGapTests
             throw new InvalidOperationException("Refinement should not run.");
     }
 
+    private sealed class DependencyRefinementPlanner : IWorkflowPlanner
+    {
+        private readonly Func<PlanningRequest, WorkflowPlan> _refinementFactory;
+
+        public DependencyRefinementPlanner(Func<PlanningRequest, WorkflowPlan> refinementFactory)
+        {
+            _refinementFactory = refinementFactory;
+        }
+
+        public IReadOnlyList<string> RefinementCompletedStepIds { get; private set; } = [];
+
+        public Task<WorkflowPlan> CreatePlanAsync(
+            PlanningRequest request,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Plan(Step("step_001", "hexquest.validate_patch", ToolKind.Query, ToolEffect.ReadOnly)));
+
+        public Task<WorkflowPlan> RefinePlanAsync(
+            PlanningRequest request,
+            Observation observation,
+            CancellationToken cancellationToken = default)
+        {
+            RefinementCompletedStepIds = request.ExecutionContext.CompletedStepIds;
+            return Task.FromResult(_refinementFactory(request));
+        }
+    }
+
     private sealed class CountingTool : ITool
     {
         public int ExecutionCount { get; private set; }
@@ -455,4 +679,53 @@ public sealed class RuntimeHarnessGapTests
             message,
             DateTimeOffset.UtcNow,
             new Dictionary<string, object?>());
+
+    private sealed class BatchGate
+    {
+        private readonly int _expectedCount;
+        private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _enteredCount;
+
+        public BatchGate(int expectedCount)
+        {
+            _expectedCount = expectedCount;
+        }
+
+        public async Task<bool> EnterAsync(CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref _enteredCount) >= _expectedCount)
+            {
+                _released.TrySetResult();
+            }
+
+            try
+            {
+                await _released.Task.WaitAsync(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
+                return true;
+            }
+            catch (TimeoutException)
+            {
+                return false;
+            }
+        }
+    }
+
+    private sealed class GateTool : ITool
+    {
+        private readonly BatchGate _gate;
+
+        public GateTool(BatchGate gate)
+        {
+            _gate = gate;
+        }
+
+        public async Task<ToolResult> ExecuteAsync(ToolInvocation invocation, CancellationToken cancellationToken)
+        {
+            var parallel = await _gate.EnterAsync(cancellationToken).ConfigureAwait(false);
+            return new ToolResult(Receipt(
+                invocation,
+                parallel ? ReceiptStatus.Succeeded : ReceiptStatus.Failed,
+                parallel ? "Batch peer observed." : "Batch peer was not observed before timeout."));
+        }
+    }
 }

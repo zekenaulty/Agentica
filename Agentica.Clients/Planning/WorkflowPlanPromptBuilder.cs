@@ -60,13 +60,25 @@ public static class WorkflowPlanPromptBuilder
         Never claim success, invent receipts, or describe a tool result that has not happened.
         Mutation-capable steps must be Action steps and must declare the matching tool effect.
         Prefer query/read tools before mutation-capable tools when state or preconditions are unknown.
+        Use batchId only for independent ReadOnly Query steps that can safely run together.
+        Never batch mutation-capable steps.
+        Use dependsOn only for execution ordering.
+        A dependsOn value must reference either an earlier step in the same submitted plan slice or a step id listed in executionContext.completedStepIds.
+        Do not put receipt ids, observation ids, artifact ids, plan ids, or unknown prior-step guesses in dependsOn.
+        Use existing receipts, observations, artifacts, and request context as evidence/context; they are not automatically dependencies.
         Produce the next safe plan slice, not a speculative long workflow.
+        A safe slice may contain 2-3 dependent steps when preconditions are already established by request context or prior receipts.
+        If preconditions are uncertain, emit one query/read step or one blocker-handling step.
+        If request context includes campaign.progress, treat it as scoped carry-forward evidence, not as proof of new tool results.
         """;
 
     private static string BuildInitialPrompt(PlanningRequest request) =>
         $$"""
         Create an initial Agentica workflow plan.
         Create only the next safe step or small safe slice.
+        Prefer 2-3 steps only when each later step is clearly dependent on earlier steps or on already-proven context.
+        Use dependsOn only when execution ordering requires it under the system dependency rule.
+        Keep mutation-capable steps sequential and unbatched.
         If a read/query tool can establish state before action, choose the read/query tool first.
 
         Objective:
@@ -77,6 +89,9 @@ public static class WorkflowPlanPromptBuilder
 
         Request context:
         {{Serialize(request.Request.Context ?? new Dictionary<string, object?>())}}
+
+        Execution context:
+        {{Serialize(request.ExecutionContext)}}
 
         Tool catalog:
         {{Serialize(request.ToolDescriptors)}}
@@ -89,7 +104,7 @@ public static class WorkflowPlanPromptBuilder
 
         Required JSON shape:
         {
-          "planId": "plan_001",
+          "planId": "unique plan id for this plan slice",
           "description": "short operator-readable description",
           "steps": [
             {
@@ -98,6 +113,8 @@ public static class WorkflowPlanPromptBuilder
               "kind": "Query|Action|PlannerAssist|Validation|Synthesis",
               "effect": "ReadOnly|WritesLocalState|ExternalSideEffect|Destructive|Unknown",
               "input": {},
+              "dependsOn": [],
+              "batchId": null,
               "reason": "why this step belongs in the plan"
             }
           ],
@@ -109,6 +126,9 @@ public static class WorkflowPlanPromptBuilder
         $$"""
         Refine the Agentica workflow plan using the new observation.
         Create only the next safe step or small safe slice justified by the observation.
+        Prefer 2-3 steps only when the observation or request context proves the needed preconditions.
+        Use dependsOn only for valid sequential execution dependencies and batchId only for independent read-only query steps.
+        Keep mutation-capable steps sequential and unbatched.
         This refinement is an auditable thinking/planning turn. Do not include hidden chain-of-thought.
         Use a concise reason code, not prose.
         Use observation only when no more specific reason code fits. Prefer the most specific accurate reason.
@@ -133,6 +153,9 @@ public static class WorkflowPlanPromptBuilder
         Request context:
         {{Serialize(request.Request.Context ?? new Dictionary<string, object?>())}}
 
+        Execution context:
+        {{Serialize(request.ExecutionContext)}}
+
         Tool catalog:
         {{Serialize(request.ToolDescriptors)}}
 
@@ -156,7 +179,7 @@ public static class WorkflowPlanPromptBuilder
             }
           ],
           "refinedPlan": {
-            "planId": "plan_002",
+            "planId": "unique plan id for this refined plan slice",
             "description": "short operator-readable description",
             "steps": [
               {
@@ -165,6 +188,8 @@ public static class WorkflowPlanPromptBuilder
                 "kind": "Query|Action|PlannerAssist|Validation|Synthesis",
                 "effect": "ReadOnly|WritesLocalState|ExternalSideEffect|Destructive|Unknown",
                 "input": {},
+                "dependsOn": [],
+                "batchId": null,
                 "reason": "why this step follows the observation"
               }
             ],

@@ -10,4 +10,8 @@ public sealed record PlanStep(
     IReadOnlyDictionary<string, object?> Input)
 {
     public string? Reason { get; init; }
+
+    public IReadOnlyList<string> DependsOn { get; init; } = [];
+
+    public string? BatchId { get; init; }
 }

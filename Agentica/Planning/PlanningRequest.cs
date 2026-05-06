@@ -9,4 +9,7 @@ public sealed record PlanningRequest(
     RunRequest Request,
     IReadOnlyList<ToolDescriptor> ToolDescriptors,
     IReadOnlyList<Observation> Observations,
-    IReadOnlyList<Receipt> Receipts);
+    IReadOnlyList<Receipt> Receipts)
+{
+    public PlanningExecutionContext ExecutionContext { get; init; } = PlanningExecutionContext.Empty;
+}

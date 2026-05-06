@@ -192,6 +192,36 @@ If an LLM is used, it should emit structured planning objects and concise ration
 
 Gemini thought summaries, when requested through `Agentica.Clients`, are diagnostic model output. They are not execution proof and must not replace receipts, observations, artifacts, validation issues, or stop reasons.
 
+Structured working context is allowed, but it is not chain-of-thought.
+
+A planner may need durable notes across turns or runs: hypotheses, open questions, route assumptions, known blockers, candidate next checks, or compact carry-forward facts. These should be represented as visible, typed, bounded planning artifacts, not hidden reasoning traces and not provider thought text.
+
+Working context rules:
+
+- It must be structured enough for the host or runtime to compact, filter, and cite.
+- It must be bounded by count, size, age, or scope.
+- It may guide planning, but it must not prove completion.
+- Any claim that matters must point back to receipts, observations, artifacts, validation issues, or host state checks.
+- It should survive only as long as the active run/campaign/work item needs it.
+- When compacted, the compacted form must preserve evidence refs for proven facts and clearly mark unsupported notes as hypotheses or open questions.
+
+The likely future runtime seam is generic, not domain-specific:
+
+```text
+WorkingContext
+  ProvenFacts[]
+  Hypotheses[]
+  OpenQuestions[]
+  Blockers[]
+  NextConsiderations[]
+  EvidenceRefs[]
+  ExpiresAtScope
+```
+
+Hosts may own richer long-lived domain memory. Agentica should only own the generic shape needed to keep planner-visible context honest, compact, and separate from proof.
+
+Do not start with a general `create_note` tool. A note-writing tool gives the planner a direct path to persistent self-authored memory, which can make weak claims sticky. Prefer system-curated working context first. If note proposals are later needed, they should be typed, size-bounded, and accepted by the host/runtime only after evidence-aware filtering.
+
 ## Decision 007: Planning Must Stay Bounded
 
 Agentica is a bounded planner/executor, not an open-ended autonomous loop.
@@ -255,6 +285,8 @@ Agentica may bound planner-visible receipts and observations; it must not own fo
 If a run ends blocked, Agentica may start a bounded retry attempt. A retry is a fresh Agentica run with the same host tool catalog and host state, `RequestOrigin.Agent`, and an `agentica.retry` request context that describes only the immediately previous blocked attempt. This lets the planner reason about how to unblock or resume without carrying stale blockers forever. The retry still proposes a normal `WorkflowPlan`; Agentica still validates every tool, input, effect, receipt, and completion claim.
 
 Extra thinking turns must stay inside the normal planning envelope. If the planner needs more granular reasoning, it returns a normal `WorkflowPlan` or `PlanRefinement` with an auditable reason code such as `ambiguous_action`, `blocked`, `low_confidence`, `conflicting_signals`, `completion_check`, `continue`, `resource_risk`, or `retry_unblock`. There is no hidden chain-of-thought store, no unbounded reasoning loop, and no execution path that bypasses plan validation.
+
+`PlanStep.DependsOn` is an execution-ordering edge, not an evidence reference. A plan slice may depend on earlier steps in the same slice or on completed step ids supplied through `PlanningRequest.ExecutionContext.CompletedStepIds`. Receipts, observations, artifacts, and request context can justify a planner decision, but they are not dependency identifiers. Agentica rejects unknown dependencies and rejects plan slices that reuse a completed step id.
 
 ## Decision 010: First Proof Slice Event Story
 

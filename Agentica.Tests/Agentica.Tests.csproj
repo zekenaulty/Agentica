@@ -17,10 +17,37 @@
   <ItemGroup>
     <ProjectReference Include="..\Agentica\Agentica.csproj" />
     <ProjectReference Include="..\Agentica.Clients\Agentica.Clients.csproj" />
+    <ProjectReference Include="..\..\Agentica.Orchestration\Agentica.Orchestration\Agentica.Orchestration.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="..\Agentica.CLI\Scenarios\Quest\*.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\CampaignAcceptance.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\CampaignGraph.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\CampaignModels.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\CampaignProgressSnapshotCompiler.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\CampaignRunner.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\CampaignWorkingContextCompiler.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\DungeonCampaignBoard.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\DungeonCampaignDeterministicPlanner.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\DungeonCampaignModels.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\DungeonCampaignSession.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\DungeonCampaignToolIds.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\DungeonCampaignTools.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\HexQuest\HexQuestBoard.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\HexQuest\HexQuestCodec.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\HexQuest\HexQuestDeterministicPlanner.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\HexQuest\HexQuestModels.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\HexQuest\HexQuestOutcomeReporter.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\HexQuest\HexQuestSession.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\HexQuest\HexQuestToolIds.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\HexQuest\HexQuestTools.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\Quest\QuestBoard.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\Quest\QuestDeterministicPlanner.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\Quest\QuestModels.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\Quest\QuestOutcomeReporter.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\Quest\QuestSession.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\Quest\QuestToolIds.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\Quest\QuestTools.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

@@ -36,7 +36,9 @@ public sealed record WorkflowPlanStepJsonContract(
     string? Kind,
     string? Effect,
     IReadOnlyDictionary<string, JsonElement>? Input,
-    string? Reason)
+    string? Reason,
+    IReadOnlyList<string>? DependsOn,
+    string? BatchId)
 {
     public PlanStep ToPlanStep()
     {
@@ -69,7 +71,14 @@ public sealed record WorkflowPlanStepJsonContract(
         {
             Reason = string.IsNullOrWhiteSpace(Reason)
                 ? null
-                : Reason
+                : Reason,
+            DependsOn = DependsOn?
+                .Where(dependency => !string.IsNullOrWhiteSpace(dependency))
+                .Select(dependency => dependency.Trim())
+                .ToArray() ?? [],
+            BatchId = string.IsNullOrWhiteSpace(BatchId)
+                ? null
+                : BatchId
         };
     }
 }

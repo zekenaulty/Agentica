@@ -8,6 +8,8 @@ public static class ExecutionEventTypeNames
             ExecutionEventType.RunCreated => "run.created",
             ExecutionEventType.RequestAccepted => "request.accepted",
             ExecutionEventType.PlanCreated => "plan.created",
+            ExecutionEventType.BatchStarted => "batch.started",
+            ExecutionEventType.BatchCompleted => "batch.completed",
             ExecutionEventType.StepStarted => "step.started",
             ExecutionEventType.ObservationMade => "observation.made",
             ExecutionEventType.ReceiptEmitted => "receipt.emitted",

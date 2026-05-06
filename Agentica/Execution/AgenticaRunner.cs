@@ -127,13 +127,13 @@ public sealed class AgenticaRunner
             run.PlanVersions.Add(currentPlan);
             EmitPlanCreated(run, currentPlan);
 
-            var validationIssues = ValidatePlan(currentPlan);
+            var executedSteps = new HashSet<string>(StringComparer.Ordinal);
+            var validationIssues = ValidatePlan(currentPlan, executedSteps);
             if (validationIssues.Count > 0)
             {
                 return Finish(run, RunOutcomeStatus.PlanInvalid, StopReason.PlanInvalid, validationIssues);
             }
 
-            var executedSteps = new HashSet<string>(StringComparer.Ordinal);
             var refinementCount = 0;
             var continuationCount = 0;
 
@@ -150,8 +150,8 @@ public sealed class AgenticaRunner
                         blockers: ["Maximum step count reached."]);
                 }
 
-                var nextStep = currentPlan.Steps.FirstOrDefault(step => !executedSteps.Contains(step.StepId));
-                if (nextStep is null)
+                var nextSteps = SelectNextSteps(currentPlan, executedSteps);
+                if (nextSteps.Count == 0)
                 {
                     var completion = _completionEvaluator.Evaluate(run);
                     if (completion.Decision == CompletionDecision.Complete)
@@ -212,7 +212,7 @@ public sealed class AgenticaRunner
                     run.PlanVersions.Add(currentPlan);
                     EmitPlanCreated(run, currentPlan);
 
-                    validationIssues = ValidatePlan(currentPlan);
+                    validationIssues = ValidatePlan(currentPlan, executedSteps);
                     if (validationIssues.Count > 0)
                     {
                         return Finish(run, RunOutcomeStatus.PlanInvalid, StopReason.PlanInvalid, validationIssues);
@@ -221,66 +221,44 @@ public sealed class AgenticaRunner
                     continue;
                 }
 
-                var registration = _toolCatalog.Resolve(nextStep.ToolId);
-                if (registration is null)
+                if (executedSteps.Count + nextSteps.Count > _policy.MaxSteps)
                 {
                     return Finish(
                         run,
                         RunOutcomeStatus.Blocked,
-                        StopReason.UnknownTool,
-                        blockers: [$"Unknown tool '{nextStep.ToolId}'."]);
+                        StopReason.StepLimitReached,
+                        blockers: ["Maximum step count would be exceeded by the next executable batch."]);
                 }
 
-                Emit(
-                    run,
-                    ExecutionEventType.StepStarted,
-                    ("step", nextStep.StepId),
-                    ("tool", nextStep.ToolId));
+                var executionResults = await ExecuteStepsAsync(run, nextSteps, ct).ConfigureAwait(false);
 
-                var result = await registration.Tool.ExecuteAsync(
-                    new ToolInvocation(run.RunId, nextStep.StepId, nextStep.ToolId, nextStep.Input),
-                    ct).ConfigureAwait(false);
-
-                executedSteps.Add(nextStep.StepId);
-                run.CompletedSteps.Add(nextStep.StepId);
-                run.Receipts.Add(result.Receipt);
-
-                if (result.Observation is not null)
+                foreach (var executionResult in executionResults)
                 {
-                    run.Observations.Add(result.Observation);
-                    Emit(
-                        run,
-                        ExecutionEventType.ObservationMade,
-                        ("observation", result.Observation.ObservationId),
-                        ("step", nextStep.StepId));
+                    executedSteps.Add(executionResult.Step.StepId);
+                    RecordToolResult(run, executionResult.Step, executionResult.Result);
                 }
 
-                if (result.Artifact is not null)
-                {
-                    run.Artifacts.Add(result.Artifact);
-                }
-
-                Emit(
-                    run,
-                    ExecutionEventType.ReceiptEmitted,
-                    ("receipt", result.Receipt.ReceiptId),
-                    ("status", result.Receipt.Status.ToString().ToLowerInvariant()));
-
-                if (result.Receipt.Status is ReceiptStatus.WaitingForApproval)
+                var waitingResult = executionResults.FirstOrDefault(item =>
+                    item.Result.Receipt.Status is ReceiptStatus.WaitingForApproval);
+                if (waitingResult is not null)
                 {
                     return Finish(
                         run,
                         RunOutcomeStatus.WaitingForApproval,
                         StopReason.WaitingForApproval,
-                        blockers: [result.Receipt.Message]);
+                        blockers: [waitingResult.Result.Receipt.Message]);
                 }
 
-                if (result.Receipt.Status is ReceiptStatus.Failed or ReceiptStatus.TimedOut or ReceiptStatus.Cancelled)
+                if (executionResults.Any(item =>
+                    item.Result.Receipt.Status is ReceiptStatus.Failed or ReceiptStatus.TimedOut or ReceiptStatus.Cancelled))
                 {
                     return Finish(run, RunOutcomeStatus.Failed, StopReason.ToolFailure);
                 }
 
-                if (result.Observation is { } observation && ShouldRefineAfterToolResult(nextStep, result))
+                var refinementCandidate = executionResults.FirstOrDefault(item =>
+                    item.Result.Observation is not null && ShouldRefineAfterToolResult(item.Step, item.Result));
+                if (refinementCandidate is not null &&
+                    refinementCandidate.Result.Observation is { } observation)
                 {
                     if (refinementCount >= _policy.MaxRefinements)
                     {
@@ -325,13 +303,13 @@ public sealed class AgenticaRunner
                         ToPlanId: refinedPlan.PlanId,
                         Reason: PlanRefinementReasons.Normalize(
                             refinedPlan.PlanningReason,
-                            result.Receipt.Status is ReceiptStatus.Unavailable or ReceiptStatus.Refused
+                            refinementCandidate.Result.Receipt.Status is ReceiptStatus.Unavailable or ReceiptStatus.Refused
                                 ? PlanRefinementReasons.Blocked
                                 : PlanRefinementReasons.Observation),
                         Evidence:
                         [
                             new EvidenceRef("observation", observation.ObservationId),
-                            new EvidenceRef("receipt", result.Receipt.ReceiptId)
+                            new EvidenceRef("receipt", refinementCandidate.Result.Receipt.ReceiptId)
                         ]));
 
                     currentPlan = refinedPlan;
@@ -344,7 +322,7 @@ public sealed class AgenticaRunner
                         ("plan", currentPlan.PlanId),
                         ("reason", run.PlanRefinements[^1].Reason));
 
-                    validationIssues = ValidatePlan(currentPlan);
+                    validationIssues = ValidatePlan(currentPlan, executedSteps);
                     if (validationIssues.Count > 0)
                     {
                         return Finish(run, RunOutcomeStatus.PlanInvalid, StopReason.PlanInvalid, validationIssues);
@@ -353,13 +331,15 @@ public sealed class AgenticaRunner
                     continue;
                 }
 
-                if (result.Receipt.Status is ReceiptStatus.Unavailable or ReceiptStatus.Refused)
+                var blockedResult = executionResults.FirstOrDefault(item =>
+                    item.Result.Receipt.Status is ReceiptStatus.Unavailable or ReceiptStatus.Refused);
+                if (blockedResult is not null)
                 {
                     return Finish(
                         run,
                         RunOutcomeStatus.Blocked,
                         StopReason.ToolUnavailable,
-                        blockers: [result.Receipt.Message]);
+                        blockers: [blockedResult.Result.Receipt.Message]);
                 }
             }
         }
@@ -375,6 +355,190 @@ public sealed class AgenticaRunner
 
     public IReadOnlyList<ValidationIssue> ValidatePlan(WorkflowPlan plan) =>
         _planValidator.Validate(plan);
+
+    private IReadOnlyList<ValidationIssue> ValidatePlan(
+        WorkflowPlan plan,
+        IReadOnlySet<string> completedStepIds) =>
+        _planValidator.Validate(plan, completedStepIds);
+
+    private IReadOnlyList<PlanStep> SelectNextSteps(
+        WorkflowPlan plan,
+        IReadOnlySet<string> executedSteps)
+    {
+        var nextIndex = plan.Steps
+            .Select((step, index) => new { Step = step, Index = index })
+            .FirstOrDefault(item => !executedSteps.Contains(item.Step.StepId));
+        if (nextIndex is null)
+        {
+            return [];
+        }
+
+        var nextStep = nextIndex.Step;
+        if (!DependenciesSatisfied(nextStep, executedSteps))
+        {
+            return [];
+        }
+
+        if (string.IsNullOrWhiteSpace(nextStep.BatchId))
+        {
+            return [nextStep];
+        }
+
+        var batchSteps = new List<PlanStep>();
+        for (var index = nextIndex.Index; index < plan.Steps.Count; index++)
+        {
+            var candidate = plan.Steps[index];
+            if (executedSteps.Contains(candidate.StepId) ||
+                !string.Equals(candidate.BatchId, nextStep.BatchId, StringComparison.Ordinal) ||
+                !DependenciesSatisfied(candidate, executedSteps))
+            {
+                break;
+            }
+
+            batchSteps.Add(candidate);
+            if (batchSteps.Count >= Math.Min(_policy.MaxBatchSize, _policy.MaxParallelism))
+            {
+                break;
+            }
+        }
+
+        return batchSteps.Count == 0 ? [nextStep] : batchSteps;
+    }
+
+    private static bool DependenciesSatisfied(PlanStep step, IReadOnlySet<string> executedSteps) =>
+        step.DependsOn.All(executedSteps.Contains);
+
+    private async Task<IReadOnlyList<StepExecutionResult>> ExecuteStepsAsync(
+        AgenticaRun run,
+        IReadOnlyList<PlanStep> steps,
+        CancellationToken cancellationToken)
+    {
+        if (steps.Count == 1)
+        {
+            var step = steps[0];
+            Emit(
+                run,
+                ExecutionEventType.StepStarted,
+                ("step", step.StepId),
+                ("tool", step.ToolId));
+
+            return [await ExecuteStepAsync(run, step, cancellationToken).ConfigureAwait(false)];
+        }
+
+        var batchId = steps[0].BatchId ?? AgenticaIds.New("batch");
+        var startedAt = DateTimeOffset.UtcNow;
+        Emit(
+            run,
+            ExecutionEventType.BatchStarted,
+            ("batch", batchId),
+            ("steps", steps.Count.ToString()));
+
+        foreach (var step in steps)
+        {
+            Emit(
+                run,
+                ExecutionEventType.StepStarted,
+                ("step", step.StepId),
+                ("tool", step.ToolId),
+                ("batch", batchId));
+        }
+
+        var tasks = steps
+            .Select(step => ExecuteStepAsync(run, step, cancellationToken))
+            .ToArray();
+        var results = await Task.WhenAll(tasks).ConfigureAwait(false);
+        var completedAt = DateTimeOffset.UtcNow;
+
+        run.Batches.Add(new ExecutionBatch(
+            batchId,
+            steps.Select(step => step.StepId).ToArray(),
+            startedAt,
+            completedAt));
+
+        Emit(
+            run,
+            ExecutionEventType.BatchCompleted,
+            ("batch", batchId),
+            ("steps", steps.Count.ToString()));
+
+        return results;
+    }
+
+    private async Task<StepExecutionResult> ExecuteStepAsync(
+        AgenticaRun run,
+        PlanStep step,
+        CancellationToken cancellationToken)
+    {
+        var registration = _toolCatalog.Resolve(step.ToolId);
+        if (registration is null)
+        {
+            return new StepExecutionResult(
+                step,
+                new ToolResult(new Receipt(
+                    AgenticaIds.New("receipt"),
+                    step.StepId,
+                    step.ToolId,
+                    ReceiptStatus.Unavailable,
+                    $"Unknown tool '{step.ToolId}'.",
+                    DateTimeOffset.UtcNow,
+                    new Dictionary<string, object?>())));
+        }
+
+        try
+        {
+            var result = await registration.Tool.ExecuteAsync(
+                new ToolInvocation(run.RunId, step.StepId, step.ToolId, step.Input),
+                cancellationToken).ConfigureAwait(false);
+            return new StepExecutionResult(step, result);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            return new StepExecutionResult(
+                step,
+                new ToolResult(new Receipt(
+                    AgenticaIds.New("receipt"),
+                    step.StepId,
+                    step.ToolId,
+                    ReceiptStatus.Failed,
+                    $"Tool '{step.ToolId}' failed: {exception.Message}",
+                    DateTimeOffset.UtcNow,
+                    new Dictionary<string, object?>
+                    {
+                        ["errorClass"] = exception.GetType().Name
+                    })));
+        }
+    }
+
+    private void RecordToolResult(AgenticaRun run, PlanStep step, ToolResult result)
+    {
+        run.CompletedSteps.Add(step.StepId);
+        run.Receipts.Add(result.Receipt);
+
+        if (result.Observation is not null)
+        {
+            run.Observations.Add(result.Observation);
+            Emit(
+                run,
+                ExecutionEventType.ObservationMade,
+                ("observation", result.Observation.ObservationId),
+                ("step", step.StepId));
+        }
+
+        if (result.Artifact is not null)
+        {
+            run.Artifacts.Add(result.Artifact);
+        }
+
+        Emit(
+            run,
+            ExecutionEventType.ReceiptEmitted,
+            ("receipt", result.Receipt.ReceiptId),
+            ("status", result.Receipt.Status.ToString().ToLowerInvariant()));
+    }
 
     private bool ShouldRefineAfterToolResult(PlanStep step, ToolResult result)
     {
@@ -448,6 +612,7 @@ public sealed class AgenticaRunner
                 PlanRefinements: run.PlanRefinements.ToArray(),
                 Observations: run.Observations.ToArray(),
                 Artifacts: run.Artifacts.ToArray(),
+                Batches: run.Batches.ToArray(),
                 Events: run.Events.ToArray(),
                 ValidationIssues: validationIssues));
     }
@@ -509,4 +674,6 @@ public sealed class AgenticaRunner
                     exception.Message)
             ]);
     }
+
+    private sealed record StepExecutionResult(PlanStep Step, ToolResult Result);
 }

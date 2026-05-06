@@ -1,4 +1,5 @@
 <Solution>
+  <Project Path="../Agentica.Orchestration/Agentica.Orchestration/Agentica.Orchestration.csproj" />
   <Project Path="Agentica.CLI/Agentica.CLI.csproj" />
   <Project Path="Agentica.Clients/Agentica.Clients.csproj" />
   <Project Path="Agentica.Tests/Agentica.Tests.csproj" />

@@ -1,6 +1,10 @@
 using System.Text.Json;
 using Agentica.Clients.Gemini;
 using Agentica.Clients.Llm;
+using Agentica.Clients.Orchestration;
+using Agentica.Orchestration;
+using Agentica.Orchestration.Planning;
+using Agentica.Requests;
 
 namespace Agentica.Tests;
 
@@ -59,6 +63,61 @@ public sealed class LiveGeminiSmokeTests
         using var document = JsonDocument.Parse(json);
         Assert.Equal("ok", document.RootElement.GetProperty("status").GetString());
         Assert.Equal("gemini", document.RootElement.GetProperty("provider").GetString());
+    }
+
+    [Fact]
+    public async Task Live_gemini_task_planner_smoke_test()
+    {
+        if (!LiveTestsEnabled())
+        {
+            return;
+        }
+
+        LoadSolutionRootEnvironmentFile();
+
+        var apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY")
+            ?? Environment.GetEnvironmentVariable("GOOGLE_API_KEY");
+
+        Assert.False(
+            string.IsNullOrWhiteSpace(apiKey),
+            $"{RunLiveTestsVariable}=true but no Gemini API key was found. Set GEMINI_API_KEY or GOOGLE_API_KEY in the solution-root .env file or local environment.");
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        var client = new GeminiLlmClient(new GeminiClientOptions(
+            ApiKey: apiKey,
+            DefaultModelId: GeminiModelId.Flash25,
+            UseVertexAi: false));
+        var planner = new LlmTaskPlanner(
+            client,
+            new LlmTaskPlannerOptions(
+                GeminiModelId.Flash25,
+                new LlmGenerationOptions(
+                    Temperature: 0,
+                    MaxOutputTokens: 4096,
+                    Thinking: LlmThinkingOptions.Off())));
+
+        var plan = await planner.CreatePlanAsync(
+            new TaskPlanningRequest(
+                new LargeTaskRequest(
+                    "Inspect a small deterministic demo workflow and complete it as one bounded Agentica run.",
+                    RequestOrigin.User,
+                    new Dictionary<string, object?>
+                    {
+                        ["smokeTest"] = true,
+                        ["availableRuntime"] = "AgenticaRunner with demo query/action tools"
+                    }),
+                new OrchestrationPolicy(MaxRuns: 4, MaxRefinements: 2)),
+            timeout.Token);
+
+        TaskGraphValidator.Validate(plan);
+        Assert.NotEmpty(plan.Tasks);
+        Assert.All(plan.Tasks, task =>
+        {
+            Assert.DoesNotContain("tool", task.Objective, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("PlanStep", task.Objective, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("query_state", task.Objective, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("perform_action", task.Objective, StringComparison.OrdinalIgnoreCase);
+        });
     }
 
     private static bool LiveTestsEnabled() =>

@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Agentica.Clients\Agentica.Clients.csproj" />
+    <ProjectReference Include="..\..\Agentica.Orchestration\Agentica.Orchestration\Agentica.Orchestration.csproj" />
   </ItemGroup>
 
 </Project>

@@ -5,6 +5,8 @@ public enum ExecutionEventType
     RunCreated,
     RequestAccepted,
     PlanCreated,
+    BatchStarted,
+    BatchCompleted,
     StepStarted,
     ObservationMade,
     ReceiptEmitted,

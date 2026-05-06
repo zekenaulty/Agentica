@@ -79,6 +79,56 @@ public sealed class AgenticaClientsTests
     }
 
     [Fact]
+    public async Task Llm_workflow_planner_maps_batch_and_dependency_fields()
+    {
+        var planner = new LlmWorkflowPlanner(new FakeLlmClient(BatchedPlanJson()));
+
+        var plan = await planner.CreatePlanAsync(CreatePlanningRequest());
+
+        Assert.Equal(3, plan.Steps.Count);
+        Assert.Equal("evidence", plan.Steps[0].BatchId);
+        Assert.Equal("evidence", plan.Steps[1].BatchId);
+        Assert.Empty(plan.Steps[0].DependsOn);
+        Assert.Equal(["read_a", "read_b"], plan.Steps[2].DependsOn);
+        Assert.Null(plan.Steps[2].BatchId);
+    }
+
+    [Fact]
+    public async Task Llm_workflow_planner_prompt_includes_completed_step_dependency_context()
+    {
+        var client = new FakeLlmClient(PlanJson("query_state", "Query", "ReadOnly"));
+        var planner = new LlmWorkflowPlanner(client);
+        var request = CreatePlanningRequest() with
+        {
+            ExecutionContext = new PlanningExecutionContext(
+                ["step_004"],
+                [
+                    new CompletedStepContext(
+                        "step_004",
+                        "hexquest.validate_patch",
+                        "plan_002",
+                        2,
+                        "receipt_004",
+                        nameof(ReceiptStatus.Succeeded),
+                        "observation_004",
+                        null)
+                ],
+                CurrentPlanId: "plan_002",
+                PlanVersionCount: 2)
+        };
+
+        await planner.CreatePlanAsync(request);
+
+        var prompt = string.Join(
+            Environment.NewLine,
+            client.Requests[0].Messages.Select(message => message.Content));
+        Assert.Contains("executionContext", prompt);
+        Assert.Contains("completedStepIds", prompt);
+        Assert.Contains("step_004", prompt);
+        Assert.Contains("same submitted plan slice", prompt);
+    }
+
+    [Fact]
     public async Task Llm_workflow_planner_maps_valid_refinement_json_into_refined_plan()
     {
         var planner = new LlmWorkflowPlanner(new FakeLlmClient(RefinementJson(
@@ -449,6 +499,56 @@ public sealed class AgenticaClientsTests
                 "action": "write_marker"
               },
               "reason": "Use the supplied tool."
+            }
+          ],
+          "completionCondition": "The selected tool completes."
+        }
+        """;
+
+    private static string BatchedPlanJson() =>
+        """
+        {
+          "planId": "plan_model",
+          "description": "Model produced a batched evidence plan.",
+          "steps": [
+            {
+              "stepId": "read_a",
+              "toolId": "query_state",
+              "kind": "Query",
+              "effect": "ReadOnly",
+              "input": {
+                "query": "a"
+              },
+              "dependsOn": [],
+              "batchId": "evidence",
+              "reason": "Read independent evidence."
+            },
+            {
+              "stepId": "read_b",
+              "toolId": "query_state",
+              "kind": "Query",
+              "effect": "ReadOnly",
+              "input": {
+                "query": "b"
+              },
+              "dependsOn": [],
+              "batchId": "evidence",
+              "reason": "Read independent evidence."
+            },
+            {
+              "stepId": "patch_after_reads",
+              "toolId": "perform_action",
+              "kind": "Action",
+              "effect": "WritesLocalState",
+              "input": {
+                "action": "write_marker"
+              },
+              "dependsOn": [
+                "read_a",
+                "read_b"
+              ],
+              "batchId": null,
+              "reason": "Mutate only after evidence."
             }
           ],
           "completionCondition": "The selected tool completes."

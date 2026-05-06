@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Agentica\Agentica.csproj" />
+    <ProjectReference Include="..\..\Agentica.Orchestration\Agentica.Orchestration\Agentica.Orchestration.csproj" />
   </ItemGroup>
 
   <ItemGroup>

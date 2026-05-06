@@ -1,7 +1,8 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Agentica.CLI.Configuration;
 using Agentica.CLI.Logging;
+using Agentica.CLI.Scenarios.Campaign;
+using Agentica.CLI.Scenarios.HexQuest;
 using Agentica.CLI.Scenarios.MazeQuest;
 using Agentica.CLI.Scenarios.Quest;
 using Agentica.CLI.Scenarios.WorkbenchQuest;
@@ -42,6 +43,24 @@ if (string.Equals(args[0], "mazequest", StringComparison.OrdinalIgnoreCase))
 if (string.Equals(args[0], "workbench", StringComparison.OrdinalIgnoreCase))
 {
     return await WorkbenchQuestCommand.RunAsync(args.Skip(1).ToArray(), CreateCommandServices());
+}
+
+if (string.Equals(args[0], "hexquest", StringComparison.OrdinalIgnoreCase))
+{
+    return await HexQuestCommand.RunAsync(args.Skip(1).ToArray(), CreateCommandServices());
+}
+
+if (string.Equals(args[0], "campaign", StringComparison.OrdinalIgnoreCase))
+{
+    return await CampaignCommand.RunAsync(args.Skip(1).ToArray(), CreateCommandServices());
+}
+
+if (string.Equals(args[0], "orchestrate", StringComparison.OrdinalIgnoreCase))
+{
+    return await OrchestrationCommand.RunAsync(
+        args.Skip(1).ToArray(),
+        GeminiCredentialsAvailable,
+        PrintUsage);
 }
 
 PrintUsage();
@@ -198,197 +217,10 @@ static void PrintUsage()
     Console.Error.WriteLine("  Agentica.CLI workbench list");
     Console.Error.WriteLine("  Agentica.CLI workbench preview [scenario-id]");
     Console.Error.WriteLine("  Agentica.CLI workbench run [scenario-id] [--planner deterministic|gemini] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--timeout-seconds <seconds>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--include-thoughts] [--log-run] [--log-dir <path>]");
-}
-
-internal static class JsonOptions
-{
-    public static JsonSerializerOptions Create()
-    {
-        var options = new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-        };
-
-        options.Converters.Add(new JsonStringEnumConverter());
-        return options;
-    }
-}
-
-internal static class CliParsing
-{
-    public static bool TryParsePlanningMode(string value, out PlanningMode planningMode)
-    {
-        switch (value.ToLowerInvariant())
-        {
-            case "stepwise":
-                planningMode = PlanningMode.Stepwise;
-                return true;
-            case "query-blocker":
-            case "query-and-blocker":
-            case "query-and-blocker-driven":
-                planningMode = PlanningMode.QueryAndBlockerDriven;
-                return true;
-            case "blocker":
-            case "blocker-driven":
-                planningMode = PlanningMode.BlockerDriven;
-                return true;
-            case "plan-only":
-            case "planonly":
-                planningMode = PlanningMode.PlanOnly;
-                return true;
-            default:
-                planningMode = PlanningMode.Stepwise;
-                return false;
-        }
-    }
-}
-
-internal enum PlannerKind
-{
-    Deterministic,
-    Gemini
-}
-
-internal sealed record CliRunOptions(
-    string Objective,
-    PlannerKind Planner,
-    string? ModelId,
-    string? ThinkingBudget,
-    bool IncludeThoughts,
-    PlanningMode PlanningMode,
-    int MaxBlockedRetries,
-    bool LogRun,
-    string? LogDir,
-    bool IsValid,
-    string? Error)
-{
-    public static CliRunOptions Parse(IReadOnlyList<string> args)
-    {
-        var objectiveParts = new List<string>();
-        var planner = PlannerKind.Deterministic;
-        string? modelId = null;
-        string? thinkingBudget = null;
-        var includeThoughts = false;
-        var planningMode = PlanningMode.Stepwise;
-        var maxBlockedRetries = 2;
-        var logRun = false;
-        string? logDir = null;
-
-        for (var index = 0; index < args.Count; index++)
-        {
-            var arg = args[index];
-            if (!arg.StartsWith("--", StringComparison.Ordinal))
-            {
-                objectiveParts.Add(arg);
-                continue;
-            }
-
-            switch (arg)
-            {
-                case "--planner":
-                    if (!TryReadValue(args, ref index, out var plannerValue))
-                    {
-                        return Invalid("Missing value for --planner.");
-                    }
-
-                    if (!Enum.TryParse<PlannerKind>(plannerValue, ignoreCase: true, out planner))
-                    {
-                        return Invalid($"Unknown planner '{plannerValue}'.");
-                    }
-
-                    break;
-
-                case "--model":
-                    if (!TryReadValue(args, ref index, out modelId))
-                    {
-                        return Invalid("Missing value for --model.");
-                    }
-
-                    break;
-
-                case "--thinking-budget":
-                    if (!TryReadValue(args, ref index, out thinkingBudget))
-                    {
-                        return Invalid("Missing value for --thinking-budget.");
-                    }
-
-                    thinkingBudget = thinkingBudget.ToLowerInvariant();
-                    if (thinkingBudget is not "dynamic" and not "off" &&
-                        (!int.TryParse(thinkingBudget, out var tokens) || tokens < 0))
-                    {
-                        return Invalid($"Invalid thinking budget '{thinkingBudget}'.");
-                    }
-
-                    break;
-
-                case "--planning-mode":
-                    if (!TryReadValue(args, ref index, out var planningModeValue))
-                    {
-                        return Invalid("Missing value for --planning-mode.");
-                    }
-
-                    if (!CliParsing.TryParsePlanningMode(planningModeValue, out planningMode))
-                    {
-                        return Invalid($"Unknown planning mode '{planningModeValue}'.");
-                    }
-
-                    break;
-
-                case "--max-blocked-retries":
-                    if (!TryReadValue(args, ref index, out var maxBlockedRetriesValue) ||
-                        !int.TryParse(maxBlockedRetriesValue, out maxBlockedRetries) ||
-                        maxBlockedRetries < 0)
-                    {
-                        return Invalid("Missing or invalid value for --max-blocked-retries.");
-                    }
-
-                    break;
-
-                case "--include-thoughts":
-                    includeThoughts = true;
-                    break;
-
-                case "--log-run":
-                    logRun = true;
-                    break;
-
-                case "--log-dir":
-                    if (!TryReadValue(args, ref index, out logDir))
-                    {
-                        return Invalid("Missing value for --log-dir.");
-                    }
-
-                    break;
-
-                default:
-                    return Invalid($"Unknown option '{arg}'.");
-            }
-        }
-
-        var objective = string.Join(' ', objectiveParts).Trim();
-        if (string.IsNullOrWhiteSpace(objective))
-        {
-            return Invalid("Objective is required.");
-        }
-
-        return new CliRunOptions(objective, planner, modelId, thinkingBudget, includeThoughts, planningMode, maxBlockedRetries, logRun, logDir, true, null);
-    }
-
-    private static bool TryReadValue(IReadOnlyList<string> args, ref int index, out string value)
-    {
-        if (index + 1 >= args.Count || args[index + 1].StartsWith("--", StringComparison.Ordinal))
-        {
-            value = string.Empty;
-            return false;
-        }
-
-        index++;
-        value = args[index];
-        return true;
-    }
-
-    private static CliRunOptions Invalid(string error) =>
-        new(string.Empty, PlannerKind.Deterministic, null, null, false, PlanningMode.Stepwise, 2, false, null, false, error);
+    Console.Error.WriteLine("  Agentica.CLI hexquest list");
+    Console.Error.WriteLine("  Agentica.CLI hexquest preview [scenario-id]");
+    Console.Error.WriteLine("  Agentica.CLI hexquest run [scenario-id] [--planner deterministic|gemini] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--timeout-seconds <seconds>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--include-thoughts] [--log-run] [--log-dir <path>]");
+    Console.Error.WriteLine("  Agentica.CLI campaign list");
+    Console.Error.WriteLine("  Agentica.CLI campaign run [campaign-id] [--planner deterministic|gemini] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--include-thoughts] [--log-run] [--log-dir <path>]");
+    Console.Error.WriteLine("  Agentica.CLI orchestrate \"<objective>\" [--task-planner deterministic|gemini] [--model <model-id>]");
 }

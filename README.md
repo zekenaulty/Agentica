@@ -33,6 +33,13 @@ Implemented reality:
 - Tool input contracts, effect policy, completion evaluation, bounded continuation, blocked retries, provider-call retries, and planner context shaping are implemented.
 - CLI run logging writes structured artifacts under `.agentica/runs`.
 - MazeQuest exists as a host-owned reasoning harness, not Agentica runtime vocabulary.
+- The runtime now supports small validated multi-step plan slices, read-only query batches, and dependency fields on plan steps.
+- Host-side campaign orchestration exists as a CLI harness only; long-horizon orchestration is not part of the core runtime package.
+
+Runtime contract reference:
+
+- `docs/Agentica.RuntimeContracts.md`
+- `docs/Agentica.DeferredWork.md`
 
 Current reality gap:
 
@@ -356,6 +363,7 @@ Agentica now exposes generic harness seams without importing host vocabulary:
 - `MaxPlanContinuations` allows bounded continuation planning when a plan is exhausted but completion evidence is missing.
 - `MaxBlockedRetries` allows bounded retry attempts after a blocked outcome. Retry attempts are fresh Agentica run attempts with `RequestOrigin.Agent` and an `agentica.retry` context describing the immediately previous blocker.
 - `PlanningContextOptions` lets hosts bound recent observations and receipts passed back to planners while preserving full run details in the envelope.
+- `PlanningRequest.ExecutionContext` exposes compact run-local completed-step context to planners. Refined and continuation plans may use `dependsOn` for earlier same-plan steps or completed step ids from that context; receipts, observations, artifacts, and plan ids are evidence, not dependency ids.
 - `PlanRefinementReasons` keeps extra thinking/planning turns auditable as normal refinement reasons such as `ambiguous_action`, `blocked`, `low_confidence`, `conflicting_signals`, `completion_check`, `continue`, `resource_risk`, or `retry_unblock`.
 
 These are Agentica concerns because every tool-using host needs them. Maze cells, fog of war, rooms, hazards, rewards, and quest objectives remain host/tool data.

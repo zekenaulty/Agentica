@@ -10,7 +10,10 @@ public sealed record ExecutionPolicy(
     int MaxPlanContinuations = 0,
     ToolEffectPolicy? EffectPolicy = null,
     PlanningContextOptions? PlanningContext = null,
-    int MaxBlockedRetries = 2)
+    int MaxBlockedRetries = 2,
+    int MaxBatchSize = 4,
+    int MaxParallelism = 4,
+    bool AllowReadOnlyParallelBatches = true)
 {
     public static ExecutionPolicy Default { get; } = new();
 

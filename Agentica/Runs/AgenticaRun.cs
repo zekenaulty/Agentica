@@ -1,4 +1,5 @@
 using Agentica.Artifacts;
+using Agentica.Execution;
 using Agentica.Events;
 using Agentica.Observations;
 using Agentica.Outcomes;
@@ -32,6 +33,8 @@ public sealed class AgenticaRun
     public List<Artifact> Artifacts { get; } = [];
 
     public List<Receipt> Receipts { get; } = [];
+
+    public List<ExecutionBatch> Batches { get; } = [];
 
     public List<ExecutionEvent> Events { get; } = [];
 }

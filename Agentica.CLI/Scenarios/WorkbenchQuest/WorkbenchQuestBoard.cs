@@ -38,7 +38,14 @@ public sealed class WorkbenchQuestBoard : IWorkbenchQuestBoard
             Objective: "Find a valid word ladder from cold to warm using the dictionary and verify it.",
             Description: "A constrained word puzzle where each step must be a dictionary word and differ by one letter.",
             Difficulty: "Moderate",
-            EstimatedSteps: 7)
+            EstimatedSteps: 7),
+        new(
+            ScenarioId: "release_gate",
+            Title: "The Release Gate",
+            Objective: "Collect independent release evidence, patch the blocked gates, and verify.",
+            Description: "A release checklist repair that rewards batching independent read-only evidence before mutation.",
+            Difficulty: "Moderate",
+            EstimatedSteps: 10)
     ];
 
     public IReadOnlyList<WorkbenchScenarioDescriptor> ListScenarios() => _descriptors;
@@ -58,6 +65,7 @@ public sealed class WorkbenchQuestBoard : IWorkbenchQuestBoard
             "missing_mapping" => CreateMissingMapping(descriptor),
             "structured_doc_merge" => CreateStructuredDocMerge(descriptor),
             "word_ladder" => CreateWordLadder(descriptor),
+            "release_gate" => CreateReleaseGate(descriptor),
             _ => throw new InvalidOperationException($"WorkbenchQuest scenario '{scenarioId}' is not implemented.")
         };
     }
@@ -277,5 +285,51 @@ public sealed class WorkbenchQuestBoard : IWorkbenchQuestBoard
             descriptor,
             files,
             RelevantPaths: ["rules.txt", "dictionary.txt", "answer.json"]);
+    }
+
+    private static WorkbenchScenario CreateReleaseGate(WorkbenchScenarioDescriptor descriptor)
+    {
+        var files = new Dictionary<string, WorkbenchFile>(StringComparer.Ordinal)
+        {
+            ["release/requirements.txt"] = new(
+                "release/requirements.txt",
+                """
+                Release gate requirements:
+                - frontend must target /prod
+                - backend health route must return 200
+                - manifest must include CHANGELOG.md
+                """,
+                ReadOnly: true),
+            ["services/frontend.env"] = new(
+                "services/frontend.env",
+                """
+                APP_NAME=Portal
+                API_BASE=/staging
+                """),
+            ["services/backend.routes"] = new(
+                "services/backend.routes",
+                """
+                GET /health -> 404
+                GET /ready -> 200
+                """),
+            ["release/manifest.txt"] = new(
+                "release/manifest.txt",
+                """
+                README.md: included
+                CHANGELOG.md: missing
+                LICENSE.txt: included
+                """)
+        };
+
+        return new WorkbenchScenario(
+            descriptor,
+            files,
+            RelevantPaths:
+            [
+                "release/requirements.txt",
+                "services/frontend.env",
+                "services/backend.routes",
+                "release/manifest.txt"
+            ]);
     }
 }
