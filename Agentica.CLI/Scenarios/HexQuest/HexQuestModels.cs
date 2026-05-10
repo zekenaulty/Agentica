@@ -18,7 +18,8 @@ public sealed record HexQuestScenario(
 public enum HexQuestCodecProfile
 {
     IntroXorChecksum,
-    RecordScopeConflict
+    RecordScopeConflict,
+    RecordScopeConflictV2
 }
 
 public sealed record HexQuestDecodedState(
@@ -31,7 +32,8 @@ public sealed record HexQuestCharacterState(
     string EntityId,
     int Strength,
     int Dexterity,
-    int Gold);
+    int Gold,
+    int DisplayStrength = 0);
 
 public sealed record HexQuestGoal(
     string Field,
@@ -39,7 +41,10 @@ public sealed record HexQuestGoal(
     IReadOnlyList<string> ProtectedFields,
     string? EntityId = null,
     int? MaxPatchBytes = null,
-    IReadOnlyList<int>? ForbiddenOffsets = null);
+    IReadOnlyList<int>? ForbiddenOffsets = null,
+    bool ExposePatchConstraints = true,
+    bool TerseValidation = false,
+    int RequiredContrastiveProbes = 0);
 
 public sealed record HexPatchOperation(
     int Offset,
@@ -60,6 +65,8 @@ public sealed class HexQuestRunState
 
     public List<HexQuestPatchRecord> Commits { get; } = [];
 
+    public List<HexQuestSandboxRecord> SandboxProbes { get; } = [];
+
     public bool Completed { get; set; }
 }
 
@@ -73,3 +80,10 @@ public sealed record HexQuestPatchRecord(
     string Patch,
     bool Accepted,
     string Message);
+
+public sealed record HexQuestSandboxRecord(
+    int Number,
+    string? EntityId,
+    string Field,
+    int Value,
+    bool Contrastive);

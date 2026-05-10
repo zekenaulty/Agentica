@@ -152,15 +152,29 @@ internal static class HexQuestCommand
         - The committed patch must set {scenario.Goal.Field} to {scenario.Goal.TargetValue}.
         - The committed patch must preserve protected decoded fields: {string.Join(", ", scenario.Goal.ProtectedFields)}.
         - The committed patch must keep checksum validation passing.
-        - Patch budget: {(scenario.Goal.MaxPatchBytes is null ? "no scenario-specific byte limit" : $"at most {scenario.Goal.MaxPatchBytes} byte edits")}.
-        - Forbidden encoded offsets: {FormatOffsets(scenario.Goal.ForbiddenOffsets)}.
+        - Patch budget: {FormatPatchBudget(scenario)}.
+        - Forbidden encoded offsets: {FormatForbiddenOffsets(scenario)}.
+        - Contrastive probing: {FormatContrastiveProbeRequirement(scenario)}.
+        - Validation feedback may be partial; use failed validation categories to narrow the patch.
         - The run succeeds only when hexquest.commit_patch emits the hexquest.objective_completed artifact.
         """;
 
-    private static string FormatOffsets(IReadOnlyList<int>? offsets) =>
-        offsets is null || offsets.Count == 0
+    private static string FormatPatchBudget(HexQuestScenario scenario) =>
+        scenario.Goal.ExposePatchConstraints
+            ? scenario.Goal.MaxPatchBytes is null ? "no scenario-specific byte limit" : $"at most {scenario.Goal.MaxPatchBytes} byte edits"
+            : "bounded; discover the acceptable patch size through validation";
+
+    private static string FormatForbiddenOffsets(HexQuestScenario scenario) =>
+        !scenario.Goal.ExposePatchConstraints
+            ? "not disclosed; validation may report derived/cache-offset failures"
+            : scenario.Goal.ForbiddenOffsets is null || scenario.Goal.ForbiddenOffsets.Count == 0
             ? "none"
-            : string.Join(", ", offsets);
+            : string.Join(", ", scenario.Goal.ForbiddenOffsets);
+
+    private static string FormatContrastiveProbeRequirement(HexQuestScenario scenario) =>
+        scenario.Goal.RequiredContrastiveProbes <= 0
+            ? "optional"
+            : $"perform at least {scenario.Goal.RequiredContrastiveProbes} sandbox probe on a non-target entity or non-target field before final validation";
 
     private static void PrintBoard(IHexQuestBoard board)
     {

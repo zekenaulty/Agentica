@@ -90,6 +90,14 @@ public sealed class HexQuestSession
         }
 
         var sandboxEncoded = HexQuestCodec.Encode(Scenario, after);
+        var contrastive = IsContrastiveProbe(entity, field);
+        State.SandboxProbes.Add(new HexQuestSandboxRecord(
+            State.SandboxProbes.Count + 1,
+            entity,
+            field,
+            value.Value,
+            contrastive));
+
         var data = Snapshot("sandbox_set_decoded");
         data["sandboxOnly"] = true;
         data["field"] = field;
@@ -100,6 +108,7 @@ public sealed class HexQuestSession
         data["beforeEncoded"] = HexQuestCodec.ToHex(State.Encoded);
         data["afterEncoded"] = HexQuestCodec.ToHex(sandboxEncoded);
         data["diff"] = HexQuestCodec.Diff(State.Encoded, sandboxEncoded);
+        data["contrastiveProbe"] = contrastive;
 
         return Observed(invocation, ReceiptStatus.Succeeded, "Sandbox decoded edit diff returned.", "Sandbox encoded diff observed without mutating authoritative payload.", data);
     }
@@ -168,6 +177,13 @@ public sealed class HexQuestSession
     private HexPatchEvaluation EvaluatePatch(IReadOnlyList<HexPatchOperation> operations)
     {
         var patched = State.Encoded.ToArray();
+        if (ContrastiveProbeMissing())
+        {
+            return HexPatchEvaluation.Reject(
+                patched,
+                "Patch validation requires at least one contrastive sandbox probe before narrowing the final patch.");
+        }
+
         if (Scenario.Goal.MaxPatchBytes is not null && operations.Count > Scenario.Goal.MaxPatchBytes.Value)
         {
             return HexPatchEvaluation.Reject(
@@ -241,11 +257,23 @@ public sealed class HexQuestSession
         data["beforeEncoded"] = HexQuestCodec.ToHex(State.Encoded);
         data["afterEncoded"] = HexQuestCodec.ToHex(validation.PatchedEncoded);
         data["diff"] = HexQuestCodec.Diff(State.Encoded, validation.PatchedEncoded);
-        data["afterDecoded"] = DecodedPayload(HexQuestCodec.Decode(Scenario, validation.PatchedEncoded));
+        var decoded = HexQuestCodec.Decode(Scenario, validation.PatchedEncoded);
+        var changedProtectedFields = Scenario.Goal.ProtectedFields
+            .Where(field => FieldValue(decoded, field, null) != FieldValue(State.InitialDecoded, field, null))
+            .ToArray();
         data["checksumValid"] = HexQuestCodec.HasValidChecksum(Scenario, validation.PatchedEncoded);
-        data["goalSatisfied"] = FieldValue(HexQuestCodec.Decode(Scenario, validation.PatchedEncoded), Scenario.Goal.Field, Scenario.Goal.EntityId) == Scenario.Goal.TargetValue;
-        data["protectedFieldsUnchanged"] = Scenario.Goal.ProtectedFields.All(field =>
-            FieldValue(HexQuestCodec.Decode(Scenario, validation.PatchedEncoded), field, null) == FieldValue(State.InitialDecoded, field, null));
+        data["goalSatisfied"] = FieldValue(decoded, Scenario.Goal.Field, Scenario.Goal.EntityId) == Scenario.Goal.TargetValue;
+        data["protectedFieldsChangedCount"] = changedProtectedFields.Length;
+        data["protectedFieldsUnchanged"] = changedProtectedFields.Length == 0;
+        data["patchBudgetValid"] = Scenario.Goal.MaxPatchBytes is null || HexQuestCodec.Diff(State.Encoded, validation.PatchedEncoded).Count <= Scenario.Goal.MaxPatchBytes.Value;
+        data["contrastiveProbeSatisfied"] = !ContrastiveProbeMissing();
+        if (Scenario.Goal.TerseValidation)
+        {
+            data["failureCategories"] = FailureCategories(validation, changedProtectedFields);
+            return;
+        }
+
+        data["afterDecoded"] = DecodedPayload(decoded);
         data["maxPatchBytes"] = Scenario.Goal.MaxPatchBytes;
         data["forbiddenOffsets"] = Scenario.Goal.ForbiddenOffsets;
     }
@@ -258,6 +286,8 @@ public sealed class HexQuestSession
             ["objective"] = Scenario.Descriptor.Objective,
             ["action"] = action,
             ["examplesRequested"] = State.Examples.Count,
+            ["sandboxProbes"] = State.SandboxProbes.Count,
+            ["contrastiveProbes"] = State.SandboxProbes.Count(item => item.Contrastive),
             ["validations"] = State.Validations.Count,
             ["commits"] = State.Commits.Count,
             ["objectiveCompleted"] = State.Completed
@@ -268,11 +298,13 @@ public sealed class HexQuestSession
         {
             ["field"] = Scenario.Goal.Field,
             ["targetValue"] = Scenario.Goal.TargetValue,
-            ["protectedFields"] = Scenario.Goal.ProtectedFields
-                ,
+            ["protectedFields"] = Scenario.Goal.ProtectedFields,
             ["entityId"] = Scenario.Goal.EntityId,
-            ["maxPatchBytes"] = Scenario.Goal.MaxPatchBytes,
-            ["forbiddenOffsets"] = Scenario.Goal.ForbiddenOffsets
+            ["patchConstraint"] = Scenario.Goal.ExposePatchConstraints
+                ? Scenario.Goal.MaxPatchBytes is null ? "none" : $"at most {Scenario.Goal.MaxPatchBytes} byte edits"
+                : "bounded patch; exact byte budget is discovered through validation",
+            ["forbiddenOffsets"] = Scenario.Goal.ExposePatchConstraints ? Scenario.Goal.ForbiddenOffsets : null,
+            ["requiredContrastiveProbes"] = Scenario.Goal.RequiredContrastiveProbes
         };
 
     private static Dictionary<string, object?> DecodedPayload(HexQuestDecodedState state) =>
@@ -287,6 +319,8 @@ public sealed class HexQuestSession
                 ["Strength"] = character.Strength,
                 ["Dexterity"] = character.Dexterity,
                 ["Gold"] = character.Gold
+                ,
+                ["DisplayStrength"] = character.DisplayStrength
             }).ToArray()
         };
 
@@ -322,6 +356,7 @@ public sealed class HexQuestSession
             "strength" when value is >= 0 and <= 255 => character with { Strength = value },
             "dexterity" when value is >= 0 and <= 255 => character with { Dexterity = value },
             "gold" when value is >= 0 and <= 65535 => character with { Gold = value },
+            "displaystrength" when value is >= 0 and <= 255 => character with { DisplayStrength = value },
             _ => character
         };
 
@@ -347,6 +382,7 @@ public sealed class HexQuestSession
                 "strength" => character.Strength,
                 "dexterity" => character.Dexterity,
                 "gold" => character.Gold,
+                "displaystrength" => character.DisplayStrength,
                 _ => null
             };
         }
@@ -358,6 +394,72 @@ public sealed class HexQuestSession
             "gold" => state.Gold,
             _ => null
         };
+    }
+
+    private bool IsContrastiveProbe(string? entity, string field)
+    {
+        if (Scenario.Goal.RequiredContrastiveProbes <= 0)
+        {
+            return false;
+        }
+
+        var targetEntity = Scenario.Goal.EntityId;
+        return !string.Equals(entity, targetEntity, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(field, Scenario.Goal.Field, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool ContrastiveProbeMissing() =>
+        State.SandboxProbes.Count(item => item.Contrastive) < Scenario.Goal.RequiredContrastiveProbes;
+
+    private static IReadOnlyList<string> FailureCategories(
+        HexPatchEvaluation validation,
+        IReadOnlyList<string> changedProtectedFields)
+    {
+        if (validation.Accepted)
+        {
+            return [];
+        }
+
+        var categories = new List<string>();
+        var message = validation.Message;
+        if (message.Contains("contrastive", StringComparison.OrdinalIgnoreCase))
+        {
+            categories.Add("contrastive_probe_missing");
+        }
+
+        if (message.Contains("at most", StringComparison.OrdinalIgnoreCase))
+        {
+            categories.Add("patch_budget_exceeded");
+        }
+
+        if (message.Contains("forbidden", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("derived", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("cache", StringComparison.OrdinalIgnoreCase))
+        {
+            categories.Add("derived_or_cache_offset_touched");
+        }
+
+        if (message.Contains("checksum", StringComparison.OrdinalIgnoreCase))
+        {
+            categories.Add("checksum_invalid");
+        }
+
+        if (message.Contains("does not set", StringComparison.OrdinalIgnoreCase))
+        {
+            categories.Add("goal_not_satisfied");
+        }
+
+        if (message.Contains("protected", StringComparison.OrdinalIgnoreCase) || changedProtectedFields.Count > 0)
+        {
+            categories.Add("protected_fields_changed");
+        }
+
+        if (categories.Count == 0)
+        {
+            categories.Add("patch_rejected");
+        }
+
+        return categories.Distinct(StringComparer.Ordinal).ToArray();
     }
 
     private static bool TryParsePatch(string? patch, out IReadOnlyList<HexPatchOperation> operations, out string error)

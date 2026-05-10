@@ -18,7 +18,7 @@ public static class HexQuestTools
                 ToolEffect.ReadOnly,
                 dispatcher,
                 ToolInputSchema.Create(
-                    new ToolInputField("field", Required: true, Description: "Decoded field to change in a sandbox copy.", AllowedValues: ["Strength", "Dexterity", "Gold"], Example: "Strength"),
+                    new ToolInputField("field", Required: true, Description: "Decoded field to change in a sandbox copy.", AllowedValues: ["Strength", "Dexterity", "Gold", "DisplayStrength"], Example: "Strength"),
                     new ToolInputField("entity", Required: false, Description: "Optional decoded entity id for multi-record scenarios.", Example: "B"),
                     new ToolInputField("value", ToolInputValueType.Integer, Required: true, Description: "Target decoded value for the sandbox copy.", Example: 18, Minimum: 0, Maximum: 65535))),
             Register(

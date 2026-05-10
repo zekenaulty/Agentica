@@ -24,7 +24,14 @@ public sealed class HexQuestBoard : IHexQuestBoard
             Objective: "Set character B Strength from 12 to 18 by committing a bounded encoded patch without touching other records or derived cache bytes.",
             Description: "A noisy payload puzzle where repeated values, derived cache bytes, and checksum repair force scope narrowing.",
             Difficulty: "Moderate",
-            EstimatedSteps: 10)
+            EstimatedSteps: 10),
+        new(
+            ScenarioId: "record_scope_conflict_v2",
+            Title: "Record Scope Conflict V2",
+            Objective: "Set character B Strength from 12 to 18 by committing a bounded encoded patch after isolating authoritative bytes from derived metadata.",
+            Description: "A larger noisy payload with repeated records, display-strength decoys, checksum-like bytes, derived indexes, hidden forbidden offsets, and partial validation feedback.",
+            Difficulty: "Hard",
+            EstimatedSteps: 14)
     ];
 
     public IReadOnlyList<HexQuestScenarioDescriptor> ListScenarios() => _descriptors;
@@ -40,6 +47,7 @@ public sealed class HexQuestBoard : IHexQuestBoard
 
         return descriptor.ScenarioId switch
         {
+            "record_scope_conflict_v2" => CreateRecordScopeConflictV2(descriptor),
             "record_scope_conflict" => CreateRecordScopeConflict(descriptor),
             _ => CreateIntro(descriptor)
         };
@@ -92,6 +100,46 @@ public sealed class HexQuestBoard : IHexQuestBoard
                 RecordScopeState(12, 9, 300)
             ]);
 
+    private static HexQuestScenario CreateRecordScopeConflictV2(HexQuestScenarioDescriptor descriptor) =>
+        new(
+            descriptor,
+            HexQuestCodecProfile.RecordScopeConflictV2,
+            RecordScopeStateV2(12, 9, 250, displayStrength: 12),
+            new HexQuestGoal(
+                Field: "Strength",
+                TargetValue: 18,
+                ProtectedFields:
+                [
+                    "A.Strength",
+                    "A.Dexterity",
+                    "A.Gold",
+                    "A.DisplayStrength",
+                    "B.Dexterity",
+                    "B.Gold",
+                    "B.DisplayStrength",
+                    "C.Strength",
+                    "C.Dexterity",
+                    "C.Gold",
+                    "C.DisplayStrength",
+                    "D.Strength",
+                    "D.Dexterity",
+                    "D.Gold",
+                    "D.DisplayStrength"
+                ],
+                EntityId: "B",
+                MaxPatchBytes: 2,
+                ForbiddenOffsets: [5, 6, 36, 76, 80, 88, 96, 104, 112, 113, 121],
+                ExposePatchConstraints: false,
+                TerseValidation: true,
+                RequiredContrastiveProbes: 1),
+            FewShotExamples:
+            [
+                RecordScopeStateV2(5, 9, 250, displayStrength: 12),
+                RecordScopeStateV2(21, 9, 250, displayStrength: 12),
+                RecordScopeStateV2(12, 11, 250, displayStrength: 12),
+                RecordScopeStateV2(12, 9, 300, displayStrength: 12)
+            ]);
+
     private static HexQuestDecodedState RecordScopeState(int strength, int dexterity, int gold) =>
         new(
             strength,
@@ -101,5 +149,17 @@ public sealed class HexQuestBoard : IHexQuestBoard
                 new HexQuestCharacterState("A", 12, 9, 250),
                 new HexQuestCharacterState("B", strength, dexterity, gold),
                 new HexQuestCharacterState("C", 12, 9, 250)
+            ]);
+
+    private static HexQuestDecodedState RecordScopeStateV2(int strength, int dexterity, int gold, int displayStrength) =>
+        new(
+            strength,
+            dexterity,
+            gold,
+            [
+                new HexQuestCharacterState("A", 12, 9, 250, 12),
+                new HexQuestCharacterState("B", strength, dexterity, gold, displayStrength),
+                new HexQuestCharacterState("C", 12, 9, 250, 12),
+                new HexQuestCharacterState("D", 12, 9, 250, 12)
             ]);
 }

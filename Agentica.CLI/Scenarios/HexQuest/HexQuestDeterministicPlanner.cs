@@ -44,6 +44,9 @@ public sealed class HexQuestDeterministicPlanner : IWorkflowPlanner
     }
 
     private PlanStep StepForScenario(int stepNumber) =>
+        string.Equals(_scenarioId, "record_scope_conflict_v2", StringComparison.OrdinalIgnoreCase)
+            ? RecordScopeConflictV2Step(stepNumber)
+            : 
         string.Equals(_scenarioId, "record_scope_conflict", StringComparison.OrdinalIgnoreCase)
             ? RecordScopeConflictStep(stepNumber)
             : IntroStep(stepNumber);
@@ -101,6 +104,41 @@ public sealed class HexQuestDeterministicPlanner : IWorkflowPlanner
                 ToolKind.Action,
                 ToolEffect.WritesLocalState,
                 ("patch", "16:A9>B7,48:1C>12"))
+        };
+
+    private static PlanStep RecordScopeConflictV2Step(int stepNumber) =>
+        stepNumber switch
+        {
+            1 => Step(stepNumber, HexQuestToolIds.InspectEncoded, ToolKind.Query, ToolEffect.ReadOnly),
+            2 => Step(stepNumber, HexQuestToolIds.InspectDecoded, ToolKind.Query, ToolEffect.ReadOnly),
+            3 => Step(
+                stepNumber,
+                HexQuestToolIds.SandboxSetDecoded,
+                ToolKind.Query,
+                ToolEffect.ReadOnly,
+                ("entity", "A"),
+                ("field", "Strength"),
+                ("value", 18)),
+            4 => Step(
+                stepNumber,
+                HexQuestToolIds.SandboxSetDecoded,
+                ToolKind.Query,
+                ToolEffect.ReadOnly,
+                ("entity", "B"),
+                ("field", "Strength"),
+                ("value", 18)),
+            5 => Step(
+                stepNumber,
+                HexQuestToolIds.ValidatePatch,
+                ToolKind.Query,
+                ToolEffect.ReadOnly,
+                ("patch", "32:A9>B7,120:D6>D8")),
+            _ => Step(
+                stepNumber,
+                HexQuestToolIds.CommitPatch,
+                ToolKind.Action,
+                ToolEffect.WritesLocalState,
+                ("patch", "32:A9>B7,120:D6>D8"))
         };
 
     private static PlanStep Step(
