@@ -12,6 +12,7 @@ public enum ChessQuestMode
 {
     StrictRefereeHard,
     StrictRefereeProjected,
+    StrictRefereeThreatAware,
     StrictRefereeAssisted,
     Coach
 }
@@ -111,6 +112,10 @@ public sealed record ChessLineProjection(
     ChessLineRejection? RejectedAt,
     bool ReadOnly,
     bool SessionFenUnchanged,
+    bool LegalProjectionOnly,
+    bool MoveQualityKnown,
+    bool SafetyKnown,
+    bool OpponentReplyModeled,
     string FenAfter,
     IReadOnlyList<string> BoardAfter,
     ChessQuestColor SideToMoveAfter,
@@ -132,6 +137,31 @@ public sealed record ChessProjectedCapture(
     int PlyOffset,
     string Move,
     string Piece);
+
+public sealed record ChessAttackInspection(
+    string Kind,
+    ChessQuestColor AgentColor,
+    ChessQuestColor OpponentColor,
+    ChessQuestColor SideToMove,
+    bool AgentKingInCheck,
+    IReadOnlyList<ChessPublicCapture> OpponentLegalCaptures,
+    IReadOnlyList<ChessAttackedPiece> AttackedAgentPieces,
+    bool ReadOnly,
+    bool EvaluationIncluded,
+    bool GuidanceIncluded,
+    string? Note = null);
+
+public sealed record ChessPublicCapture(
+    string Move,
+    string From,
+    string To,
+    string CapturedPiece);
+
+public sealed record ChessAttackedPiece(
+    string Square,
+    string Piece,
+    IReadOnlyList<string> Attackers,
+    IReadOnlyList<string> CaptureMoves);
 
 public sealed record ChessOpponentRequest(
     string Fen,

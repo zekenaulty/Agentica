@@ -213,6 +213,11 @@ public sealed class AgenticaRunner
                         return Finish(run, RunOutcomeStatus.Blocked, completion.StopReason, blockers: completion.Blockers);
                     }
 
+                    if (completion.Decision == CompletionDecision.Failed)
+                    {
+                        return Finish(run, RunOutcomeStatus.Failed, completion.StopReason, blockers: completion.Blockers);
+                    }
+
                     if (continuationCount >= _policy.MaxPlanContinuations)
                     {
                         return Finish(
@@ -331,6 +336,28 @@ public sealed class AgenticaRunner
                         RunOutcomeStatus.Failed,
                         StopReason.ToolFailure,
                         diagnostics: failedResult.Diagnostics ?? DiagnosticsFromReceipt(failedResult.Result.Receipt));
+                }
+
+                if (_policy.EvaluateCompletionAfterEachBatch)
+                {
+                    var postExecutionCompletion = _completionEvaluator.Evaluate(run);
+                    if (postExecutionCompletion.Decision == CompletionDecision.Complete)
+                    {
+                        return Finish(
+                            run,
+                            RunOutcomeStatus.Succeeded,
+                            postExecutionCompletion.StopReason,
+                            blockers: postExecutionCompletion.Blockers);
+                    }
+
+                    if (postExecutionCompletion.Decision == CompletionDecision.Failed)
+                    {
+                        return Finish(
+                            run,
+                            RunOutcomeStatus.Failed,
+                            postExecutionCompletion.StopReason,
+                            blockers: postExecutionCompletion.Blockers);
+                    }
                 }
 
                 var refinementCandidate = executionResults.FirstOrDefault(item =>

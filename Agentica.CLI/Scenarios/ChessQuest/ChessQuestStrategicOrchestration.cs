@@ -403,7 +403,11 @@ public sealed class ChessQuestPhaseRunExecutor : IRunExecutor
             runContext[pair.Key] = pair.Value;
         }
 
-        var phaseObjective = BuildPhaseObjective(request.Objective, envelope, projection);
+        var phaseObjective = BuildPhaseObjective(
+            request.Objective,
+            envelope,
+            projection,
+            _state.Session.Scenario.DisclosurePolicy.AllowAttackInspection);
         var phaseRequest = new RunRequest(phaseObjective, request.Origin, runContext);
         var runner = new AgenticaRunner(
             _plannerFactory(phaseRequest),
@@ -442,9 +446,13 @@ public sealed class ChessQuestPhaseRunExecutor : IRunExecutor
     private static string BuildPhaseObjective(
         string taskObjective,
         ChessQuestPhaseTaskEnvelope task,
-        ChessQuestStrategyProjection projection)
+        ChessQuestStrategyProjection projection,
+        bool attackInspectionAllowed)
     {
         var doctrine = ChessQuestGoalShapingPolicy.StaticDoctrine;
+        var attackInspectionContract = attackInspectionAllowed
+            ? "- chess.inspect_attacks provides neutral public opponent-capture facts only; it does not score, choose, or prove a response is safe."
+            : string.Empty;
         return
         $"""
         {taskObjective}
@@ -477,6 +485,7 @@ public sealed class ChessQuestPhaseRunExecutor : IRunExecutor
         - Board truth, legal receipts, and chess.project_line verification override strategy claims.
         - Legal moves are affordances only; legal does not mean good or safe.
         - A one-ply chess.project_line result proves only the submitted move's public-rule projection.
+        {attackInspectionContract}
         - chess.play_move turnIntent should include goal, evidence, hypothesis, riskCheck, claimLevel, and publicReason.
         """;
     }
@@ -565,15 +574,6 @@ public sealed class ChessQuestTaskAcceptanceEvaluator : ITaskAcceptanceEvaluator
                 []));
         }
 
-        if (outcome.Outcome.Status != RunOutcomeStatus.Succeeded)
-        {
-            return Task.FromResult(new TaskAcceptanceResult(
-                TaskAcceptanceStatus.PartiallyAccepted,
-                [$"Phase run outcome was {outcome.Outcome.Status}."],
-                Evidence(report),
-                RequiresGraphRefinement: true));
-        }
-
         var terminal = _state.Session.CurrentState.IsTerminal;
         var agentWon = _state.Session.CurrentState.TerminalState?.Winner == _state.Session.Scenario.AgentColor;
         if (terminal && !agentWon)
@@ -582,6 +582,15 @@ public sealed class ChessQuestTaskAcceptanceEvaluator : ITaskAcceptanceEvaluator
                 TaskAcceptanceStatus.Rejected,
                 ["ChessQuest reached a terminal state without an agent win."],
                 Evidence(report)));
+        }
+
+        if (outcome.Outcome.Status != RunOutcomeStatus.Succeeded)
+        {
+            return Task.FromResult(new TaskAcceptanceResult(
+                TaskAcceptanceStatus.PartiallyAccepted,
+                [$"Phase run outcome was {outcome.Outcome.Status}."],
+                Evidence(report),
+                RequiresGraphRefinement: true));
         }
 
         var shouldRefine = !terminal && _state.PhaseReports.Count < _targetPhaseTasks;

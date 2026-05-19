@@ -13,7 +13,8 @@ public sealed record ExecutionPolicy(
     int MaxBlockedRetries = 2,
     int MaxBatchSize = 8,
     int MaxParallelism = 8,
-    bool AllowReadOnlyParallelBatches = true)
+    bool AllowReadOnlyParallelBatches = true,
+    bool EvaluateCompletionAfterEachBatch = false)
 {
     public static ExecutionPolicy Default { get; } = new();
 

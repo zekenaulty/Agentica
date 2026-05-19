@@ -34,15 +34,19 @@ Implemented and working:
 
 - Gera.Chess behind the private rules adapter.
 - `StrictRefereeProjected` tool surface.
+- `StrictRefereeThreatAware` tool surface for neutral attack perception.
 - `chess.get_state`
 - `chess.render_board`
 - `chess.list_legal_moves`
 - `chess.project_line`
+- `chess.inspect_attacks`
 - `chess.play_move`
 - `chess.complete_objective`
 - Legal move observation binding for `play_move`.
 - `sideToMoveInCheck` in public board state.
 - `project_line` check/checkmate claim verification.
+- `project_line` semantic flags that distinguish rule projection from safety/quality evaluation.
+- Neutral opponent capture / attacked-piece inspection behind the threat-aware surface.
 - Host-controlled random, heuristic, and agent-backed opponents.
 - Replay/resume game records.
 - Board parsing probe with persisted prompt/response logs.
@@ -66,6 +70,7 @@ Implemented and working:
   - warnings
 - Tests for no-op/refused move trace honesty.
 - Tests for doctrine/protocol projection and move-level guidance sanitization.
+- Tests for projection semantics, neutral attack inspection, and terminal-loss completion classification.
 
 ## Hard Boundary
 
@@ -79,7 +84,7 @@ Allowed in strict benchmark mode:
 - claim verification for agent-authored lines
 - public phase goals from orchestration
 - public operating doctrine
-- neutral factual threat/attack data, once implemented
+- neutral factual threat/attack data when the chosen surface exposes it
 - deterministic receipts and phase reports
 
 Forbidden in strict benchmark mode:
@@ -126,14 +131,17 @@ Current mitigation:
 - cockpit warns on unsupported safety claims
 - tool descriptions have been tightened
 
-Remaining work:
+Implemented hardening:
 
-- add explicit `project_line` response flags:
+- explicit `project_line` response flags:
   - `legalProjectionOnly: true`
   - `moveQualityKnown: false`
   - `safetyKnown: false`
   - `opponentReplyModeled: line.Length >= 2`
-- add tests that one-ply projection output never uses safety/quality language
+- tests for one-ply and agent-authored opponent-reply projection semantics
+
+Remaining work:
+
 - add prompt regression tests that tactical safety claims require evidence or explicit uncertainty
 
 ### 2. Threat Blindness
@@ -144,18 +152,18 @@ Observed behavior:
 The model misses immediate captures and opponent replies because current tools do not expose neutral threat facts.
 ```
 
-Current state:
+Implemented state:
 
 - the agent can see board state
 - the agent can list legal moves for the current side
 - the agent can project self-authored lines
-- the agent does not get a direct list of opponent legal captures or attacked pieces
+- `StrictRefereeThreatAware` exposes a direct neutral list of opponent legal captures and attacked agent pieces
 
 Impact:
 
 The agent must infer threats from board geometry. That is exactly where LLMs are unreliable.
 
-Required next tool:
+Implemented tool:
 
 ```text
 chess.inspect_attacks
@@ -229,19 +237,19 @@ Tests:
 - does not expose score, best move, tactic labels, recommendation, or ranking
 - active strict tool surface contains `inspect_attacks` only when the chosen surface mode allows threat perception
 
-Open design question:
+Resolved design question:
 
 Should `inspect_attacks` be part of `StrictRefereeProjected` by default, or a separate `StrictRefereeThreatAware` surface level?
 
-Recommendation:
+Decision:
 
-Add it behind a new surface level first:
+It is behind a new surface level first:
 
 ```text
 StrictRefereeThreatAware
 ```
 
-Then compare runs against `StrictRefereeProjected`.
+The heuristic and agent-opponent standard-start scenarios now use the threat-aware surface; `standard_start_random` remains a projected baseline.
 
 ### 3. Material Awareness Is Too Late
 
@@ -374,10 +382,14 @@ If the board is terminal and winner != agentColor:
   stopReason = TerminalLoss
 ```
 
+Implemented hardening:
+
+- terminal loss/draw can fail via ChessQuest completion evaluation with `TerminalLoss` / `TerminalDraw`
+- ChessQuest CLI runs opt into post-batch completion evaluation so terminal game truth can stop before further refinement
+- orchestration acceptance rejects terminal non-agent wins before trying to refine
+
 Remaining work:
 
-- make terminal loss sovereign in ChessQuest active run and orchestration acceptance
-- do not let planner refinement continue after terminal loss
 - do not allow max refinement/budget exhaustion to mask terminal game truth
 
 Tests:

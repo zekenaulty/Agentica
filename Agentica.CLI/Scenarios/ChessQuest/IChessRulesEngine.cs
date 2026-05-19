@@ -19,4 +19,6 @@ public interface IChessRulesEngine
     ChessMoveResult TryPlayMove(string uciMove);
 
     ChessLineProjection ProjectLine(ChessLineProjectionRequest request);
+
+    ChessAttackInspection InspectAttacks(ChessQuestColor agentColor);
 }

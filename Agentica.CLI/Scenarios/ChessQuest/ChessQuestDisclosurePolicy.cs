@@ -12,7 +12,8 @@ public sealed record ChessQuestDisclosurePolicy(
     bool AllowLineProjection,
     int MaxProjectedLinesPerTurn,
     int MaxProjectedPliesPerLine,
-    bool IncludeProjectionCaptures)
+    bool IncludeProjectionCaptures,
+    bool AllowAttackInspection)
 {
     public static ChessQuestDisclosurePolicy StrictRefereeHard { get; } = new(
         Mode: ChessQuestMode.StrictRefereeHard,
@@ -26,7 +27,8 @@ public sealed record ChessQuestDisclosurePolicy(
         AllowLineProjection: false,
         MaxProjectedLinesPerTurn: 0,
         MaxProjectedPliesPerLine: 0,
-        IncludeProjectionCaptures: false);
+        IncludeProjectionCaptures: false,
+        AllowAttackInspection: false);
 
     public static ChessQuestDisclosurePolicy StrictRefereeProjected { get; } = new(
         Mode: ChessQuestMode.StrictRefereeProjected,
@@ -40,5 +42,21 @@ public sealed record ChessQuestDisclosurePolicy(
         AllowLineProjection: true,
         MaxProjectedLinesPerTurn: 3,
         MaxProjectedPliesPerLine: 4,
-        IncludeProjectionCaptures: true);
+        IncludeProjectionCaptures: true,
+        AllowAttackInspection: false);
+
+    public static ChessQuestDisclosurePolicy StrictRefereeThreatAware { get; } = new(
+        Mode: ChessQuestMode.StrictRefereeThreatAware,
+        IncludeSan: false,
+        IncludeCurrentCheckStatus: true,
+        IncludeHostCandidateConsequences: false,
+        IncludeMaterialCounts: false,
+        IncludeTacticalLabels: false,
+        IncludeEngineEvaluation: false,
+        IncludeHiddenObjectiveHints: false,
+        AllowLineProjection: true,
+        MaxProjectedLinesPerTurn: 4,
+        MaxProjectedPliesPerLine: 6,
+        IncludeProjectionCaptures: true,
+        AllowAttackInspection: true);
 }

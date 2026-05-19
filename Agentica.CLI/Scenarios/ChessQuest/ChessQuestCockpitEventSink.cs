@@ -109,12 +109,31 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
             case ChessQuestToolIds.ProjectLine:
                 PrintProjection(turn);
                 break;
+            case ChessQuestToolIds.InspectAttacks:
+                PrintAttackInspection(turn);
+                break;
             case ChessQuestToolIds.PlayMove:
                 PrintMoveTurn(turn);
                 break;
             case ChessQuestToolIds.CompleteObjective:
                 PrintCompletion(turn);
                 break;
+        }
+    }
+
+    private static void PrintAttackInspection(ChessQuestToolTurn turn)
+    {
+        if (!turn.Result.Receipt.Data.TryGetValue("inspection", out var value) ||
+            value is not ChessAttackInspection inspection)
+        {
+            return;
+        }
+
+        Console.WriteLine(
+            $"[attacks] opponent legal captures={inspection.OpponentLegalCaptures.Count}; capturable agent pieces={inspection.AttackedAgentPieces.Count}; agentKingInCheck={inspection.AgentKingInCheck}");
+        foreach (var attacked in inspection.AttackedAgentPieces.Take(8))
+        {
+            Console.WriteLine($"  - {attacked.Piece} on {attacked.Square}: {string.Join(", ", attacked.CaptureMoves)}");
         }
     }
 
@@ -508,6 +527,11 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
         if (!envelope.AgentMoveAccepted)
         {
             return $"Outcome: move refused; reason: {Compact(envelope.ReceiptMessage)}";
+        }
+
+        if (envelope.Terminal)
+        {
+            return $"Outcome: move accepted; game is terminal ({envelope.TerminalResult ?? "terminal"}).";
         }
 
         return envelope.OpponentMoveApplied

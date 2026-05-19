@@ -5,5 +5,6 @@ public enum CompletionDecision
     Complete,
     Continue,
     Blocked,
-    Partial
+    Partial,
+    Failed
 }

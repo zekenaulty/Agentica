@@ -134,7 +134,7 @@ public static partial class ChessQuestGoalShapingPolicy
                 projection?.ClaimDiscipline,
                 DefaultClaimDiscipline(phase),
                 maxItems: 8)),
-            ToolSemantics: ToolSemantics,
+            ToolSemantics: ToolSemanticsFor(session),
             TurnIntentFields:
             [
                 "goal",
@@ -216,14 +216,23 @@ public static partial class ChessQuestGoalShapingPolicy
     public static bool HasAffirmativeMateClaim(string text) =>
         MateClaimPattern().IsMatch(text);
 
-    private static IReadOnlyDictionary<string, string> ToolSemantics =>
-        new Dictionary<string, string>(StringComparer.Ordinal)
+    private static IReadOnlyDictionary<string, string> ToolSemanticsFor(ChessQuestSession session)
+    {
+        var semantics = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["chess.list_legal_moves"] = "Returns legal affordances only. The order is not a ranking, and legal does not mean good or safe.",
             ["chess.project_line"] = "Projects an agent-authored line under public rules. It proves legality and resulting public board state only; it does not evaluate quality, safety, or best play.",
             ["chess.play_move"] = "Commits one selected move with public intent. Receipts prove mutation; public intent is a claim to audit, not proof.",
             ["chess.complete_objective"] = "Only the host verifier can prove the win objective."
         };
+
+        if (session.Scenario.DisclosurePolicy.AllowAttackInspection)
+        {
+            semantics["chess.inspect_attacks"] = "Returns opponent legal captures and capturable agent pieces from the current placement. It does not score, choose, or prove a response is safe.";
+        }
+
+        return semantics;
+    }
 
     private static IReadOnlyList<string> DefaultActiveObjectives(
         string phase,
@@ -752,9 +761,64 @@ public sealed class ChessQuestPhaseCompletionEvaluator : ICompletionEvaluator
             return CompletionEvaluation.Complete();
         }
 
+        var state = _session.CurrentState;
+        if (state.IsTerminal)
+        {
+            if (state.TerminalState?.Winner == _session.Scenario.AgentColor)
+            {
+                return CompletionEvaluation.Complete();
+            }
+
+            return state.TerminalState?.Winner is null
+                ? CompletionEvaluation.Failed(
+                    StopReason.TerminalDraw,
+                    "ChessQuest reached a terminal draw; draw is not success.")
+                : CompletionEvaluation.Failed(
+                    StopReason.TerminalLoss,
+                    "ChessQuest reached a terminal loss for the agent.");
+        }
+
         return _phaseTracker.IsPhaseComplete(_session)
             ? CompletionEvaluation.Complete()
             : CompletionEvaluation.Continue("ChessQuest phase boundary has not been reached.");
+    }
+}
+
+public sealed class ChessQuestCompletionEvaluator : ICompletionEvaluator
+{
+    private readonly ChessQuestSession _session;
+
+    public ChessQuestCompletionEvaluator(ChessQuestSession session)
+    {
+        _session = session;
+    }
+
+    public CompletionEvaluation Evaluate(AgenticaRun run)
+    {
+        if (run.Artifacts.Any(artifact =>
+                string.Equals(artifact.Kind, "chessquest.objective_completed", StringComparison.Ordinal)))
+        {
+            return CompletionEvaluation.Complete();
+        }
+
+        var state = _session.CurrentState;
+        if (!state.IsTerminal)
+        {
+            return CompletionEvaluation.Continue("ChessQuest objective has not been verified.");
+        }
+
+        if (state.TerminalState?.Winner == _session.Scenario.AgentColor)
+        {
+            return CompletionEvaluation.Continue("ChessQuest terminal win reached; complete_objective must emit the verifier artifact.");
+        }
+
+        return state.TerminalState?.Winner is null
+            ? CompletionEvaluation.Failed(
+                StopReason.TerminalDraw,
+                "ChessQuest reached a terminal draw; draw is not success.")
+            : CompletionEvaluation.Failed(
+                StopReason.TerminalLoss,
+                "ChessQuest reached a terminal loss for the agent.");
     }
 }
 
@@ -787,9 +851,13 @@ public sealed class ChessQuestPhaseOutcomeReporter : IOutcomeReporter
         }
 
         var report = _phaseTracker.BuildReport(_session);
+        var terminalFailure = _session.CurrentState.IsTerminal &&
+            _session.CurrentState.TerminalState?.Winner != _session.Scenario.AgentColor;
         return new OutcomeReport(
             ReportId: Agentica.AgenticaIds.New("report"),
-            Summary: status == RunOutcomeStatus.Succeeded
+            Summary: terminalFailure
+                ? $"The ChessQuest phase '{report.Phase}' ended in terminal non-win state '{_session.CurrentState.TerminalState?.Result ?? "draw"}'."
+                : status == RunOutcomeStatus.Succeeded
                 ? $"The ChessQuest phase '{report.Phase}' stopped at boundary '{report.StopReason}' after {report.AgentTurnsPlayed} agent turn(s)."
                 : $"The ChessQuest phase '{report.Phase}' stopped with status {status}. Stop reason: {stopReason}.",
             Claims:

@@ -52,7 +52,7 @@ public sealed class ChessQuestBoard : IChessQuestBoard
             Objective: "Win the game as White from the standard starting position. Draw is not success.",
             Description: "A longer benchmark-style session against a pure managed heuristic opponent.",
             Difficulty: "Open",
-            Surface: "StrictRefereeProjected",
+            Surface: "StrictRefereeThreatAware",
             Opponent: "heuristic-club",
             EstimatedSteps: 120),
         new(
@@ -61,7 +61,7 @@ public sealed class ChessQuestBoard : IChessQuestBoard
             Objective: "Win the game as White from the standard starting position. Draw is not success.",
             Description: "A benchmark-style session where a second bounded Agentica planner chooses the opponent replies.",
             Difficulty: "Open",
-            Surface: "StrictRefereeProjected",
+            Surface: "StrictRefereeThreatAware",
             Opponent: "agent-opponent",
             EstimatedSteps: 80)
     ];
@@ -92,7 +92,7 @@ public sealed class ChessQuestBoard : IChessQuestBoard
                     Opponent: descriptor.Opponent),
                 DisclosurePolicy: ChessQuestDisclosurePolicy.StrictRefereeProjected,
                 HiddenSolutionLine: ["d8h4"]),
-            "standard_start_random" or "standard_start_heuristic" or "standard_start_agent" => new ChessQuestScenario(
+            "standard_start_random" => new ChessQuestScenario(
                 ScenarioId: descriptor.ScenarioId,
                 Title: descriptor.Title,
                 InitialFen: StandardStartFen,
@@ -104,6 +104,18 @@ public sealed class ChessQuestBoard : IChessQuestBoard
                     Surface: "strict_projected",
                     Opponent: descriptor.Opponent),
                 DisclosurePolicy: ChessQuestDisclosurePolicy.StrictRefereeProjected),
+            "standard_start_heuristic" or "standard_start_agent" => new ChessQuestScenario(
+                ScenarioId: descriptor.ScenarioId,
+                Title: descriptor.Title,
+                InitialFen: StandardStartFen,
+                AgentColor: ChessQuestColor.White,
+                ObjectiveKind: ChessQuestObjectiveKind.WinGame,
+                PublicObjective: descriptor.Objective,
+                Difficulty: new ChessQuestDifficulty(
+                    Scenario: descriptor.Difficulty.ToLowerInvariant(),
+                    Surface: "strict_threat_aware",
+                    Opponent: descriptor.Opponent),
+                DisclosurePolicy: ChessQuestDisclosurePolicy.StrictRefereeThreatAware),
             _ => throw new InvalidOperationException($"ChessQuest scenario '{scenarioId}' is not implemented.")
         };
     }

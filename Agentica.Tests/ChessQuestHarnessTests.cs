@@ -100,9 +100,36 @@ public sealed class ChessQuestHarnessTests
         Assert.Null(projection.RejectedAt);
         Assert.True(projection.ReadOnly);
         Assert.True(projection.SessionFenUnchanged);
+        Assert.True(projection.LegalProjectionOnly);
+        Assert.False(projection.MoveQualityKnown);
+        Assert.False(projection.SafetyKnown);
+        Assert.False(projection.OpponentReplyModeled);
         Assert.Equal(ChessQuestColor.Black, projection.SideToMoveAfter);
         Assert.Contains("without generating any opponent reply", projection.Note, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("e7e5", projection.AcceptedPrefix);
+    }
+
+    [Fact]
+    public async Task ChessQuest_project_line_marks_agent_authored_opponent_reply_when_supplied()
+    {
+        var session = CreateSession(opponentMoves: ["c7c5"]);
+
+        var result = await InvokeAsync(
+            session,
+            ChessQuestToolIds.ProjectLine,
+            new Dictionary<string, object?>
+            {
+                ["line"] = new[] { "e2e4", "e7e5" },
+                ["maxPlies"] = 4
+            });
+
+        var projection = Assert.IsType<ChessLineProjection>(result.Receipt.Data["projection"]);
+        Assert.Equal(["e2e4", "e7e5"], projection.AcceptedPrefix);
+        Assert.True(projection.LegalProjectionOnly);
+        Assert.False(projection.MoveQualityKnown);
+        Assert.False(projection.SafetyKnown);
+        Assert.True(projection.OpponentReplyModeled);
+        Assert.Equal(StartFen, session.CurrentState.Fen);
     }
 
     [Fact]
@@ -192,6 +219,49 @@ public sealed class ChessQuestHarnessTests
         Assert.True(projection.ClaimVerification["checkmate"]);
         Assert.True(projection.Terminal);
         Assert.Equal(ChessQuestColor.Black, projection.TerminalState?.Winner);
+    }
+
+    [Fact]
+    public void ChessQuest_threat_aware_surface_registers_neutral_attack_inspection()
+    {
+        var session = CreateSession(policy: ChessQuestDisclosurePolicy.StrictRefereeThreatAware);
+        var catalog = ChessQuestTools.CreateCatalog(session);
+        var context = ChessQuestCapabilitySurfaceCompiler.BuildPlannerContext(session);
+        var protocol = Assert.IsType<ChessQuestDecisionProtocol>(context["decisionProtocol"]);
+
+        Assert.Contains(catalog.Descriptors, descriptor => descriptor.ToolId == ChessQuestToolIds.InspectAttacks);
+        Assert.Contains(protocol.ToolSemantics, pair => pair.Key == ChessQuestToolIds.InspectAttacks);
+
+        var harness = ChessQuestCapabilitySurfaceCompiler.BuildHarnessContext(session);
+        Assert.Contains(ChessQuestToolIds.InspectAttacks, harness.ContextSurfaceReceipt.ExposedToolIds);
+        Assert.Equal(true, harness.ActiveCapabilitySurface.TurnContract["attackInspectionAllowed"]);
+    }
+
+    [Fact]
+    public async Task ChessQuest_inspect_attacks_returns_public_opponent_captures_without_guidance()
+    {
+        const string attackedBishopFen = "4k3/ppb5/8/8/5B2/8/PP6/4K3 w - - 0 1";
+        var session = CreateSession(
+            fen: attackedBishopFen,
+            policy: ChessQuestDisclosurePolicy.StrictRefereeThreatAware);
+
+        var result = await InvokeAsync(session, ChessQuestToolIds.InspectAttacks, new Dictionary<string, object?>());
+
+        Assert.Equal(ReceiptStatus.Succeeded, result.Receipt.Status);
+        Assert.Equal(attackedBishopFen, session.CurrentState.Fen);
+        var inspection = Assert.IsType<ChessAttackInspection>(result.Receipt.Data["inspection"]);
+        Assert.True(inspection.ReadOnly);
+        Assert.False(inspection.EvaluationIncluded);
+        Assert.False(inspection.GuidanceIncluded);
+        Assert.Contains(inspection.OpponentLegalCaptures, capture =>
+            capture.Move == "c7f4" &&
+            capture.From == "c7" &&
+            capture.To == "f4" &&
+            capture.CapturedPiece == "white_bishop");
+        var attacked = Assert.Single(inspection.AttackedAgentPieces);
+        Assert.Equal("f4", attacked.Square);
+        Assert.Equal("white_bishop", attacked.Piece);
+        Assert.Contains("c7f4", attacked.CaptureMoves);
     }
 
     [Fact]
@@ -835,6 +905,35 @@ public sealed class ChessQuestHarnessTests
     }
 
     [Fact]
+    public void ChessQuest_completion_evaluator_fails_terminal_loss_without_more_refinement()
+    {
+        var session = CreateSession(
+            fen: FoolsMateBlackToMoveFen,
+            agentColor: ChessQuestColor.White,
+            opponentMoves: []);
+        session.ReplayCommittedPlies(
+        [
+            new ChessQuestRecordedPly(
+                Ply: 1,
+                Move: "d8h4",
+                Color: ChessQuestColor.Black,
+                Source: "opponent",
+                FenBefore: FoolsMateBlackToMoveFen,
+                FenAfter: string.Empty,
+                At: DateTimeOffset.UtcNow)
+        ]);
+
+        var evaluation = new ChessQuestCompletionEvaluator(session).Evaluate(
+            new Agentica.Runs.AgenticaRun(
+                "run_test",
+                new RunRequest("Win as White.", RequestOrigin.User, new Dictionary<string, object?>())));
+
+        Assert.Equal(CompletionDecision.Failed, evaluation.Decision);
+        Assert.Equal(StopReason.TerminalLoss, evaluation.StopReason);
+        Assert.Contains(evaluation.Blockers, blocker => blocker.Contains("terminal loss", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task ChessQuest_runner_uses_planning_frame_and_public_execution_intent()
     {
         var session = CreateSession(opponentMoves: ["e7e5"]);
@@ -968,8 +1067,10 @@ public sealed class ChessQuestHarnessTests
         string fen = StartFen,
         ChessQuestColor agentColor = ChessQuestColor.White,
         IReadOnlyList<string>? opponentMoves = null,
-        IReadOnlyList<string>? hiddenSolutionLine = null)
+        IReadOnlyList<string>? hiddenSolutionLine = null,
+        ChessQuestDisclosurePolicy? policy = null)
     {
+        policy ??= ChessQuestDisclosurePolicy.StrictRefereeProjected;
         var scenario = new ChessQuestScenario(
             ScenarioId: "chessquest_test",
             Title: "ChessQuest Test",
@@ -979,9 +1080,9 @@ public sealed class ChessQuestHarnessTests
             PublicObjective: $"Win the game as {agentColor}. Draw is not success.",
             Difficulty: new ChessQuestDifficulty(
                 Scenario: "test",
-                Surface: "strict_projected",
+                Surface: policy.Mode.ToString(),
                 Opponent: "scripted"),
-            DisclosurePolicy: ChessQuestDisclosurePolicy.StrictRefereeProjected,
+            DisclosurePolicy: policy,
             HiddenSolutionLine: hiddenSolutionLine);
 
         return new ChessQuestSession(

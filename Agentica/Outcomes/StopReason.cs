@@ -15,6 +15,8 @@ public enum StopReason
     RefinementLimitReached,
     WaitingForApproval,
     Partial,
+    TerminalLoss,
+    TerminalDraw,
     Cancelled,
     Timeout
 }

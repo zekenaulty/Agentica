@@ -45,6 +45,16 @@ public static class ChessQuestTools
                         Example: new[] { "check", "checkmate" }))));
         }
 
+        if (session.Scenario.DisclosurePolicy.AllowAttackInspection)
+        {
+            registrations.Add(Register(
+                ChessQuestToolIds.InspectAttacks,
+                "ChessQuest Inspect Attacks",
+                ToolKind.Query,
+                ToolEffect.ReadOnly,
+                dispatcher));
+        }
+
         registrations.Add(Register(
             ChessQuestToolIds.PlayMove,
             "ChessQuest Play Move",
@@ -109,6 +119,7 @@ public static class ChessQuestTools
             ChessQuestToolIds.RenderBoard => "Returns a plain ASCII board render for spatial inspection of the current public position.",
             ChessQuestToolIds.ListLegalMoves => "Returns current legal UCI moves plus legalMoveObservationId. Legal means playable under chess rules only; the order is not a ranking and legality does not imply safety, quality, or recommendation.",
             ChessQuestToolIds.ProjectLine => "Projects an agent-authored UCI line under public chess rules. It validates legality and resulting board state only; it does not rank moves, prove safety, evaluate quality, or generate opponent replies.",
+            ChessQuestToolIds.InspectAttacks => "Returns neutral public attack facts: opponent legal captures from the current placement and agent pieces currently capturable. It does not score, choose, or attach quality labels.",
             ChessQuestToolIds.PlayMove => "Commits one selected legal agent UCI move with public intent, then applies one host-controlled opponent move when non-terminal. Public intent should separate evidence, hypothesis, risk, and verified facts.",
             ChessQuestToolIds.CompleteObjective => "Checks whether the current terminal board state satisfies the ChessQuest objective and emits the completion artifact only when verified.",
             _ => "ChessQuest tool."
@@ -197,6 +208,29 @@ public static class ChessQuestTools
             {
                 UseWhen = "The planner has self-authored candidate moves or a line and needs deterministic rule projection.",
                 NotEnoughWhen = "The planner wants the host to select moves, rank choices, prove safety, or evaluate move quality; this surface never does that."
+            },
+            ChessQuestToolIds.InspectAttacks => new ToolContextHint(
+                Produces: "read-only opponent legal captures and capturable agent pieces from the current placement, without scoring or move selection",
+                Complements:
+                [
+                    ChessQuestToolIds.RenderBoard,
+                    ChessQuestToolIds.ListLegalMoves,
+                    ChessQuestToolIds.ProjectLine
+                ],
+                CanBatchWith:
+                [
+                    ChessQuestToolIds.GetState,
+                    ChessQuestToolIds.RenderBoard,
+                    ChessQuestToolIds.ListLegalMoves
+                ],
+                ShouldPrecede:
+                [
+                    ChessQuestToolIds.ProjectLine,
+                    ChessQuestToolIds.PlayMove
+                ])
+            {
+                UseWhen = "The planner needs public attack/capture facts before making safety or material claims.",
+                NotEnoughWhen = "The planner wants scoring, ordering by quality, a chosen move, or a proof that a move is safe."
             },
             ChessQuestToolIds.PlayMove => new ToolContextHint(
                 Produces: "committed agent move, committed opponent reply when applicable, updated public board state, receipt evidence, and the agent's public decision declaration",

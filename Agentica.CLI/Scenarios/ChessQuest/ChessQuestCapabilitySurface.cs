@@ -311,6 +311,25 @@ public static class ChessQuestCapabilitySurfaceCompiler
                 "Line projection is disabled for this surface mode.");
         }
 
+        if (session.Scenario.DisclosurePolicy.AllowAttackInspection)
+        {
+            yield return new ChessQuestCapabilityBinding(
+                "inspect_public_attacks",
+                "Inspect public attack facts",
+                ChessQuestCapabilityBindingState.Available,
+                "Opponent legal captures are public facts without scoring or move selection.",
+                ChessQuestToolIds.InspectAttacks,
+                Priority: 65);
+        }
+        else
+        {
+            yield return new ChessQuestCapabilityBinding(
+                "inspect_public_attacks",
+                "Inspect public attack facts",
+                ChessQuestCapabilityBindingState.Hidden,
+                "Attack inspection is not exposed for this surface mode.");
+        }
+
         yield return new ChessQuestCapabilityBinding(
             "play_agent_move",
             "Play one legal agent move",
@@ -330,28 +349,43 @@ public static class ChessQuestCapabilitySurfaceCompiler
 
     }
 
-    private static IReadOnlyDictionary<string, object?> TurnContract(ChessQuestSession session) =>
-        new Dictionary<string, object?>(StringComparer.Ordinal)
+    private static IReadOnlyDictionary<string, object?> TurnContract(ChessQuestSession session)
+    {
+        var allowed = new List<string>
+        {
+            "inspect public state",
+            "render board",
+            "list legal moves"
+        };
+        if (session.Scenario.DisclosurePolicy.AllowAttackInspection)
+        {
+            allowed.Add("inspect public attack facts");
+        }
+
+        if (session.Scenario.DisclosurePolicy.AllowLineProjection)
+        {
+            allowed.Add("project self-authored hypothetical lines");
+        }
+
+        allowed.Add("play one legal move");
+        allowed.Add("check completion");
+
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["mustUseUci"] = true,
-            ["allowedNextActions"] = new[]
-            {
-                "inspect public state",
-                "render board",
-                "list legal moves",
-                "project self-authored hypothetical lines",
-                "play one legal move",
-                "check completion"
-            },
+            ["allowedNextActions"] = allowed.ToArray(),
             ["hostCandidateConsequencesHidden"] = true,
             ["agentAuthoredLineProjectionAllowed"] = session.Scenario.DisclosurePolicy.AllowLineProjection,
+            ["attackInspectionAllowed"] = session.Scenario.DisclosurePolicy.AllowAttackInspection,
             ["lineProjectionDoesNotGenerateOpponentMoves"] = true,
+            ["attackInspectionDoesNotChooseMoves"] = true,
             ["nonPublicOracleDataHidden"] = true,
             ["opponentPolicyHidden"] = true,
             ["hiddenObjectiveHintsHidden"] = true,
             ["maxProjectedLinesPerTurn"] = session.Scenario.DisclosurePolicy.MaxProjectedLinesPerTurn,
             ["maxProjectedPliesPerLine"] = session.Scenario.DisclosurePolicy.MaxProjectedPliesPerLine
         };
+    }
 
     private static IReadOnlyList<string> AntiLeakRules =>
     [

@@ -18,4 +18,7 @@ public sealed record CompletionEvaluation(
 
     public static CompletionEvaluation Partial(params string[] blockers) =>
         new(CompletionDecision.Partial, StopReason.Partial, blockers);
+
+    public static CompletionEvaluation Failed(StopReason stopReason, params string[] blockers) =>
+        new(CompletionDecision.Failed, stopReason, blockers);
 }

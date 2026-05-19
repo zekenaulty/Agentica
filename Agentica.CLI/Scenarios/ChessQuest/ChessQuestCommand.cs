@@ -264,7 +264,8 @@ internal static class ChessQuestCommand
                     PlanningMode: PlanningMode.QueryAndBlockerDriven,
                     MaxPlanContinuations: options.MaxPlanContinuations,
                     PlanningContext: new PlanningContextOptions(MaxRecentObservations: 12, MaxRecentReceipts: 12),
-                    MaxBlockedRetries: options.MaxBlockedRetries),
+                    MaxBlockedRetries: options.MaxBlockedRetries,
+                    EvaluateCompletionAfterEachBatch: true),
                 phaseCompleted),
             new ChessQuestTaskAcceptanceEvaluator(state, options.MaxOrchestrationRuns),
             new DeterministicWorkContextCompiler(),
@@ -486,9 +487,10 @@ internal static class ChessQuestCommand
                 PlanningMode: effectivePlanningMode,
                 MaxPlanContinuations: options.MaxPlanContinuations,
                 PlanningContext: new PlanningContextOptions(MaxRecentObservations: 12, MaxRecentReceipts: 12),
-                MaxBlockedRetries: options.MaxBlockedRetries),
+                MaxBlockedRetries: options.MaxBlockedRetries,
+                EvaluateCompletionAfterEachBatch: true),
             completionEvaluator: phaseTracker is null
-                ? EvidenceCompletionEvaluator.ForArtifactKind("chessquest.objective_completed")
+                ? new ChessQuestCompletionEvaluator(session)
                 : new ChessQuestPhaseCompletionEvaluator(session, phaseTracker),
             planningFrameProjector: new ChessQuestPlanningFrameProjector(session, phaseTracker));
 
@@ -782,6 +784,9 @@ internal static class ChessQuestCommand
         ChessQuestPhaseTracker? phaseTracker = null)
     {
         var doctrine = ChessQuestGoalShapingPolicy.StaticDoctrine;
+        var attackInspectionContract = scenario.DisclosurePolicy.AllowAttackInspection
+            ? "- You may use chess.inspect_attacks for neutral public opponent-capture facts. It does not score, choose, or prove a response is safe."
+            : string.Empty;
         var phaseContract = phaseTracker is null
             ? string.Empty
             : $"""
@@ -822,6 +827,7 @@ internal static class ChessQuestCommand
         - turnIntent should separate goal, evidence, hypothesis, riskCheck, claimLevel, and publicReason. Public intent is audit text, not proof.
         - If you selected the move from chess.list_legal_moves, pass that observation's legalMoveObservationId into chess.play_move. If the board changes or a move is refused as stale, refresh chess.list_legal_moves.
         - Before describing a move as check or checkmate, call chess.project_line for that exact move or line with claims ["check"] or ["checkmate"] and use the returned claimVerification.
+        {attackInspectionContract}
         - Do not describe a selected move as checkmate, a forced win, or objective completion unless a prior chess.project_line result or committed receipt has already verified that terminal state.
         - Do not describe a move as safe, winning, material-gaining, forced, or decisive unless your evidence/riskCheck explains what was verified and what remains unmodeled.
         - Legal does not mean safe. One-ply project_line does not prove safety or move quality.
@@ -994,7 +1000,8 @@ internal static class ChessQuestCommand
         Console.WriteLine(ChessQuestRenderer.RenderBoardFromFen(scenario.InitialFen));
         Console.WriteLine();
         Console.WriteLine("Tool surface:");
-        Console.WriteLine("  chess.get_state, chess.render_board, chess.list_legal_moves, chess.project_line, chess.play_move, chess.complete_objective");
+        var previewSession = new ChessQuestSession(scenario, opponent: new ScriptedChessOpponent([], fallbackToFirstLegalMove: false));
+        Console.WriteLine($"  {string.Join(", ", ChessQuestTools.CreateCatalog(previewSession).Descriptors.Select(descriptor => descriptor.ToolId))}");
         Console.WriteLine();
         Console.WriteLine("Completion requires terminal board verification through chess.complete_objective.");
     }

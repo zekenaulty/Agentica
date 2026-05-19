@@ -53,6 +53,7 @@ public sealed class ChessQuestSession
             ChessQuestToolIds.RenderBoard => RenderBoard(invocation),
             ChessQuestToolIds.ListLegalMoves => ListLegalMoves(invocation),
             ChessQuestToolIds.ProjectLine => ProjectLine(invocation),
+            ChessQuestToolIds.InspectAttacks => InspectAttacks(invocation),
             ChessQuestToolIds.PlayMove => await PlayMoveAsync(invocation, cancellationToken).ConfigureAwait(false),
             ChessQuestToolIds.CompleteObjective => CompleteObjective(invocation),
             _ => Refused(invocation, "unknown_chess_tool", $"Unknown ChessQuest tool '{invocation.ToolId}'.")
@@ -174,12 +175,36 @@ public sealed class ChessQuestSession
         var data = Snapshot("project_line");
         data["projection"] = ProjectionPayload(projection);
         data["claimVerification"] = projection.ClaimVerification;
+        data["legalProjectionOnly"] = projection.LegalProjectionOnly;
+        data["moveQualityKnown"] = projection.MoveQualityKnown;
+        data["safetyKnown"] = projection.SafetyKnown;
+        data["opponentReplyModeled"] = projection.OpponentReplyModeled;
         data["projectedLinesThisTurn"] = _projectedLinesThisTurn;
         data["maxProjectedLinesPerTurn"] = Scenario.DisclosurePolicy.MaxProjectedLinesPerTurn;
         data["maxProjectedPliesPerLine"] = Scenario.DisclosurePolicy.MaxProjectedPliesPerLine;
 
         var receipt = Receipt(invocation, ReceiptStatus.Succeeded, "Agent-authored chess line projected.", data);
         return new ToolResult(receipt, Observation(invocation, receipt, "Agent-authored chess line projection observed.", data));
+    }
+
+    private ToolResult InspectAttacks(ToolInvocation invocation)
+    {
+        if (!Scenario.DisclosurePolicy.AllowAttackInspection)
+        {
+            return Refused(invocation, "attack_inspection_unavailable", "Attack inspection is not available for this ChessQuest surface.");
+        }
+
+        var inspection = _rules.InspectAttacks(Scenario.AgentColor);
+        var data = Snapshot("inspect_attacks");
+        data["inspection"] = inspection;
+        data["opponentLegalCaptures"] = inspection.OpponentLegalCaptures;
+        data["attackedAgentPieces"] = inspection.AttackedAgentPieces;
+        data["agentKingInCheck"] = inspection.AgentKingInCheck;
+        data["evaluationIncluded"] = inspection.EvaluationIncluded;
+        data["guidanceIncluded"] = inspection.GuidanceIncluded;
+
+        var receipt = Receipt(invocation, ReceiptStatus.Succeeded, "Public attack inspection returned.", data);
+        return new ToolResult(receipt, Observation(invocation, receipt, "Public attack inspection observed.", data));
     }
 
     private async Task<ToolResult> PlayMoveAsync(

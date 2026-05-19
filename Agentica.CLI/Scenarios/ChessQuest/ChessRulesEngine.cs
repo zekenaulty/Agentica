@@ -81,7 +81,7 @@ public sealed class GeraChessRulesEngine : IChessRulesEngine
         }
 
         var canonical = ToUci(legalMove);
-        var captures = CaptureFor(0, canonical, legalMove);
+        var captures = CaptureFor(0, canonical, legalMove, before);
         _board.Move(legalMove);
         _movesUci.Add(canonical);
 
@@ -148,6 +148,10 @@ public sealed class GeraChessRulesEngine : IChessRulesEngine
             RejectedAt: rejected,
             ReadOnly: true,
             SessionFenUnchanged: string.Equals(GetFen(), _board.ToFen(), StringComparison.Ordinal),
+            LegalProjectionOnly: true,
+            MoveQualityKnown: false,
+            SafetyKnown: false,
+            OpponentReplyModeled: accepted.Count >= 2,
             FenAfter: clone.GetFen(),
             BoardAfter: clone.RenderAsciiLines(),
             SideToMoveAfter: projectedState.SideToMove,
@@ -162,6 +166,76 @@ public sealed class GeraChessRulesEngine : IChessRulesEngine
                 lastAcceptedMoveGivesCheck,
                 lastAcceptedMoveGivesCheckmate),
             Note: note);
+    }
+
+    public ChessAttackInspection InspectAttacks(ChessQuestColor agentColor)
+    {
+        var opponentColor = Opposite(agentColor);
+        var inspectionFen = FenWithSideToMove(GetFen(), opponentColor);
+        var inspector = new GeraChessRulesEngine(inspectionFen);
+        var captures = new List<ChessPublicCapture>();
+
+        if (!inspector.GetState().IsTerminal)
+        {
+            foreach (var legalMove in inspector.ListLegalMoves())
+            {
+                var move = legalMove.Uci;
+                var clone = new GeraChessRulesEngine(inspectionFen);
+                var result = clone.TryPlayMove(move);
+                if (!result.Accepted)
+                {
+                    continue;
+                }
+
+                foreach (var capture in result.Captures)
+                {
+                    if (!PieceBelongsTo(capture.Piece, agentColor))
+                    {
+                        continue;
+                    }
+
+                    captures.Add(new ChessPublicCapture(
+                        Move: move,
+                        From: move[..2],
+                        To: move.Substring(2, 2),
+                        CapturedPiece: capture.Piece));
+                }
+            }
+        }
+
+        var attackedPieces = captures
+            .GroupBy(capture => (capture.To, capture.CapturedPiece))
+            .OrderBy(group => group.Key.To, StringComparer.Ordinal)
+            .ThenBy(group => group.Key.CapturedPiece, StringComparer.Ordinal)
+            .Select(group => new ChessAttackedPiece(
+                Square: group.Key.To,
+                Piece: group.Key.CapturedPiece,
+                Attackers: group
+                    .Select(capture => capture.From)
+                    .Distinct(StringComparer.Ordinal)
+                    .Order(StringComparer.Ordinal)
+                    .ToArray(),
+                CaptureMoves: group
+                    .Select(capture => capture.Move)
+                    .Distinct(StringComparer.Ordinal)
+                    .Order(StringComparer.Ordinal)
+                    .ToArray()))
+            .ToArray();
+
+        return new ChessAttackInspection(
+            Kind: "ChessAttackInspection",
+            AgentColor: agentColor,
+            OpponentColor: opponentColor,
+            SideToMove: GetState().SideToMove,
+            AgentKingInCheck: IsKingInCheck(agentColor),
+            OpponentLegalCaptures: captures
+                .OrderBy(capture => capture.Move, StringComparer.Ordinal)
+                .ToArray(),
+            AttackedAgentPieces: attackedPieces,
+            ReadOnly: true,
+            EvaluationIncluded: false,
+            GuidanceIncluded: false,
+            Note: "Neutral public attack inspection reports legal opponent captures from the current placement only; it does not choose moves or attach quality labels.");
     }
 
     private Move? FindLegalMove(string uciMove)
@@ -192,6 +266,26 @@ public sealed class GeraChessRulesEngine : IChessRulesEngine
         square.Length == 2 &&
         square[0] is >= 'a' and <= 'h' &&
         square[1] is >= '1' and <= '8';
+
+    private static ChessQuestColor Opposite(ChessQuestColor color) =>
+        color == ChessQuestColor.White ? ChessQuestColor.Black : ChessQuestColor.White;
+
+    private static bool PieceBelongsTo(string piece, ChessQuestColor color) =>
+        piece.StartsWith(
+            color.ToString().ToLowerInvariant() + "_",
+            StringComparison.Ordinal);
+
+    private static string FenWithSideToMove(string fen, ChessQuestColor sideToMove)
+    {
+        var parts = fen.Split(' ');
+        if (parts.Length < 2)
+        {
+            return fen;
+        }
+
+        parts[1] = sideToMove == ChessQuestColor.White ? "w" : "b";
+        return string.Join(' ', parts);
+    }
 
     private static IReadOnlyDictionary<string, bool> VerifyClaims(
         IReadOnlyList<string>? claims,
@@ -240,19 +334,72 @@ public sealed class GeraChessRulesEngine : IChessRulesEngine
     private static IReadOnlyList<ChessProjectedCapture> CaptureFor(
         int plyOffset,
         string uciMove,
-        Move move) =>
-        move.CapturedPiece is null
+        Move move,
+        string fen)
+    {
+        var capturedPiece = PieceNameAt(fen, uciMove.Substring(2, 2)) ??
+            (move.CapturedPiece is null ? null : PieceName(move.CapturedPiece));
+        return capturedPiece is null
             ? []
             :
             [
                 new ChessProjectedCapture(
                     plyOffset,
                     uciMove,
-                    PieceName(move.CapturedPiece))
+                    capturedPiece)
             ];
+    }
 
     private static string PieceName(Piece piece) =>
         $"{ToQuestColor(piece.Color).ToString().ToLowerInvariant()}_{piece.Type.ToString().ToLowerInvariant()}";
+
+    private static string? PieceNameAt(string fen, string square)
+    {
+        var board = fen.Split(' ', 2)[0];
+        var targetFile = square[0] - 'a';
+        var targetRank = square[1] - '1';
+        var rank = 7;
+        var file = 0;
+        foreach (var character in board)
+        {
+            switch (character)
+            {
+                case '/':
+                    rank--;
+                    file = 0;
+                    continue;
+                case >= '1' and <= '8':
+                    file += character - '0';
+                    continue;
+            }
+
+            if (file == targetFile && rank == targetRank)
+            {
+                return PieceName(character);
+            }
+
+            file++;
+        }
+
+        return null;
+    }
+
+    private static string PieceName(char piece)
+    {
+        var color = char.IsUpper(piece) ? ChessQuestColor.White : ChessQuestColor.Black;
+        var type = char.ToLowerInvariant(piece) switch
+        {
+            'p' => "pawn",
+            'n' => "knight",
+            'b' => "bishop",
+            'r' => "rook",
+            'q' => "queen",
+            'k' => "king",
+            _ => "piece"
+        };
+
+        return $"{color.ToString().ToLowerInvariant()}_{type}";
+    }
 
     private static ChessTerminalState? TerminalState(ChessBoard board)
     {
