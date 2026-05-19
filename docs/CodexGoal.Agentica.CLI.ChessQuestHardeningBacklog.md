@@ -612,6 +612,20 @@ Remaining work:
 6. Added `chessquest legal-action-probe`, which asks the model to produce a legal UCI move without receiving the legal move list and verifies it against the rules engine.
 7. Added `chessquest puzzle-probe`, starting with a single-answer mate-in-one probe verified by the rules engine.
 
+## Implemented 2026-05-19 Prompt Surface Pass
+
+1. Removed concrete move examples from legal-action and puzzle probe prompts.
+2. Replaced answer-shaped JSON examples with field contracts to avoid `e2e4`/answer anchoring.
+3. Added board-grounding instructions for actor probes:
+   - identify side to move
+   - locate pieces
+   - consider legal movement and check restrictions
+   - avoid default opening moves unless legal in the exact position
+4. Added puzzle-solver instructions that encourage solving toward the stated objective without revealing the accepted answer.
+5. Tightened coordinate-UCI requirements across probe prompts, gameplay objective text, opponent-agent objective text, and capability frame text.
+6. Removed concrete opening move examples from ChessQuest tool input schemas.
+7. Added probe/prompt regressions for no legal-list leak, no answer leak, no concrete move anchoring, and SAN/checkmate notation rejection.
+
 ## Recommended Next Implementation Order
 
 Do this order:

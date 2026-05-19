@@ -929,16 +929,18 @@ public sealed class ChessQuestLegalActionProbeRunner
 
         return
             $$"""
-            You are {{trial.SideToMove}} to move. Produce one legal chess move in UCI notation from the supplied current board.
+            You are {{trial.SideToMove}} to move. Choose one valid legal move from the supplied current board.
             You are not given the legal move list. The host will verify legality after your answer.
+            Ground the answer in the board: identify the side to move, locate that side's pieces, consider how those pieces legally move, and account for check restrictions.
+            Do not use a default opening move unless it is legal in this exact position.
+            The "move" value must be coordinate UCI only: origin square followed by destination square, plus a promotion letter only when promoting.
+            Do not use SAN, piece letters, capture markers, check symbols, or checkmate symbols.
             {{boardSection}}
             {{fenSection}}
 
-            Return JSON only:
-            {
-              "move": "e2e4",
-              "publicReason": "one short public reason"
-            }
+            Return JSON only with fields:
+            - move: one coordinate UCI move string
+            - publicReason: one short public reason grounded in the current board
             """;
     }
 
@@ -964,6 +966,11 @@ public sealed class ChessQuestLegalActionProbeRunner
         }
 
         var move = answer.Move.Trim().ToLowerInvariant();
+        if (!IsCoordinateUci(move))
+        {
+            return Failure(trial, rawResponse, $"invalid_uci_format: '{move}' is not coordinate UCI");
+        }
+
         var passed = trial.LegalMoves.Contains(move, StringComparer.Ordinal);
         return new ChessQuestLegalActionProbeTrialResult(
             TrialNumber: trial.TrialNumber,
@@ -987,8 +994,9 @@ public sealed class ChessQuestLegalActionProbeRunner
                     new LlmMessage(
                         LlmMessageRole.System,
                         """
-                        You are being tested as a chess actor. Choose one legal UCI move from public board state only.
-                        Do not ask for a legal move list. Do not output SAN. Return only the requested JSON object.
+                        You are being tested as a chess actor. Solve from the supplied public board state only.
+                        Choose one legal coordinate-UCI move for the side to move. Do not ask for or assume a legal move list.
+                        Read the current board instead of using opening-pattern defaults. Return only the requested JSON object.
                         """),
                     new LlmMessage(
                         LlmMessageRole.User,
@@ -1033,6 +1041,26 @@ public sealed class ChessQuestLegalActionProbeRunner
           "required": ["move"]
         }
         """;
+
+    internal static bool IsCoordinateUci(string move)
+    {
+        var normalized = move.Trim().ToLowerInvariant();
+        if (normalized.Length is not 4 and not 5)
+        {
+            return false;
+        }
+
+        if (normalized[0] is < 'a' or > 'h' ||
+            normalized[2] is < 'a' or > 'h' ||
+            normalized[1] is < '1' or > '8' ||
+            normalized[3] is < '1' or > '8')
+        {
+            return false;
+        }
+
+        return normalized.Length == 4 ||
+            normalized[4] is 'q' or 'r' or 'b' or 'n';
+    }
 }
 
 public sealed record ChessQuestPuzzleProbeTrial(
@@ -1144,14 +1172,17 @@ public sealed class ChessQuestPuzzleProbeRunner
             Role: {{trial.AgentColor}}
             Objective: {{trial.Objective}}
             There is exactly one accepted answer for this probe.
+            Solve the puzzle from the board state. Identify the moving side, candidate checking moves, the opponent king's legal escapes, captures, and blocks.
+            Return the best move that satisfies the objective, not a random legal move.
+            The "move" value must be coordinate UCI only: origin square followed by destination square, plus a promotion letter only when promoting.
+            Do not use SAN, piece letters, capture markers, check symbols, or checkmate symbols.
+            If you intend a queen, rook, bishop, knight, king, or pawn move, encode the origin and destination squares, not the piece name.
             {{boardSection}}
             {{fenSection}}
 
-            Return JSON only:
-            {
-              "move": "d8h4",
-              "publicReason": "one short public reason"
-            }
+            Return JSON only with fields:
+            - move: the single coordinate UCI move that solves the puzzle
+            - publicReason: one short public reason grounded in the current board
             """;
     }
 
@@ -1177,6 +1208,11 @@ public sealed class ChessQuestPuzzleProbeRunner
         }
 
         var move = answer.Move.Trim().ToLowerInvariant();
+        if (!ChessQuestLegalActionProbeRunner.IsCoordinateUci(move))
+        {
+            return Failure(trial, rawResponse, $"invalid_uci_format: '{move}' is not coordinate UCI");
+        }
+
         var rules = new GeraChessRulesEngine(trial.Fen);
         var legal = rules.ListLegalMoves().Any(legalMove => legalMove.Uci == move);
         var accepted = legal && trial.AcceptedMoves.Contains(move, StringComparer.Ordinal);
@@ -1210,8 +1246,8 @@ public sealed class ChessQuestPuzzleProbeRunner
                     new LlmMessage(
                         LlmMessageRole.System,
                         """
-                        You are being tested as a chess puzzle solver. Return one UCI move only through the requested JSON object.
-                        Use the supplied public board state. Do not output SAN or prose outside JSON.
+                        You are being tested as a chess puzzle solver. Use the supplied public board state to solve the stated objective.
+                        Return one coordinate-UCI move only through the requested JSON object. Do not output SAN or prose outside JSON.
                         """),
                     new LlmMessage(
                         LlmMessageRole.User,

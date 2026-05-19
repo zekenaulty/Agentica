@@ -132,7 +132,8 @@ public static class ChessQuestCapabilitySurfaceCompiler
         ChessQuest StrictRefereeProjected frame instructions:
         - Treat chessFrame.session as the authoritative public role, turn, goal, and difficulty context.
         - The agent always plays chessFrame.session.agentColor and must play for the stated win condition.
-        - Use UCI notation only for legal moves and submitted lines.
+        - Use coordinate UCI notation only for legal moves and submitted lines: origin square followed by destination square, plus a promotion letter only when promoting.
+        - Do not use SAN, piece letters, capture markers, check symbols, or checkmate symbols in move fields.
         - chess.project_line may be used only for self-authored hypothetical lines; it never chooses moves and never generates opponent replies.
         - chess.play_move requires a concise public turnIntent matching the selected move.
         - Strict gameplay requires chess.play_move to include the current chess.list_legal_moves legalMoveObservationId. Actor probes are the only bypass surface.

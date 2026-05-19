@@ -27,8 +27,7 @@ public static class ChessQuestTools
                         "line",
                         ToolInputValueType.Array,
                         Required: true,
-                        Description: "Agent-authored UCI line to project from the current public position. The host does not choose moves or generate replies.",
-                        Example: new[] { "g1f3", "g8f6" }),
+                        Description: "Agent-authored coordinate-UCI line to project from the current public position. The host does not choose moves or generate replies."),
                     new ToolInputField(
                         "maxPlies",
                         ToolInputValueType.Integer,
@@ -65,8 +64,7 @@ public static class ChessQuestTools
                 new ToolInputField(
                     "move",
                     Required: true,
-                    Description: "Exact UCI move selected by the agent from current legal moves or its public line projection.",
-                    Example: "g1f3"),
+                    Description: "Exact coordinate-UCI move selected by the agent from current legal moves or its public line projection. Use origin square plus destination square, with a promotion letter only when promoting."),
                 new ToolInputField(
                     "legalMoveObservationId",
                     Required: false,
@@ -76,20 +74,7 @@ public static class ChessQuestTools
                     "turnIntent",
                     ToolInputValueType.Object,
                     Required: true,
-                    Description: "Short public decision declaration. Must include selectedMove matching move and should separate goal, evidence, hypothesis, riskCheck, and claimLevel. Do not include hidden chain-of-thought or unverified checkmate/completion claims.",
-                    Example: new Dictionary<string, object?>
-                    {
-                        ["agentColor"] = "white",
-                        ["selectedMove"] = "g1f3",
-                        ["legalBasis"] = "selected_from_current_legal_move_list",
-                        ["goal"] = "Improve development while preserving king safety.",
-                        ["evidence"] = new[] { "g1f3 appeared in the current legal move list" },
-                        ["hypothesis"] = "The knight move may improve piece activity.",
-                        ["riskCheck"] = "Opponent replies are not fully modeled, so safety is unverified.",
-                        ["claimLevel"] = "hypothesis",
-                        ["publicReason"] = "Develop a knight without claiming it is fully safe.",
-                        ["completionClaim"] = false
-                    }))));
+                    Description: "Short public decision declaration. Must include selectedMove matching move and should separate goal, evidence, hypothesis, riskCheck, and claimLevel. Do not include hidden chain-of-thought or unverified checkmate/completion claims."))));
         registrations.Add(Register(ChessQuestToolIds.CompleteObjective, "ChessQuest Complete Objective", ToolKind.Action, ToolEffect.WritesLocalState, dispatcher));
 
         return ToolCatalog.Create(registrations.ToArray());

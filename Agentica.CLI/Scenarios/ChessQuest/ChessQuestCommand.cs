@@ -1016,7 +1016,8 @@ internal static class ChessQuestCommand
         {FormatObjectiveBullets(doctrine.GoodPlayCriteria)}
         - Evidence discipline:
         {FormatObjectiveBullets(doctrine.EvidenceDiscipline)}
-        - Use UCI notation only, for example e2e4, g1f3, or a7a8q.
+        - Use coordinate UCI notation only: origin square followed by destination square, plus a promotion letter only when promoting.
+        - Do not use SAN, piece letters, capture markers, check symbols, or checkmate symbols in move fields.
         - Use chess.get_state, chess.render_board, and chess.list_legal_moves to inspect current public state.
         - You may use chess.project_line only for hypothetical UCI lines you authored yourself. It is read-only, can verify submitted check/checkmate claims, and does not generate opponent replies.
         - Commit exactly one selected agent move with chess.play_move. Include a concise public turnIntent matching the selected move.

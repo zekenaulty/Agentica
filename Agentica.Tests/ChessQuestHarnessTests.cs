@@ -590,6 +590,10 @@ public sealed class ChessQuestHarnessTests
 
         var legalMoves = catalog.Descriptors.Single(descriptor => descriptor.ToolId == ChessQuestToolIds.ListLegalMoves);
         Assert.Contains("legality does not imply safety", legalMoves.Description, StringComparison.OrdinalIgnoreCase);
+
+        var descriptorJson = JsonSerializer.Serialize(catalog.Descriptors, JsonOptions());
+        Assert.DoesNotContain("g1f3", descriptorJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("e2e4", descriptorJson, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -979,11 +983,15 @@ public sealed class ChessQuestHarnessTests
 
         Assert.True(result.Passed);
         Assert.Contains("You are not given the legal move list", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Ground the answer in the board", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Do not use a default opening move", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("coordinate UCI", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Legal moves:", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("e2e4", prompt, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void ChessQuest_legal_action_probe_rejects_illegal_actor_move()
+    public void ChessQuest_legal_action_probe_rejects_non_uci_actor_move()
     {
         var trial = ChessQuestLegalActionProbeRunner.CreateTrial(
             seed: 5519,
@@ -993,11 +1001,11 @@ public sealed class ChessQuestHarnessTests
         var result = ChessQuestLegalActionProbeRunner.Validate(
             trial,
             JsonSerializer.Serialize(new ChessQuestMoveProbeAnswer(
-                "a1a8",
-                "Try an illegal move.")));
+                "Nf3",
+                "Try SAN notation.")));
 
         Assert.False(result.Passed);
-        Assert.Contains("illegal_move", result.FailureReason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("invalid_uci_format", result.FailureReason, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1012,6 +1020,40 @@ public sealed class ChessQuestHarnessTests
                 "Black checkmates White.")));
 
         Assert.True(result.Passed);
+    }
+
+    [Fact]
+    public void ChessQuest_puzzle_probe_prompt_does_not_reveal_accepted_answer()
+    {
+        var trial = ChessQuestPuzzleProbeRunner.BuiltInPuzzle();
+
+        var prompt = ChessQuestPuzzleProbeRunner.BuildPrompt(
+            trial,
+            ChessQuestBoardProbePresentation.Ascii);
+
+        Assert.Contains("Solve the puzzle from the board state", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Return the best move", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("candidate checking moves", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("coordinate UCI", prompt, StringComparison.OrdinalIgnoreCase);
+        foreach (var acceptedMove in trial.AcceptedMoves)
+        {
+            Assert.DoesNotContain(acceptedMove, prompt, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public void ChessQuest_puzzle_probe_flags_san_notation_as_invalid_uci()
+    {
+        var trial = ChessQuestPuzzleProbeRunner.BuiltInPuzzle();
+
+        var result = ChessQuestPuzzleProbeRunner.Validate(
+            trial,
+            JsonSerializer.Serialize(new ChessQuestMoveProbeAnswer(
+                "Qh4#",
+                "Black checkmates White.")));
+
+        Assert.False(result.Passed);
+        Assert.Contains("invalid_uci_format", result.FailureReason, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
