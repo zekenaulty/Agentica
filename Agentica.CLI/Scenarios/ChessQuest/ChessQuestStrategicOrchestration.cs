@@ -20,6 +20,9 @@ public sealed record ChessQuestPhaseTaskEnvelope(
     string TaskDirection,
     string PublicRationale,
     string PhaseGoal,
+    IReadOnlyList<string> ActiveObjectives,
+    IReadOnlyList<string> SuccessSignals,
+    IReadOnlyList<string> ClaimDiscipline,
     int MaxAgentTurns,
     IReadOnlyList<string> ReplanTriggers)
 {
@@ -40,6 +43,15 @@ public sealed record ChessQuestPhaseTaskEnvelope(
         var phaseGoal = ReadString(context, "chessquest.phaseGoal")
             ?? ReadString(context, "phaseGoal")
             ?? DefaultGoal(phase);
+        var activeObjectives = ReadStringList(context, "chessquest.activeObjectives")
+            ?? ReadStringList(context, "activeObjectives")
+            ?? DefaultObjectives(phase, phaseGoal);
+        var successSignals = ReadStringList(context, "chessquest.successSignals")
+            ?? ReadStringList(context, "successSignals")
+            ?? DefaultSuccessSignals(phase);
+        var claimDiscipline = ReadStringList(context, "chessquest.claimDiscipline")
+            ?? ReadStringList(context, "claimDiscipline")
+            ?? DefaultClaimDiscipline(phase);
         var maxAgentTurns = ReadInt(context, "chessquest.maxAgentTurns")
             ?? ReadInt(context, "maxAgentTurns")
             ?? defaultMaxAgentTurns;
@@ -49,12 +61,15 @@ public sealed record ChessQuestPhaseTaskEnvelope(
 
         return new ChessQuestPhaseTaskEnvelope(
             TaskKind: ReadString(context, "chessquest.taskKind") ?? "phase_run",
-            Phase: Normalize(phase),
-            TaskDirection: direction,
-            PublicRationale: rationale,
-            PhaseGoal: phaseGoal,
+            Phase: ChessQuestGoalShapingPolicy.SanitizePhase(phase),
+            TaskDirection: ChessQuestGoalShapingPolicy.SanitizeText(direction, DefaultDirection(phase)),
+            PublicRationale: ChessQuestGoalShapingPolicy.SanitizeText(rationale, $"Execute bounded {phase} phase task {taskNumber}."),
+            PhaseGoal: ChessQuestGoalShapingPolicy.SanitizeText(phaseGoal, DefaultGoal(phase)),
+            ActiveObjectives: ChessQuestGoalShapingPolicy.SanitizeList(activeObjectives, DefaultObjectives(phase, phaseGoal), maxItems: 6),
+            SuccessSignals: ChessQuestGoalShapingPolicy.SanitizeList(successSignals, DefaultSuccessSignals(phase), maxItems: 6),
+            ClaimDiscipline: ChessQuestGoalShapingPolicy.SanitizeList(claimDiscipline, DefaultClaimDiscipline(phase), maxItems: 8),
             MaxAgentTurns: Math.Max(1, maxAgentTurns),
-            ReplanTriggers: triggers);
+            ReplanTriggers: ChessQuestGoalShapingPolicy.SanitizeList(triggers, DefaultTriggers(), maxItems: 8));
     }
 
     public ChessQuestStrategyProjection ToProjection(ChessQuestSession session)
@@ -69,10 +84,11 @@ public sealed record ChessQuestPhaseTaskEnvelope(
                 $"Direction: {TaskDirection}",
                 "verify check and checkmate claims with chess.project_line"
             }
+            .Concat(ActiveObjectives)
             .Concat(fallback.ActiveObjectives)
             .Where(item => !string.IsNullOrWhiteSpace(item))
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(5)
+            .Take(6)
             .ToArray();
 
         return fallback with
@@ -84,12 +100,13 @@ public sealed record ChessQuestPhaseTaskEnvelope(
             StrategyIntent = PublicRationale,
             ActiveObjectives = objectives,
             StopTriggers = ReplanTriggers.Count == 0 ? fallback.StopTriggers : ReplanTriggers,
-            ProgressSignals =
-            [
-                "phase task produced at least one legal agent move or terminal state",
-                "phase report is compiled from receipts",
-                "strategy claims remain subordinate to chessFrame and legal receipts"
-            ]
+            ProgressSignals = SuccessSignals.Count == 0
+                ? fallback.ProgressSignals
+                : SuccessSignals,
+            VerificationRules = fallback.VerificationRules,
+            ClaimDiscipline = ClaimDiscipline.Count == 0
+                ? fallback.ClaimDiscipline
+                : ClaimDiscipline
         };
     }
 
@@ -109,6 +126,92 @@ public sealed record ChessQuestPhaseTaskEnvelope(
             "endgame" or "conversion" => "Convert toward a win while preserving material and avoiding draw outcomes.",
             "defense" or "recovery" => "Stabilize the position, resolve immediate threats, and avoid unsupported claims.",
             _ => "Develop pieces, contest the center, improve king safety, and avoid immediate material loss."
+        };
+
+    private static IReadOnlyList<string> DefaultObjectives(
+        string phase,
+        string phaseGoal) =>
+        Normalize(phase) switch
+        {
+            "tactical" =>
+            [
+                phaseGoal,
+                "model opponent replies before safety claims",
+                "avoid unsupported material or forcing claims"
+            ],
+            "defense" or "recovery" =>
+            [
+                phaseGoal,
+                "preserve king safety",
+                "avoid further material loss",
+                "seek counterplay only after checking public consequences"
+            ],
+            "endgame" or "conversion" =>
+            [
+                phaseGoal,
+                "simplify only when advantage or stability is real",
+                "avoid draw outcomes",
+                "verify terminal claims"
+            ],
+            _ =>
+            [
+                phaseGoal,
+                "develop pieces",
+                "contest central squares",
+                "improve king safety"
+            ]
+        };
+
+    private static IReadOnlyList<string> DefaultSuccessSignals(string phase) =>
+        Normalize(phase) switch
+        {
+            "tactical" =>
+            [
+                "opponent replies are modeled before safety claims",
+                "material or terminal claims are evidence-backed",
+                "phase does not worsen material balance"
+            ],
+            "defense" or "recovery" =>
+            [
+                "king is not in check after opponent reply",
+                "material balance does not worsen",
+                "immediate threats are reduced or acknowledged"
+            ],
+            "endgame" or "conversion" =>
+            [
+                "conversion condition is evidence-backed",
+                "simplification does not worsen the position",
+                "terminal claims are verifier-backed"
+            ],
+            _ =>
+            [
+                "legal move committed",
+                "king safety improves or remains stable",
+                "piece activity improves without unsupported claims"
+            ]
+        };
+
+    private static IReadOnlyList<string> DefaultClaimDiscipline(string phase) =>
+        Normalize(phase) switch
+        {
+            "tactical" =>
+            [
+                "treat tactical ideas as hypotheses until opponent replies are modeled",
+                "legal projection does not prove safety",
+                "material claims require projected line or receipt evidence"
+            ],
+            "endgame" or "conversion" =>
+            [
+                "do not select conversion/endgame framing merely because ply is high",
+                "conversion claims require real material, positional, promotion, or terminal evidence",
+                "do not claim simplification helps unless evidence supports it"
+            ],
+            _ =>
+            [
+                "state what is verified, hypothesized, and unmodeled",
+                "legal does not mean safe",
+                "do not claim checkmate unless terminal state is verified"
+            ]
         };
 
     private static IReadOnlyList<string> DefaultTriggers() =>
@@ -283,12 +386,17 @@ public sealed class ChessQuestPhaseRunExecutor : IRunExecutor
         Console.WriteLine($"Direction: {envelope.TaskDirection}");
         Console.WriteLine($"Rationale: {envelope.PublicRationale}");
         Console.WriteLine($"Envelope: phase={envelope.Phase} maxAgentTurns={envelope.MaxAgentTurns}");
+        PrintList("Objectives", envelope.ActiveObjectives);
+        PrintList("Success signals", envelope.SuccessSignals);
+        PrintList("Claim discipline", envelope.ClaimDiscipline);
 
         var phaseTracker = ChessQuestPhaseTracker.Create(
             _state.Session,
             envelope.Phase,
             envelope.MaxAgentTurns,
-            projection);
+            projection,
+            envelope.PhaseGoal,
+            envelope.ReplanTriggers);
         var runContext = new Dictionary<string, object?>(requestContext, StringComparer.Ordinal);
         foreach (var pair in ChessQuestCapabilitySurfaceCompiler.BuildPlannerContext(_state.Session, phaseTracker))
         {
@@ -334,7 +442,10 @@ public sealed class ChessQuestPhaseRunExecutor : IRunExecutor
     private static string BuildPhaseObjective(
         string taskObjective,
         ChessQuestPhaseTaskEnvelope task,
-        ChessQuestStrategyProjection projection) =>
+        ChessQuestStrategyProjection projection)
+    {
+        var doctrine = ChessQuestGoalShapingPolicy.StaticDoctrine;
+        return
         $"""
         {taskObjective}
 
@@ -346,12 +457,48 @@ public sealed class ChessQuestPhaseRunExecutor : IRunExecutor
         - Max agent turns: {task.MaxAgentTurns}
         - Strategy projection: {projection.StrategyName}
         - Strategy intent: {projection.StrategyIntent}
+        - Active objectives:
+        {FormatBulletBlock(task.ActiveObjectives)}
+        - Success signals:
+        {FormatBulletBlock(task.SuccessSignals)}
+        - Claim discipline:
+        {FormatBulletBlock(task.ClaimDiscipline)}
+
+        Playing doctrine:
+        - {doctrine.Summary}
+        - Good play criteria:
+        {FormatBulletBlock(doctrine.GoodPlayCriteria)}
+        - Evidence discipline:
+        {FormatBulletBlock(doctrine.EvidenceDiscipline)}
 
         Active run contract:
         - You choose legal chess moves through the ChessQuest strict referee tools.
         - The orchestration tier chose this phase envelope; it did not choose a move.
         - Board truth, legal receipts, and chess.project_line verification override strategy claims.
+        - Legal moves are affordances only; legal does not mean good or safe.
+        - A one-ply chess.project_line result proves only the submitted move's public-rule projection.
+        - chess.play_move turnIntent should include goal, evidence, hypothesis, riskCheck, claimLevel, and publicReason.
         """;
+    }
+
+    private static string FormatBulletBlock(IReadOnlyList<string> values) =>
+        values.Count == 0
+            ? "  - none"
+            : string.Join(Environment.NewLine, values.Select(value => $"  - {value}"));
+
+    private static void PrintList(string label, IReadOnlyList<string> values)
+    {
+        if (values.Count == 0)
+        {
+            return;
+        }
+
+        Console.WriteLine($"{label}:");
+        foreach (var value in values)
+        {
+            Console.WriteLine($"  - {value}");
+        }
+    }
 
     private static OutcomeEnvelope AppendPhaseReportArtifact(
         OutcomeEnvelope outcome,
@@ -515,6 +662,9 @@ public sealed class ChessQuestDeterministicTaskPlanner : ITaskPlanner
                 ["chessquest.taskDirection"] = direction,
                 ["chessquest.publicRationale"] = rationale,
                 ["chessquest.phaseGoal"] = PhaseGoal(phase),
+                ["chessquest.activeObjectives"] = PhaseObjectives(phase),
+                ["chessquest.successSignals"] = PhaseSuccessSignals(phase),
+                ["chessquest.claimDiscipline"] = PhaseClaimDiscipline(phase),
                 ["chessquest.maxAgentTurns"] = _maxAgentTurns,
                 ["chessquest.replanTriggers"] = new[]
                 {
@@ -555,6 +705,87 @@ public sealed class ChessQuestDeterministicTaskPlanner : ITaskPlanner
             "conversion" => "Convert a material or positional advantage toward a win while avoiding draw outcomes.",
             "defense" => "Stabilize the position, preserve the king, and recover from material or tactical pressure.",
             _ => "Develop pieces, contest central squares, improve king safety, and avoid immediate material loss."
+        };
+
+    private static string[] PhaseObjectives(string phase) =>
+        phase switch
+        {
+            "tactical" =>
+            [
+                "verify candidate tactics with public projections",
+                "model opponent replies before claiming safety",
+                "avoid material loss without compensation"
+            ],
+            "conversion" =>
+            [
+                "convert advantage only when evidence supports advantage",
+                "preserve material",
+                "avoid draw outcomes"
+            ],
+            "defense" =>
+            [
+                "preserve king safety",
+                "avoid further material loss",
+                "seek counterplay only after checking public consequences"
+            ],
+            _ =>
+            [
+                "develop pieces",
+                "contest central squares",
+                "improve king safety"
+            ]
+        };
+
+    private static string[] PhaseSuccessSignals(string phase) =>
+        phase switch
+        {
+            "tactical" =>
+            [
+                "opponent replies are modeled before safety claims",
+                "material or terminal claims are evidence-backed",
+                "phase does not worsen material balance"
+            ],
+            "defense" =>
+            [
+                "king is not in check after opponent reply",
+                "material balance does not worsen",
+                "immediate threats are reduced or acknowledged"
+            ],
+            "conversion" =>
+            [
+                "conversion condition is evidence-backed",
+                "simplification does not worsen the position",
+                "terminal claims are verifier-backed"
+            ],
+            _ =>
+            [
+                "legal move committed",
+                "king safety improves or remains stable",
+                "piece activity improves without unsupported claims"
+            ]
+        };
+
+    private static string[] PhaseClaimDiscipline(string phase) =>
+        phase switch
+        {
+            "tactical" =>
+            [
+                "legal projection does not prove safety",
+                "material claims require projected line or receipt evidence",
+                "treat tactical ideas as hypotheses until opponent replies are modeled"
+            ],
+            "conversion" =>
+            [
+                "conversion claims require real material, positional, promotion, or terminal evidence",
+                "do not claim simplification helps unless evidence supports it",
+                "do not claim checkmate unless terminal state is verified"
+            ],
+            _ =>
+            [
+                "state what is verified, hypothesized, and unmodeled",
+                "legal does not mean safe",
+                "do not claim checkmate unless terminal state is verified"
+            ]
         };
 
     private static bool TryBool(
@@ -661,12 +892,46 @@ public sealed class ChessQuestConsoleTaskPlanner : ITaskPlanner
         {
             Console.WriteLine($"  Rationale: {rationale}");
         }
+
+        PrintTaskList(task, "Objectives", "chessquest.activeObjectives");
+        PrintTaskList(task, "Success", "chessquest.successSignals");
+        PrintTaskList(task, "Claim discipline", "chessquest.claimDiscipline");
     }
 
     private static string? Read(TaskNode task, string key) =>
         task.ContextProjection.TryGetValue(key, out var value)
             ? value?.ToString()
             : null;
+
+    private static void PrintTaskList(TaskNode task, string label, string key)
+    {
+        if (!task.ContextProjection.TryGetValue(key, out var value) || value is null)
+        {
+            return;
+        }
+
+        var items = value switch
+        {
+            IEnumerable<string> strings => strings.ToArray(),
+            IEnumerable<object> objects => objects
+                .Select(item => item?.ToString())
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Select(item => item!)
+                .ToArray(),
+            _ => []
+        };
+
+        if (items.Length == 0)
+        {
+            return;
+        }
+
+        Console.WriteLine($"  {label}:");
+        foreach (var item in items)
+        {
+            Console.WriteLine($"    - {item}");
+        }
+    }
 
     private static async Task<T> RunWithFallbackAsync<T>(
         Func<Task<T>> action,

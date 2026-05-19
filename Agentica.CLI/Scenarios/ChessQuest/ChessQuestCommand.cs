@@ -616,6 +616,8 @@ internal static class ChessQuestCommand
         - Initial plan should contain exactly one non-optional phase_run task.
         - Refinement may add exactly one next phase_run task when a receipt-backed phase report shows the game is nonterminal and more phase budget remains.
         - Strategy frames shape public intent only. chessFrame, legal move receipts, and objective verifier outputs are authoritative.
+        - Goal content should come from orchestration. Host guardrails only define the grammar: role invariants, legal evidence types, forbidden claim patterns, and terminal verification.
+        - Do not include move-level direction such as concrete UCI moves, square-specific attacks, opening lines, or hidden solution lines in the phase envelope.
 
         Required phase task contextProjection keys:
         - chessquest.taskKind = "phase_run"
@@ -623,6 +625,9 @@ internal static class ChessQuestCommand
         - chessquest.taskDirection = short public strategic direction
         - chessquest.publicRationale = concise evidence-based rationale from public context
         - chessquest.phaseGoal = bounded goal for the active runner
+        - chessquest.activeObjectives = 2-5 public objectives for this phase
+        - chessquest.successSignals = 2-5 observable signals the active runner should try to produce
+        - chessquest.claimDiscipline = 2-5 evidence/claim rules for this phase
         - chessquest.maxAgentTurns = integer from 1 to {Math.Max(1, options.PhaseMaxAgentTurns)}
         - chessquest.replanTriggers = public stop/replan triggers
 
@@ -653,6 +658,17 @@ internal static class ChessQuestCommand
             },
             ["chessquest.orchestration.allowedTaskKind"] = "phase_run",
             ["chessquest.orchestration.acceptanceArtifactKind"] = "chessquest.phase_report",
+            ["chessquest.playingDoctrine"] = ChessQuestGoalShapingPolicy.StaticDoctrine,
+            ["chessquest.orchestration.goalOwnership"] =
+                "The orchestration planner owns phase choice, phase goal, active objectives, success signals, rationale, and claim discipline. The host owns guardrails and sanitization.",
+            ["chessquest.orchestration.forbiddenMoveLevelGuidance"] = new[]
+            {
+                "concrete UCI moves",
+                "square-specific tactics",
+                "opening lines",
+                "best move hints",
+                "hidden solution lines"
+            },
             ["chessquest.orchestration.requiredContextProjectionKeys"] = new[]
             {
                 "chessquest.taskKind",
@@ -660,6 +676,9 @@ internal static class ChessQuestCommand
                 "chessquest.taskDirection",
                 "chessquest.publicRationale",
                 "chessquest.phaseGoal",
+                "chessquest.activeObjectives",
+                "chessquest.successSignals",
+                "chessquest.claimDiscipline",
                 "chessquest.maxAgentTurns",
                 "chessquest.replanTriggers"
             },
@@ -762,6 +781,7 @@ internal static class ChessQuestCommand
         ChessQuestScenario scenario,
         ChessQuestPhaseTracker? phaseTracker = null)
     {
+        var doctrine = ChessQuestGoalShapingPolicy.StaticDoctrine;
         var phaseContract = phaseTracker is null
             ? string.Empty
             : $"""
@@ -773,6 +793,12 @@ internal static class ChessQuestCommand
         - Strategy: {phaseTracker.Context.StrategyFrame.StrategyName}
         - Strategy intent: {phaseTracker.Context.StrategyFrame.StrategyIntent}
         - Phase budget: {phaseTracker.Context.PhaseObjective.MaxAgentTurns} agent turn(s).
+        - Active objectives:
+        {FormatObjectiveBullets(phaseTracker.Context.StrategyFrame.ActiveObjectives)}
+        - Stop/replan triggers:
+        {FormatObjectiveBullets(phaseTracker.Context.PhaseObjective.StopTriggers)}
+        - Claim discipline:
+        {FormatObjectiveBullets(phaseTracker.Context.StrategyProjection?.ClaimDiscipline ?? [])}
         - Advance the phase when legal, but if phase guidance conflicts with chessFrame board truth, legal moves and receipts win.
         """;
 
@@ -784,19 +810,32 @@ internal static class ChessQuestCommand
         Planner contract:
         - You are playing {scenario.AgentColor}. The opponent is the other color.
         - Win is required. Draw and loss do not satisfy the objective.
+        - Playing doctrine: {doctrine.Summary}
+        - Good play means:
+        {FormatObjectiveBullets(doctrine.GoodPlayCriteria)}
+        - Evidence discipline:
+        {FormatObjectiveBullets(doctrine.EvidenceDiscipline)}
         - Use UCI notation only, for example e2e4, g1f3, or a7a8q.
         - Use chess.get_state, chess.render_board, and chess.list_legal_moves to inspect current public state.
         - You may use chess.project_line only for hypothetical UCI lines you authored yourself. It is read-only, can verify submitted check/checkmate claims, and does not generate opponent replies.
         - Commit exactly one selected agent move with chess.play_move. Include a concise public turnIntent matching the selected move.
+        - turnIntent should separate goal, evidence, hypothesis, riskCheck, claimLevel, and publicReason. Public intent is audit text, not proof.
         - If you selected the move from chess.list_legal_moves, pass that observation's legalMoveObservationId into chess.play_move. If the board changes or a move is refused as stale, refresh chess.list_legal_moves.
         - Before describing a move as check or checkmate, call chess.project_line for that exact move or line with claims ["check"] or ["checkmate"] and use the returned claimVerification.
         - Do not describe a selected move as checkmate, a forced win, or objective completion unless a prior chess.project_line result or committed receipt has already verified that terminal state.
+        - Do not describe a move as safe, winning, material-gaining, forced, or decisive unless your evidence/riskCheck explains what was verified and what remains unmodeled.
+        - Legal does not mean safe. One-ply project_line does not prove safety or move quality.
         - chess.play_move applies the host-controlled opponent reply after your accepted move unless the game is terminal.
         - Do not claim completion unless chess.complete_objective emits chessquest.objective_completed.
         - The strict surface does not provide move rankings, scores, tactical labels, or opponent policy details.
         {phaseContract}
         """;
     }
+
+    private static string FormatObjectiveBullets(IReadOnlyList<string> values) =>
+        values.Count == 0
+            ? "        - none"
+            : string.Join(Environment.NewLine, values.Select(value => $"        - {value}"));
 
     private static IChessOpponent CreateOpponent(
         ChessQuestScenario scenario,
@@ -1039,6 +1078,12 @@ internal static class ChessQuestCommand
 
         Console.WriteLine("Verification Rules:");
         foreach (var rule in projection.VerificationRules)
+        {
+            Console.WriteLine($"  - {rule}");
+        }
+
+        Console.WriteLine("Claim Discipline:");
+        foreach (var rule in projection.ClaimDiscipline)
         {
             Console.WriteLine($"  - {rule}");
         }

@@ -177,6 +177,11 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
         var turnIntent = ReadDictionary(turn.Invocation.Input, "turnIntent") ??
             ReadDictionary(data, "turnIntent");
         var publicReason = ReadString(turnIntent, "publicReason");
+        var turnGoal = ReadString(turnIntent, "goal");
+        var turnEvidence = ReadStringList(turnIntent, "evidence");
+        var turnHypothesis = ReadString(turnIntent, "hypothesis");
+        var turnRiskCheck = ReadString(turnIntent, "riskCheck");
+        var turnClaimLevel = ReadString(turnIntent, "claimLevel");
         var selectedMove = ReadString(data, "agentMove") ??
             ReadString(data, "requestedMove") ??
             ReadString(turn.Invocation.Input, "move") ??
@@ -221,8 +226,15 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
             CommittedAgentTurnNumber = agentMoveAccepted
                 ? _session.CommittedPlies.Count(ply => string.Equals(ply.Source, "agent", StringComparison.Ordinal))
                 : null,
+            TurnGoal = turnGoal,
+            TurnEvidence = turnEvidence,
+            TurnHypothesis = turnHypothesis,
+            TurnRiskCheck = turnRiskCheck,
+            TurnClaimLevel = turnClaimLevel,
             Warnings = BuildWarnings(
                 intent,
+                turnIntent,
+                _pendingProjections,
                 publicReason,
                 completionClaim,
                 agentMoveGivesCheck,
@@ -282,6 +294,35 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
         if (!string.IsNullOrWhiteSpace(envelope.TurnPublicReason))
         {
             Console.WriteLine($"Public reason: {Compact(envelope.TurnPublicReason)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(envelope.TurnGoal))
+        {
+            Console.WriteLine($"Turn goal: {Compact(envelope.TurnGoal)}");
+        }
+
+        if (envelope.TurnEvidence.Count > 0)
+        {
+            Console.WriteLine("Evidence declared:");
+            foreach (var evidence in envelope.TurnEvidence)
+            {
+                Console.WriteLine($"  - {Compact(evidence)}");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(envelope.TurnHypothesis))
+        {
+            Console.WriteLine($"Hypothesis: {Compact(envelope.TurnHypothesis)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(envelope.TurnRiskCheck))
+        {
+            Console.WriteLine($"Risk check: {Compact(envelope.TurnRiskCheck)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(envelope.TurnClaimLevel))
+        {
+            Console.WriteLine($"Claim level: {Compact(envelope.TurnClaimLevel)}");
         }
 
         foreach (var warning in envelope.Warnings)
@@ -359,10 +400,10 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
         source is not null && ReadBool(source, key);
 
     private static IReadOnlyList<string> ReadStringList(
-        IReadOnlyDictionary<string, object?> source,
+        IReadOnlyDictionary<string, object?>? source,
         string key)
     {
-        if (!source.TryGetValue(key, out var value) || value is null)
+        if (source is null || !source.TryGetValue(key, out var value) || value is null)
         {
             return [];
         }
@@ -397,6 +438,8 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
 
     private static IReadOnlyList<string> BuildWarnings(
         ExecutionIntent? intent,
+        IReadOnlyDictionary<string, object?>? turnIntent,
+        IReadOnlyList<ChessQuestProjectedLineSummary> projections,
         string? publicReason,
         bool completionClaim,
         bool agentMoveGivesCheck,
@@ -413,8 +456,15 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
                 intent?.Action,
                 intent?.Rationale,
                 intent?.ExpectedOutcome,
+                ReadString(turnIntent, "goal"),
+                ReadString(turnIntent, "hypothesis"),
+                ReadString(turnIntent, "riskCheck"),
+                ReadString(turnIntent, "claimLevel"),
                 publicReason
             }.Where(item => !string.IsNullOrWhiteSpace(item)));
+        var riskCheck = ReadString(turnIntent, "riskCheck");
+        var claimLevel = ReadString(turnIntent, "claimLevel");
+        var evidence = ReadStringList(turnIntent, "evidence");
 
         if (!agentMoveAccepted)
         {
@@ -423,7 +473,7 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
                 : "selected move was refused; verify board state before retrying.");
         }
 
-        if (MentionsMate(declaredText) && !agentMoveGivesCheckmate)
+        if (ChessQuestGoalShapingPolicy.HasAffirmativeMateClaim(declaredText) && !agentMoveGivesCheckmate)
         {
             warnings.Add("declared mate/checkmate, but the committed agent move was not checkmate.");
         }
@@ -435,6 +485,19 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
         if (completionClaim && !terminal)
         {
             warnings.Add("turnIntent.completionClaim was true, but the committed result is not terminal.");
+        }
+
+        if (ChessQuestGoalShapingPolicy.HasRiskyClaimLanguage(declaredText) &&
+            !HasAdequateClaimDiscipline(evidence, riskCheck, claimLevel))
+        {
+            warnings.Add("intent uses strong claim language without enough public evidence/risk discipline.");
+        }
+
+        if (HasSafetyClaim(declaredText) &&
+            !HasModeledOpponentReply(projections) &&
+            !AdmitsUnmodeledRisk(riskCheck))
+        {
+            warnings.Add("safety claim is unsupported: legal moves and one-ply projections do not prove safety.");
         }
 
         return warnings;
@@ -452,13 +515,48 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
             : "Outcome: move accepted; no opponent reply applied.";
     }
 
-    private static bool MentionsMate(string text) =>
-        !string.IsNullOrWhiteSpace(text) &&
-        Regex.IsMatch(text, @"\b(checkmate|checkmating|mate|mating)\b", RegexOptions.IgnoreCase);
-
     private static bool MentionsCheck(string text) =>
         !string.IsNullOrWhiteSpace(text) &&
-        Regex.IsMatch(text, @"\b(check|checks|checking|checked)\b", RegexOptions.IgnoreCase);
+        Regex.IsMatch(
+            text,
+            @"\b(?:give|gives|giving|deliver|delivers|delivering)\s+check\b|\bcheck(?:s|ing)?\s+the\s+king\b|\bwith\s+check\b|\bis\s+check\b",
+            RegexOptions.IgnoreCase);
+
+    private static bool HasSafetyClaim(string text) =>
+        !string.IsNullOrWhiteSpace(text) &&
+        Regex.IsMatch(text, @"\b(?:safe|safety|secure|harmless|no risk)\b", RegexOptions.IgnoreCase);
+
+    private static bool HasAdequateClaimDiscipline(
+        IReadOnlyList<string> evidence,
+        string? riskCheck,
+        string? claimLevel)
+    {
+        if (evidence.Count == 0)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(riskCheck) &&
+            !string.IsNullOrWhiteSpace(claimLevel))
+        {
+            return true;
+        }
+
+        return evidence.Any(item =>
+            item.Contains("project", StringComparison.OrdinalIgnoreCase) ||
+            item.Contains("receipt", StringComparison.OrdinalIgnoreCase) ||
+            item.Contains("legal", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool HasModeledOpponentReply(IReadOnlyList<ChessQuestProjectedLineSummary> projections) =>
+        projections.Any(projection => projection.AcceptedPrefix.Count >= 2);
+
+    private static bool AdmitsUnmodeledRisk(string? riskCheck) =>
+        !string.IsNullOrWhiteSpace(riskCheck) &&
+        (riskCheck.Contains("unverified", StringComparison.OrdinalIgnoreCase) ||
+         riskCheck.Contains("not modeled", StringComparison.OrdinalIgnoreCase) ||
+         riskCheck.Contains("unmodeled", StringComparison.OrdinalIgnoreCase) ||
+         riskCheck.Contains("not fully modeled", StringComparison.OrdinalIgnoreCase));
 
     private static string? Data(ExecutionEvent executionEvent, string key) =>
         executionEvent.Data.TryGetValue(key, out var value) ? value : null;

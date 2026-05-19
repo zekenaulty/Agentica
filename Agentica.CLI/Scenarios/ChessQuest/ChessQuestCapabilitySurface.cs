@@ -66,7 +66,9 @@ public sealed record ChessQuestPlanningFrame(
     DateTimeOffset CreatedAt,
     ChessQuestSessionContext Session,
     IReadOnlyDictionary<string, object?> Board,
-    IReadOnlyDictionary<string, object?> TurnContract);
+    IReadOnlyDictionary<string, object?> TurnContract,
+    ChessQuestPlayingDoctrine PlayingDoctrine,
+    ChessQuestDecisionProtocol DecisionProtocol);
 
 public sealed class ChessQuestPlanningFrameProjector : IPlanningFrameProjector
 {
@@ -83,7 +85,7 @@ public sealed class ChessQuestPlanningFrameProjector : IPlanningFrameProjector
 
     public IReadOnlyList<PlanningFrame> Project(PlanningFrameProjectionRequest request)
     {
-        var frame = ChessQuestCapabilitySurfaceCompiler.BuildPlanningFrame(_session);
+        var frame = ChessQuestCapabilitySurfaceCompiler.BuildPlanningFrame(_session, _phaseTracker);
         var harnessContext = ChessQuestCapabilitySurfaceCompiler.BuildHarnessContext(_session);
 
         return
@@ -100,6 +102,8 @@ public sealed class ChessQuestPlanningFrameProjector : IPlanningFrameProjector
                     ["strategyFrame"] = _phaseTracker?.Snapshot(_session).StrategyFrame,
                     ["phaseObjective"] = _phaseTracker?.Snapshot(_session).PhaseObjective,
                     ["phaseProgress"] = _phaseTracker?.Snapshot(_session).Progress,
+                    ["playingDoctrine"] = frame.PlayingDoctrine,
+                    ["decisionProtocol"] = frame.DecisionProtocol,
                     ["agenticHarness"] = harnessContext,
                     ["activeCapabilitySurface"] = harnessContext.ActiveCapabilitySurface,
                     ["contextSurfaceReceipt"] = harnessContext.ContextSurfaceReceipt,
@@ -133,6 +137,9 @@ public static class ChessQuestCapabilitySurfaceCompiler
         - chess.play_move requires a concise public turnIntent matching the selected move.
         - If the move was selected from chess.list_legal_moves, include that result's legalMoveObservationId in chess.play_move.
         - Do not claim completion unless chess.complete_objective emits chessquest.objective_completed.
+        - Use chessFrame.decisionProtocol as the current operating grammar for goals, claim discipline, evidence, and risk checks.
+        - A legal move is not necessarily good or safe. A one-ply project_line result does not prove tactical safety or move quality.
+        - Prefer turnIntent fields goal, evidence, hypothesis, riskCheck, and claimLevel when making a move.
         - If strategyProjection, strategyFrame, and phaseObjective are present, treat them as public strategic guidance, not board truth.
         - If strategyProjection, strategyFrame, or phaseObjective conflicts with chessFrame, prefer chessFrame and legal tool receipts.
         """;
@@ -154,7 +161,9 @@ public static class ChessQuestCapabilitySurfaceCompiler
         new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             [ContextKey] = BuildHarnessContext(session),
-            ["chessFrame"] = BuildPlanningFrame(session),
+            ["chessFrame"] = BuildPlanningFrame(session, phaseTracker),
+            ["playingDoctrine"] = ChessQuestGoalShapingPolicy.StaticDoctrine,
+            ["decisionProtocol"] = ChessQuestGoalShapingPolicy.BuildDecisionProtocol(session, phaseTracker),
             ["strategyProjection"] = phaseTracker?.Snapshot(session).StrategyProjection,
             ["strategyFrame"] = phaseTracker?.Snapshot(session).StrategyFrame,
             ["phaseObjective"] = phaseTracker?.Snapshot(session).PhaseObjective,
@@ -237,9 +246,12 @@ public static class ChessQuestCapabilitySurfaceCompiler
             ContextSurfaceReceipt: receipt);
     }
 
-    public static ChessQuestPlanningFrame BuildPlanningFrame(ChessQuestSession session)
+    public static ChessQuestPlanningFrame BuildPlanningFrame(
+        ChessQuestSession session,
+        ChessQuestPhaseTracker? phaseTracker = null)
     {
         var state = session.CurrentState;
+        var decisionProtocol = ChessQuestGoalShapingPolicy.BuildDecisionProtocol(session, phaseTracker);
         return new ChessQuestPlanningFrame(
             Kind: "ChessQuestPlanningFrame",
             Version: "1.0",
@@ -252,7 +264,9 @@ public static class ChessQuestCapabilitySurfaceCompiler
                 ["sideToMoveInCheck"] = !state.IsTerminal && session.IsSideToMoveInCheck(),
                 ["recentMovesUci"] = state.RecentMovesUci
             },
-            TurnContract: TurnContract(session));
+            TurnContract: TurnContract(session),
+            PlayingDoctrine: decisionProtocol.PlayingDoctrine,
+            DecisionProtocol: decisionProtocol);
     }
 
     private static IEnumerable<ChessQuestCapabilityBinding> BuildBindings(ChessQuestSession session)

@@ -98,6 +98,11 @@ public sealed class ChessQuestDeterministicPlanner : IWorkflowPlanner
                 ["agentColor"] = agentColor,
                 ["selectedMove"] = move,
                 ["legalBasis"] = "selected_from_current_legal_move_list",
+                ["goal"] = "Commit one legal move while preserving the win objective.",
+                ["evidence"] = new[] { $"{move} is the deterministic candidate from the current legal move surface." },
+                ["hypothesis"] = "The move advances the deterministic harness slice without asserting move quality.",
+                ["riskCheck"] = "Opponent replies are not fully modeled, so safety is unverified.",
+                ["claimLevel"] = "hypothesis",
                 ["publicReason"] = "Use a legal move from the strict referee surface and keep playing for a win.",
                 ["completionClaim"] = false
             }));

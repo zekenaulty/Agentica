@@ -130,7 +130,8 @@ public sealed class ChessQuestStrategyProjectionRunner
               "activeObjectives": ["2-5 public phase objectives"],
               "stopTriggers": ["2-6 stop or replan triggers"],
               "progressSignals": ["2-5 observable progress signals"],
-              "verificationRules": ["2-5 rules that keep chess truth with the referee/tools"]
+              "verificationRules": ["2-5 rules that keep chess truth with the referee/tools"],
+              "claimDiscipline": ["2-5 rules for what the active runner may claim before acting"]
             }
 
             Constraints:
@@ -138,6 +139,7 @@ public sealed class ChessQuestStrategyProjectionRunner
             - Do not rank moves.
             - Do not include engine scores or best lines.
             - Do not assert checkmate or forced wins.
+            - Legal does not mean safe; one-ply projection does not prove move quality.
             - Include a verification rule requiring chess.project_line before check/checkmate claims.
             """;
     }
@@ -195,7 +197,15 @@ public sealed class ChessQuestStrategyProjectionRunner
                     "legal move receipts override strategy claims",
                     "use chess.project_line to verify check and checkmate claims"
                 ],
-                maxItems: 5)));
+                maxItems: 5)),
+            ClaimDiscipline: ChessQuestGoalShapingPolicy.SanitizeList(
+                contract.ClaimDiscipline,
+                [
+                    "state what is verified, what is hypothesized, and what remains unmodeled",
+                    "legal does not mean safe",
+                    "one-ply projection does not prove tactical safety"
+                ],
+                maxItems: 8));
     }
 
     private static IReadOnlyList<string> EnsureProjectionVerificationRules(IReadOnlyList<string> rules)
@@ -221,7 +231,7 @@ public sealed class ChessQuestStrategyProjectionRunner
         int maxItems)
     {
         var cleaned = (values ?? [])
-            .Select(value => Clean(value, string.Empty))
+            .Select(value => ChessQuestGoalShapingPolicy.SanitizeText(value, string.Empty))
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(maxItems)
@@ -237,7 +247,7 @@ public sealed class ChessQuestStrategyProjectionRunner
             return fallback;
         }
 
-        return value.Trim().ReplaceLineEndings(" ");
+        return ChessQuestGoalShapingPolicy.SanitizeText(value, fallback);
     }
 
     private static string ExtractJson(string rawResponse)
@@ -280,7 +290,8 @@ public sealed class ChessQuestStrategyProjectionRunner
         IReadOnlyList<string>? ActiveObjectives,
         IReadOnlyList<string>? StopTriggers,
         IReadOnlyList<string>? ProgressSignals,
-        IReadOnlyList<string>? VerificationRules);
+        IReadOnlyList<string>? VerificationRules,
+        IReadOnlyList<string>? ClaimDiscipline);
 
     private const string ProjectionJsonSchema =
         """
@@ -319,6 +330,12 @@ public sealed class ChessQuestStrategyProjectionRunner
               "items": {
                 "type": "string"
               }
+            },
+            "claimDiscipline": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "required": [
@@ -328,7 +345,8 @@ public sealed class ChessQuestStrategyProjectionRunner
             "activeObjectives",
             "stopTriggers",
             "progressSignals",
-            "verificationRules"
+            "verificationRules",
+            "claimDiscipline"
           ]
         }
         """;

@@ -66,13 +66,18 @@ public static class ChessQuestTools
                     "turnIntent",
                     ToolInputValueType.Object,
                     Required: true,
-                    Description: "Short public decision declaration. Must include selectedMove matching move; do not include hidden chain-of-thought or unverified checkmate/completion claims.",
+                    Description: "Short public decision declaration. Must include selectedMove matching move and should separate goal, evidence, hypothesis, riskCheck, and claimLevel. Do not include hidden chain-of-thought or unverified checkmate/completion claims.",
                     Example: new Dictionary<string, object?>
                     {
                         ["agentColor"] = "white",
                         ["selectedMove"] = "g1f3",
                         ["legalBasis"] = "selected_from_current_legal_move_list",
-                        ["publicReason"] = "Develop a knight and keep playing for a win.",
+                        ["goal"] = "Improve development while preserving king safety.",
+                        ["evidence"] = new[] { "g1f3 appeared in the current legal move list" },
+                        ["hypothesis"] = "The knight move may improve piece activity.",
+                        ["riskCheck"] = "Opponent replies are not fully modeled, so safety is unverified.",
+                        ["claimLevel"] = "hypothesis",
+                        ["publicReason"] = "Develop a knight without claiming it is fully safe.",
                         ["completionClaim"] = false
                     }))));
         registrations.Add(Register(ChessQuestToolIds.CompleteObjective, "ChessQuest Complete Objective", ToolKind.Action, ToolEffect.WritesLocalState, dispatcher));
@@ -102,9 +107,9 @@ public static class ChessQuestTools
         {
             ChessQuestToolIds.GetState => "Returns current public ChessQuest session state, role, goal, FEN, turn, terminal state, and strict surface contract.",
             ChessQuestToolIds.RenderBoard => "Returns a plain ASCII board render for spatial inspection of the current public position.",
-            ChessQuestToolIds.ListLegalMoves => "Returns legal moves for the current side in UCI notation only, plus the legalMoveObservationId that binds a later play_move to this exact board state.",
-            ChessQuestToolIds.ProjectLine => "Projects an agent-authored hypothetical UCI line under public chess rules and verifies submitted check/checkmate claims without mutating the session or generating opponent replies.",
-            ChessQuestToolIds.PlayMove => "Commits one legal agent UCI move, then applies one host-controlled opponent move when the game remains non-terminal.",
+            ChessQuestToolIds.ListLegalMoves => "Returns current legal UCI moves plus legalMoveObservationId. Legal means playable under chess rules only; the order is not a ranking and legality does not imply safety, quality, or recommendation.",
+            ChessQuestToolIds.ProjectLine => "Projects an agent-authored UCI line under public chess rules. It validates legality and resulting board state only; it does not rank moves, prove safety, evaluate quality, or generate opponent replies.",
+            ChessQuestToolIds.PlayMove => "Commits one selected legal agent UCI move with public intent, then applies one host-controlled opponent move when non-terminal. Public intent should separate evidence, hypothesis, risk, and verified facts.",
             ChessQuestToolIds.CompleteObjective => "Checks whether the current terminal board state satisfies the ChessQuest objective and emits the completion artifact only when verified.",
             _ => "ChessQuest tool."
         };
@@ -156,7 +161,7 @@ public static class ChessQuestTools
                 NotEnoughWhen = "The planner needs the exact legal UCI move set."
             },
             ChessQuestToolIds.ListLegalMoves => new ToolContextHint(
-                Produces: "legal UCI moves for the current side and a legalMoveObservationId for the exact observed board state",
+                Produces: "legal UCI moves for the current side and a legalMoveObservationId for the exact observed board state; legal affordances are not recommendations",
                 Complements:
                 [
                     ChessQuestToolIds.GetState,
@@ -175,10 +180,10 @@ public static class ChessQuestTools
                 ])
             {
                 UseWhen = "The planner needs exact legal action affordances before selecting a move, or must refresh after a stale/illegal move refusal.",
-                NotEnoughWhen = "The planner wants to inspect a self-authored hypothetical line."
+                NotEnoughWhen = "The planner needs to know whether its own hypothesis survives a submitted line; a legal move is not evidence of safety."
             },
             ChessQuestToolIds.ProjectLine => new ToolContextHint(
-                Produces: "read-only public-rule projection of submitted UCI moves, including check/checkmate status for the submitted line",
+                Produces: "read-only public-rule projection of submitted UCI moves, including check/checkmate status for the submitted line; one-ply projection is not safety or quality evaluation",
                 Complements:
                 [
                     ChessQuestToolIds.ListLegalMoves,
@@ -191,10 +196,10 @@ public static class ChessQuestTools
                 ])
             {
                 UseWhen = "The planner has self-authored candidate moves or a line and needs deterministic rule projection.",
-                NotEnoughWhen = "The planner expects the host to select candidate moves; this surface never does that."
+                NotEnoughWhen = "The planner wants the host to select moves, rank choices, prove safety, or evaluate move quality; this surface never does that."
             },
             ChessQuestToolIds.PlayMove => new ToolContextHint(
-                Produces: "committed agent move, committed opponent reply when applicable, updated public board state, and receipt evidence",
+                Produces: "committed agent move, committed opponent reply when applicable, updated public board state, receipt evidence, and the agent's public decision declaration",
                 Complements: [],
                 CanBatchWith: [],
                 ShouldPrecede:
@@ -202,14 +207,12 @@ public static class ChessQuestTools
                     ChessQuestToolIds.CompleteObjective
                 ])
             {
-                UseWhen = "It is the agent's turn and a legal UCI move has been selected with public turn intent.",
-                NotEnoughWhen = "The planner has not established legal UCI moves or turn ownership."
+                UseWhen = "It is the agent's turn and a legal UCI move has been selected with public turn intent that distinguishes evidence, hypothesis, and risk.",
+                NotEnoughWhen = "The planner has not established legal UCI moves, turn ownership, or evidence/risk discipline for strong safety or material claims."
             },
             ChessQuestToolIds.CompleteObjective => new ToolContextHint(
                 Produces: "verified ChessQuest completion artifact when the agent has won",
-                Complements: [],
-                CanBatchWith: [],
-                ShouldPrecede: [])
+                Complements: [], CanBatchWith: [], ShouldPrecede: [])
             {
                 UseWhen = "The current board state is terminal and the agent appears to have won.",
                 NotEnoughWhen = "The game is not terminal or a draw/loss occurred."

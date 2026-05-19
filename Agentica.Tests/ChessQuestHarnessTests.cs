@@ -458,11 +458,17 @@ public sealed class ChessQuestHarnessTests
         var strategyFrame = Assert.IsType<ChessQuestStrategyFrame>(context["strategyFrame"]);
         var objective = Assert.IsType<ChessQuestPhaseObjective>(context["phaseObjective"]);
         var progress = Assert.IsType<ChessQuestPhaseProgress>(context["phaseProgress"]);
+        var doctrine = Assert.IsType<ChessQuestPlayingDoctrine>(context["playingDoctrine"]);
+        var protocol = Assert.IsType<ChessQuestDecisionProtocol>(context["decisionProtocol"]);
         Assert.Equal("opening", strategyFrame.Phase);
         Assert.Equal("opening", objective.Phase);
         Assert.Equal(3, objective.MaxAgentTurns);
         Assert.Equal(0, progress.AgentTurnsPlayed);
         Assert.Equal(3, progress.AgentTurnsRemaining);
+        Assert.Contains(doctrine.GoodPlayCriteria, item => item.Contains("material", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("opening", protocol.Phase);
+        Assert.Contains("not mean good or safe", protocol.ToolSemantics[ChessQuestToolIds.ListLegalMoves], StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(protocol.ClaimDiscipline, item => item.Contains("legal", StringComparison.OrdinalIgnoreCase) && item.Contains("safe", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -557,6 +563,9 @@ public sealed class ChessQuestHarnessTests
                 ["chessquest.taskDirection"] = "verify_tactical_opportunity",
                 ["chessquest.publicRationale"] = "A public phase report suggests a forcing opportunity.",
                 ["chessquest.phaseGoal"] = "Verify forcing ideas before committing a move.",
+                ["chessquest.activeObjectives"] = new[] { "model opponent replies before safety claims" },
+                ["chessquest.successSignals"] = new[] { "phase does not worsen material balance" },
+                ["chessquest.claimDiscipline"] = new[] { "do not call a move safe from one-ply projection" },
                 ["chessquest.maxAgentTurns"] = 2,
                 ["chessquest.replanTriggers"] = new[] { "terminal game state" }
             },
@@ -571,7 +580,34 @@ public sealed class ChessQuestHarnessTests
         Assert.Equal("verify_tactical_opportunity", projection.StrategyName);
         Assert.Equal("A public phase report suggests a forcing opportunity.", projection.StrategyIntent);
         Assert.Contains("Verify forcing ideas before committing a move.", projection.ActiveObjectives);
+        Assert.Contains("model opponent replies before safety claims", projection.ActiveObjectives);
+        Assert.Contains("phase does not worsen material balance", projection.ProgressSignals);
+        Assert.Contains("do not call a move safe from one-ply projection", projection.ClaimDiscipline);
         Assert.Contains("terminal game state", projection.StopTriggers);
+    }
+
+    [Fact]
+    public void ChessQuest_phase_task_envelope_sanitizes_move_level_guidance()
+    {
+        var envelope = ChessQuestPhaseTaskEnvelope.FromContext(
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["chessquest.phase"] = "tactical",
+                ["chessquest.taskDirection"] = "play e2e4 now",
+                ["chessquest.phaseGoal"] = "Attack f7 with a concrete move hint.",
+                ["chessquest.activeObjectives"] = new[]
+                {
+                    "attack f7",
+                    "preserve material"
+                }
+            },
+            defaultMaxAgentTurns: 3,
+            taskNumber: 1);
+
+        Assert.NotEqual("play e2e4 now", envelope.TaskDirection);
+        Assert.NotEqual("Attack f7 with a concrete move hint.", envelope.PhaseGoal);
+        Assert.DoesNotContain(envelope.ActiveObjectives, objective => objective.Contains("f7", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("preserve material", envelope.ActiveObjectives);
     }
 
     [Fact]
@@ -873,6 +909,61 @@ public sealed class ChessQuestHarnessTests
         Assert.DoesNotContain("Outcome: move accepted; no opponent reply applied.", output);
     }
 
+    [Fact]
+    public async Task ChessQuest_cockpit_warns_on_unsupported_safety_claim()
+    {
+        var session = CreateSession(opponentMoves: ["e7e5"]);
+        var result = await InvokeAsync(
+            session,
+            ChessQuestToolIds.PlayMove,
+            new Dictionary<string, object?>
+            {
+                ["move"] = "e2e4",
+                ["turnIntent"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["agentColor"] = "white",
+                    ["selectedMove"] = "e2e4",
+                    ["legalBasis"] = "selected_from_current_legal_move_list",
+                    ["publicReason"] = "This move is safe and winning.",
+                    ["completionClaim"] = false
+                }
+            });
+        Assert.Equal(ReceiptStatus.Succeeded, result.Receipt.Status);
+
+        var sink = new ChessQuestCockpitEventSink(session);
+        using var writer = new StringWriter();
+        var originalOut = Console.Out;
+        try
+        {
+            Console.SetOut(writer);
+            sink.Emit(new ExecutionEvent(
+                "event_test",
+                "receipt.emitted",
+                DateTimeOffset.UtcNow,
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["receipt"] = result.Receipt.ReceiptId,
+                    ["status"] = "succeeded"
+                })
+            {
+                Context = new ExecutionEventContext(
+                    RunId: "run_test",
+                    AttemptNumber: 1,
+                    StepId: "step_001",
+                    ToolId: ChessQuestToolIds.PlayMove,
+                    ReceiptId: result.Receipt.ReceiptId)
+            });
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+
+        var output = writer.ToString();
+        Assert.Contains("Trace warning: intent uses strong claim language", output);
+        Assert.Contains("Trace warning: safety claim is unsupported", output);
+    }
+
     private static ChessQuestSession CreateSession(
         string fen = StartFen,
         ChessQuestColor agentColor = ChessQuestColor.White,
@@ -913,6 +1004,11 @@ public sealed class ChessQuestHarnessTests
             ["agentColor"] = agentColor,
             ["selectedMove"] = selectedMove,
             ["legalBasis"] = "selected_from_current_legal_move_list",
+            ["goal"] = "Play a legal move while preserving the win objective.",
+            ["evidence"] = new[] { $"{selectedMove} was selected as the current legal move candidate" },
+            ["hypothesis"] = "The selected move may improve the position without making an unsupported claim.",
+            ["riskCheck"] = "Opponent replies are not fully modeled, so safety is unverified.",
+            ["claimLevel"] = "hypothesis",
             ["publicReason"] = publicReason,
             ["completionClaim"] = false
         };

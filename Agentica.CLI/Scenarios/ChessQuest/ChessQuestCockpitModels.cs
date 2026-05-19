@@ -41,5 +41,15 @@ public sealed record ChessQuestCockpitTurnEnvelope(
 
     public int? CommittedAgentTurnNumber { get; init; }
 
+    public string? TurnGoal { get; init; }
+
+    public IReadOnlyList<string> TurnEvidence { get; init; } = [];
+
+    public string? TurnHypothesis { get; init; }
+
+    public string? TurnRiskCheck { get; init; }
+
+    public string? TurnClaimLevel { get; init; }
+
     public IReadOnlyList<string> Warnings { get; init; } = [];
 }
