@@ -9,6 +9,7 @@ public sealed class ChessQuestSession
     private readonly IChessRulesEngine _rules;
     private readonly IChessOpponent _opponent;
     private readonly List<ChessQuestToolTurn> _turns = [];
+    private readonly List<ChessQuestRecordedPly> _committedPlies = [];
     private int _projectedLinesThisTurn;
 
     public ChessQuestSession(
@@ -24,6 +25,8 @@ public sealed class ChessQuestSession
     public ChessQuestScenario Scenario { get; }
 
     public IReadOnlyList<ChessQuestToolTurn> Turns => _turns;
+
+    public IReadOnlyList<ChessQuestRecordedPly> CommittedPlies => _committedPlies;
 
     public ChessPublicState CurrentState => _rules.GetState();
 
@@ -47,6 +50,49 @@ public sealed class ChessQuestSession
 
         _turns.Add(new ChessQuestToolTurn(invocation, result, _rules.GetState()));
         return result;
+    }
+
+    public void ReplayCommittedPlies(IEnumerable<ChessQuestRecordedPly> plies)
+    {
+        foreach (var ply in plies.OrderBy(item => item.Ply))
+        {
+            ReplayCommittedPly(ply);
+        }
+    }
+
+    private void ReplayCommittedPly(ChessQuestRecordedPly ply)
+    {
+        var before = CurrentState;
+        if (!string.IsNullOrWhiteSpace(ply.FenBefore) &&
+            !string.Equals(before.Fen, ply.FenBefore, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Cannot replay ChessQuest ply {ply.Ply}: expected FEN '{ply.FenBefore}', but current FEN is '{before.Fen}'.");
+        }
+
+        var result = _rules.TryPlayMove(ply.Move);
+        if (!result.Accepted || result.Move is null)
+        {
+            throw new InvalidOperationException(
+                $"Cannot replay ChessQuest ply {ply.Ply}: move '{ply.Move}' was refused as {result.RefusalReason ?? "illegal_move"}.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(ply.FenAfter) &&
+            !string.Equals(result.FenAfter, ply.FenAfter, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Cannot replay ChessQuest ply {ply.Ply}: expected resulting FEN '{ply.FenAfter}', but got '{result.FenAfter}'.");
+        }
+
+        _committedPlies.Add(ply with
+        {
+            Ply = _committedPlies.Count + 1,
+            Move = result.Move,
+            Color = before.SideToMove,
+            FenBefore = result.FenBefore,
+            FenAfter = result.FenAfter
+        });
+        _projectedLinesThisTurn = 0;
     }
 
     private ToolResult GetState(ToolInvocation invocation)
@@ -165,6 +211,15 @@ public sealed class ChessQuestSession
         }
 
         var stateAfterAgentMove = CurrentState;
+        _committedPlies.Add(new ChessQuestRecordedPly(
+            Ply: _committedPlies.Count + 1,
+            Move: agentResult.Move,
+            Color: before.SideToMove,
+            Source: "agent",
+            FenBefore: agentResult.FenBefore,
+            FenAfter: agentResult.FenAfter,
+            At: DateTimeOffset.UtcNow));
+
         var sideToMoveInCheckAfterAgentMove = !stateAfterAgentMove.IsTerminal &&
             _rules.IsKingInCheck(stateAfterAgentMove.SideToMove);
         var agentMoveGivesCheckmate = MoveGivesCheckmate(stateAfterAgentMove, Scenario.AgentColor);
@@ -197,6 +252,14 @@ public sealed class ChessQuestSession
                     opponentMoveApplied = true;
                     opponentMove = opponentResult.Move;
                     opponentPolicy = chosen.Policy;
+                    _committedPlies.Add(new ChessQuestRecordedPly(
+                        Ply: _committedPlies.Count + 1,
+                        Move: opponentResult.Move,
+                        Color: stateAfterAgentMove.SideToMove,
+                        Source: "opponent",
+                        FenBefore: opponentResult.FenBefore,
+                        FenAfter: opponentResult.FenAfter,
+                        At: DateTimeOffset.UtcNow));
                 }
             }
         }

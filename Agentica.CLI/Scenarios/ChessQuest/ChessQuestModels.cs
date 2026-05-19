@@ -136,6 +136,31 @@ public sealed record ChessOpponentMove(
     string Move,
     string Policy);
 
+public sealed record ChessQuestRecordedPly(
+    int Ply,
+    string Move,
+    ChessQuestColor Color,
+    string Source,
+    string FenBefore,
+    string FenAfter,
+    DateTimeOffset At);
+
+public sealed record ChessQuestGameRecord(
+    string Kind,
+    int Version,
+    string ScenarioId,
+    string Title,
+    string InitialFen,
+    ChessQuestColor AgentColor,
+    ChessQuestDifficulty Difficulty,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt,
+    string CurrentFen,
+    int Ply,
+    bool Terminal,
+    ChessTerminalState? TerminalState,
+    IReadOnlyList<ChessQuestRecordedPly> Plies);
+
 public interface IChessOpponent
 {
     Task<ChessOpponentMove?> ChooseMoveAsync(

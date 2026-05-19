@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Agentica.CLI.Scenarios.ChessQuest;
 using Agentica.Events;
 using Agentica.Execution;
@@ -34,6 +35,16 @@ internal static class ChessQuestCommand
             }
         }
 
+        if (string.Equals(args[0], "replay", StringComparison.OrdinalIgnoreCase))
+        {
+            return ReplayGame(args.Skip(1).ToArray());
+        }
+
+        if (string.Equals(args[0], "resume", StringComparison.OrdinalIgnoreCase))
+        {
+            return await ResumeGameAsync(board, args.Skip(1).ToArray(), services).ConfigureAwait(false);
+        }
+
         if (!string.Equals(args[0], "run", StringComparison.OrdinalIgnoreCase))
         {
             services.PrintUsage();
@@ -46,7 +57,9 @@ internal static class ChessQuestCommand
     private static async Task<int> RunScenarioAsync(
         IChessQuestBoard board,
         IReadOnlyList<string> args,
-        CliCommandServices services)
+        CliCommandServices services,
+        ChessQuestGameRecord? resumeRecord = null,
+        string? resumeSource = null)
     {
         var options = ChessQuestRunOptions.Parse(args);
         if (!options.IsValid)
@@ -73,6 +86,16 @@ internal static class ChessQuestCommand
             return 2;
         }
 
+        if (resumeRecord is not null)
+        {
+            scenario = scenario with
+            {
+                InitialFen = resumeRecord.InitialFen,
+                AgentColor = resumeRecord.AgentColor,
+                Difficulty = resumeRecord.Difficulty
+            };
+        }
+
         var opponentMode = ResolveOpponentMode(scenario, options);
         var opponentPlanner = options.OpponentPlanner ?? options.Planner;
         if (opponentMode == ChessQuestOpponentMode.Agent &&
@@ -88,17 +111,49 @@ internal static class ChessQuestCommand
         var session = new ChessQuestSession(
             scenario,
             opponent: opponent);
+
+        if (resumeRecord is not null)
+        {
+            try
+            {
+                ChessQuestGameRecordStore.ReplayIntoSession(session, resumeRecord);
+            }
+            catch (InvalidOperationException exception)
+            {
+                Console.Error.WriteLine(exception.Message);
+                return 2;
+            }
+        }
+
         var runObjective = BuildObjective(scenario);
         var initialPlannerContext = ChessQuestCapabilitySurfaceCompiler.BuildPlannerContext(session);
         var runLog = services.CreateRunLog(options.LogRun, options.LogDir, "chessquest", args);
+        if (runLog is not null)
+        {
+            ChessQuestGameRecordStore.WriteDirectory(runLog.DirectoryPath, session);
+        }
+
         runLog?.WriteJson("chessquest-scenario.json", scenario);
+        if (resumeRecord is not null)
+        {
+            runLog?.WriteJson("chessquest-resume-source.json", new
+            {
+                source = resumeSource,
+                record = resumeRecord
+            });
+        }
+
         runLog?.WriteJson("chessquest-initial-planning-context.json", initialPlannerContext);
         runLog?.WriteJson("chessquest-initial-planning-frame.json", ChessQuestCapabilitySurfaceCompiler.BuildPlanningFrame(session));
         Action<ChessQuestCockpitTurnEnvelope>? turnRecorder = runLog is null
             ? null
-            : turn => runLog.WriteJsonLine("chessquest-turns.jsonl", turn);
+            : turn =>
+            {
+                runLog.WriteJsonLine("chessquest-turns.jsonl", turn);
+                ChessQuestGameRecordStore.WriteDirectory(runLog.DirectoryPath, session);
+            };
 
-        PrintOpening(scenario, session, options, opponentMode, opponentPlanner);
+        PrintOpening(scenario, session, options, opponentMode, opponentPlanner, resumeRecord, resumeSource);
 
         using var runCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(options.TimeoutSeconds));
         ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
@@ -163,8 +218,62 @@ internal static class ChessQuestCommand
             PrintSummary(envelope);
         }
 
+        if (runLog is not null)
+        {
+            ChessQuestGameRecordStore.WriteDirectory(runLog.DirectoryPath, session);
+        }
+
         services.FinishRunLog(runLog, envelope);
         return envelope.Outcome.Status == RunOutcomeStatus.Succeeded ? 0 : 1;
+    }
+
+    private static int ReplayGame(IReadOnlyList<string> args)
+    {
+        if (args.Count == 0)
+        {
+            Console.Error.WriteLine("ChessQuest replay requires a game record file or run log directory.");
+            return 2;
+        }
+
+        try
+        {
+            var record = ChessQuestGameRecordStore.Load(args[0]);
+            PrintReplay(record, args[0]);
+            return 0;
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or JsonException)
+        {
+            Console.Error.WriteLine(exception.Message);
+            return 2;
+        }
+    }
+
+    private static async Task<int> ResumeGameAsync(
+        IChessQuestBoard board,
+        IReadOnlyList<string> args,
+        CliCommandServices services)
+    {
+        if (args.Count == 0)
+        {
+            Console.Error.WriteLine("ChessQuest resume requires a game record file or run log directory.");
+            return 2;
+        }
+
+        ChessQuestGameRecord record;
+        try
+        {
+            record = ChessQuestGameRecordStore.Load(args[0]);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or JsonException)
+        {
+            Console.Error.WriteLine(exception.Message);
+            return 2;
+        }
+
+        var runArgs = new[] { record.ScenarioId }
+            .Concat(args.Skip(1))
+            .ToArray();
+        return await RunScenarioAsync(board, runArgs, services, record, args[0]).ConfigureAwait(false);
     }
 
     private static string BuildObjective(ChessQuestScenario scenario) =>
@@ -353,7 +462,9 @@ internal static class ChessQuestCommand
         ChessQuestSession session,
         ChessQuestRunOptions options,
         ChessQuestOpponentMode opponentMode,
-        PlannerKind opponentPlanner)
+        PlannerKind opponentPlanner,
+        ChessQuestGameRecord? resumeRecord = null,
+        string? resumeSource = null)
     {
         Console.WriteLine($"Agent has accepted ChessQuest: \"{scenario.Title}\"");
         Console.WriteLine($"Objective: {scenario.PublicObjective}");
@@ -361,6 +472,12 @@ internal static class ChessQuestCommand
         Console.WriteLine($"Agent Color: {scenario.AgentColor}");
         Console.WriteLine($"Surface: {scenario.DisclosurePolicy.Mode}");
         Console.WriteLine($"Opponent: {scenario.Difficulty.Opponent}");
+        if (resumeRecord is not null)
+        {
+            Console.WriteLine($"Resume Source: {resumeSource}");
+            Console.WriteLine($"Resumed Plies: {resumeRecord.Plies.Count}; FEN: {session.CurrentState.Fen}");
+        }
+
         if (opponentMode == ChessQuestOpponentMode.Agent)
         {
             Console.WriteLine($"Opponent Agent: planner={opponentPlanner} maxSteps={options.OpponentMaxSteps} maxRefinements={options.OpponentMaxRefinements} timeoutSeconds={options.OpponentTimeoutSeconds}");
@@ -370,6 +487,43 @@ internal static class ChessQuestCommand
         Console.WriteLine(session.CurrentState.Fen);
         Console.WriteLine(ChessQuestRenderer.RenderBoardFromFen(session.CurrentState.Fen));
         Console.WriteLine();
+    }
+
+    private static void PrintReplay(ChessQuestGameRecord record, string source)
+    {
+        Console.WriteLine($"ChessQuest Replay: \"{record.Title}\"");
+        Console.WriteLine($"Source: {source}");
+        Console.WriteLine($"Scenario: {record.ScenarioId}");
+        Console.WriteLine($"Agent Color: {record.AgentColor}");
+        Console.WriteLine($"Plies: {record.Plies.Count}");
+        Console.WriteLine($"Terminal: {record.Terminal}");
+        if (record.TerminalState is not null)
+        {
+            Console.WriteLine($"Result: {record.TerminalState.Result} ({record.TerminalState.Reason})");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Initial FEN:");
+        Console.WriteLine(record.InitialFen);
+        Console.WriteLine(ChessQuestRenderer.RenderBoardFromFen(record.InitialFen));
+        Console.WriteLine();
+        Console.WriteLine("Moves:");
+        if (record.Plies.Count == 0)
+        {
+            Console.WriteLine("  none");
+        }
+        else
+        {
+            foreach (var ply in record.Plies.OrderBy(item => item.Ply))
+            {
+                Console.WriteLine($"  {ply.Ply:000}. {ply.Color} {ply.Source}: {ply.Move}");
+            }
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Final FEN:");
+        Console.WriteLine(record.CurrentFen);
+        Console.WriteLine(ChessQuestRenderer.RenderBoardFromFen(record.CurrentFen));
     }
 
     private static void PrintSummary(OutcomeEnvelope envelope)

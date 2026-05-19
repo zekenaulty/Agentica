@@ -234,6 +234,121 @@ public sealed class ChessQuestHarnessTests
     }
 
     [Fact]
+    public async Task ChessQuest_game_record_replays_committed_plies()
+    {
+        var session = CreateSession(opponentMoves: ["e7e5"]);
+        await InvokeAsync(
+            session,
+            ChessQuestToolIds.PlayMove,
+            new Dictionary<string, object?>
+            {
+                ["move"] = "e2e4",
+                ["turnIntent"] = TurnIntent("white", "e2e4", "Use a legal opening move and keep playing for a win.")
+            });
+
+        var record = ChessQuestGameRecordStore.FromSession(session);
+        Assert.Equal(["e2e4", "e7e5"], record.Plies.Select(ply => ply.Move));
+
+        var replayed = CreateSession();
+        ChessQuestGameRecordStore.ReplayIntoSession(replayed, record);
+
+        Assert.Equal(session.CurrentState.Fen, replayed.CurrentState.Fen);
+        Assert.Equal(session.CurrentState.Ply, replayed.CurrentState.Ply);
+        Assert.Equal(["e2e4", "e7e5"], replayed.CommittedPlies.Select(ply => ply.Move));
+    }
+
+    [Fact]
+    public async Task ChessQuest_game_record_store_writes_and_loads_resume_record()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"agentica-chessquest-{Guid.NewGuid():N}");
+        var session = CreateSession(opponentMoves: ["e7e5"]);
+        await InvokeAsync(
+            session,
+            ChessQuestToolIds.PlayMove,
+            new Dictionary<string, object?>
+            {
+                ["move"] = "e2e4",
+                ["turnIntent"] = TurnIntent("white", "e2e4", "Use a legal opening move and keep playing for a win.")
+            });
+
+        try
+        {
+            var path = ChessQuestGameRecordStore.WriteDirectory(directory, session);
+            var loaded = ChessQuestGameRecordStore.Load(directory);
+
+            Assert.True(File.Exists(path));
+            Assert.Equal(session.CurrentState.Fen, loaded.CurrentFen);
+            Assert.Equal(["e2e4", "e7e5"], loaded.Plies.Select(ply => ply.Move));
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ChessQuest_game_record_store_can_replay_legacy_turn_log_directory()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"agentica-chessquest-legacy-{Guid.NewGuid():N}");
+        var session = CreateSession(opponentMoves: ["e7e5"]);
+        await InvokeAsync(
+            session,
+            ChessQuestToolIds.PlayMove,
+            new Dictionary<string, object?>
+            {
+                ["move"] = "e2e4",
+                ["turnIntent"] = TurnIntent("white", "e2e4", "Use a legal opening move and keep playing for a win.")
+            });
+
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(directory, "chessquest-scenario.json"),
+                JsonSerializer.Serialize(session.Scenario, JsonOptions()));
+            var turn = new ChessQuestCockpitTurnEnvelope(
+                TurnNumber: 1,
+                StepId: "step_001",
+                ReceiptId: "receipt_001",
+                ReceiptStatus: ReceiptStatus.Succeeded,
+                ReceiptMessage: "Agent move e2e4 accepted; opponent move applied.",
+                AgentColor: ChessQuestColor.White,
+                SideToMoveAfter: ChessQuestColor.White,
+                PlyAfter: session.CurrentState.Ply,
+                SelectedMove: "e2e4",
+                OpponentMove: "e7e5",
+                OpponentMoveApplied: true,
+                Terminal: false,
+                TerminalResult: null,
+                FenAfter: session.CurrentState.Fen,
+                PublicIntentAction: "Play e2e4 as White.",
+                PublicIntentRationale: "Use a public legal move.",
+                PublicIntentExpectedOutcome: "Continue the game.",
+                TurnPublicReason: "Use a legal opening move.",
+                LegalMoveCountBeforeMove: 20,
+                CandidateLinesExplored: []);
+            File.WriteAllText(
+                Path.Combine(directory, "chessquest-turns.jsonl"),
+                JsonSerializer.Serialize(turn, JsonOptions()) + Environment.NewLine);
+
+            var loaded = ChessQuestGameRecordStore.Load(directory);
+
+            Assert.Equal(session.CurrentState.Fen, loaded.CurrentFen);
+            Assert.Equal(["e2e4", "e7e5"], loaded.Plies.Select(ply => ply.Move));
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task HeuristicChessOpponent_prefers_immediate_checkmate()
     {
         var rules = new GeraChessRulesEngine(FoolsMateBlackToMoveFen);
