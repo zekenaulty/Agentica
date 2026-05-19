@@ -125,8 +125,14 @@ internal static class ChessQuestCommand
             }
         }
 
-        var runObjective = BuildObjective(scenario);
-        var initialPlannerContext = ChessQuestCapabilitySurfaceCompiler.BuildPlannerContext(session);
+        var phaseTracker = options.StrategyMode == ChessQuestStrategyMode.Phase
+            ? ChessQuestPhaseTracker.Create(session, options.Phase, options.PhaseMaxAgentTurns)
+            : null;
+        var effectivePlanningMode = phaseTracker is not null && options.PlanningMode == PlanningMode.Stepwise
+            ? PlanningMode.QueryAndBlockerDriven
+            : options.PlanningMode;
+        var runObjective = BuildObjective(scenario, phaseTracker);
+        var initialPlannerContext = ChessQuestCapabilitySurfaceCompiler.BuildPlannerContext(session, phaseTracker);
         var runLog = services.CreateRunLog(options.LogRun, options.LogDir, "chessquest", args);
         if (runLog is not null)
         {
@@ -134,6 +140,11 @@ internal static class ChessQuestCommand
         }
 
         runLog?.WriteJson("chessquest-scenario.json", scenario);
+        if (phaseTracker is not null)
+        {
+            runLog?.WriteJson("chessquest-phase-context.json", phaseTracker.Snapshot(session));
+        }
+
         if (resumeRecord is not null)
         {
             runLog?.WriteJson("chessquest-resume-source.json", new
@@ -151,9 +162,13 @@ internal static class ChessQuestCommand
             {
                 runLog.WriteJsonLine("chessquest-turns.jsonl", turn);
                 ChessQuestGameRecordStore.WriteDirectory(runLog.DirectoryPath, session);
+                if (phaseTracker is not null)
+                {
+                    runLog.WriteJson("chessquest-phase-report.json", phaseTracker.BuildReport(session));
+                }
             };
 
-        PrintOpening(scenario, session, options, opponentMode, opponentPlanner, resumeRecord, resumeSource);
+        PrintOpening(scenario, session, options, opponentMode, opponentPlanner, phaseTracker, resumeRecord, resumeSource);
 
         using var runCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(options.TimeoutSeconds));
         ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
@@ -171,7 +186,7 @@ internal static class ChessQuestCommand
                 options.ThinkingBudget,
                 options.IncludeThoughts,
                 options.MaxOutputTokens,
-                options.PlanningMode,
+                effectivePlanningMode,
                 options.MaxBlockedRetries,
                 LogRun: false,
                 LogDir: null,
@@ -184,17 +199,21 @@ internal static class ChessQuestCommand
             eventSink: services.CreateEventSink(
                 CreateEventSink(session, options, turnRecorder),
                 runLog),
-            outcomeReporter: new ChessQuestOutcomeReporter(),
+            outcomeReporter: phaseTracker is null
+                ? new ChessQuestOutcomeReporter()
+                : new ChessQuestPhaseOutcomeReporter(session, phaseTracker),
             policy: new ExecutionPolicy(
                 MaxSteps: options.MaxSteps,
                 MaxRefinements: options.MaxRefinements,
                 Timeout: TimeSpan.FromSeconds(options.TimeoutSeconds),
-                PlanningMode: options.PlanningMode,
+                PlanningMode: effectivePlanningMode,
                 MaxPlanContinuations: options.MaxPlanContinuations,
                 PlanningContext: new PlanningContextOptions(MaxRecentObservations: 12, MaxRecentReceipts: 12),
                 MaxBlockedRetries: options.MaxBlockedRetries),
-            completionEvaluator: EvidenceCompletionEvaluator.ForArtifactKind("chessquest.objective_completed"),
-            planningFrameProjector: new ChessQuestPlanningFrameProjector(session));
+            completionEvaluator: phaseTracker is null
+                ? EvidenceCompletionEvaluator.ForArtifactKind("chessquest.objective_completed")
+                : new ChessQuestPhaseCompletionEvaluator(session, phaseTracker),
+            planningFrameProjector: new ChessQuestPlanningFrameProjector(session, phaseTracker));
 
         OutcomeEnvelope envelope;
         Console.CancelKeyPress += cancelHandler;
@@ -221,9 +240,18 @@ internal static class ChessQuestCommand
         if (runLog is not null)
         {
             ChessQuestGameRecordStore.WriteDirectory(runLog.DirectoryPath, session);
+            if (phaseTracker is not null)
+            {
+                runLog.WriteJson("chessquest-phase-report.json", phaseTracker.BuildReport(session));
+            }
         }
 
         services.FinishRunLog(runLog, envelope);
+        if (phaseTracker is not null)
+        {
+            PrintPhaseReport(phaseTracker.BuildReport(session));
+        }
+
         return envelope.Outcome.Status == RunOutcomeStatus.Succeeded ? 0 : 1;
     }
 
@@ -276,7 +304,25 @@ internal static class ChessQuestCommand
         return await RunScenarioAsync(board, runArgs, services, record, args[0]).ConfigureAwait(false);
     }
 
-    private static string BuildObjective(ChessQuestScenario scenario) =>
+    private static string BuildObjective(
+        ChessQuestScenario scenario,
+        ChessQuestPhaseTracker? phaseTracker = null)
+    {
+        var phaseContract = phaseTracker is null
+            ? string.Empty
+            : $"""
+
+        Phase strategy context:
+        - You are executing a bounded ChessQuest phase, not an unbounded whole-game run.
+        - Phase: {phaseTracker.Context.PhaseObjective.Phase}
+        - Phase goal: {phaseTracker.Context.PhaseObjective.Goal}
+        - Strategy: {phaseTracker.Context.StrategyFrame.StrategyName}
+        - Strategy intent: {phaseTracker.Context.StrategyFrame.StrategyIntent}
+        - Phase budget: {phaseTracker.Context.PhaseObjective.MaxAgentTurns} agent turn(s).
+        - Advance the phase when legal, but if phase guidance conflicts with chessFrame board truth, legal moves and receipts win.
+        """;
+
+        return
         $"""
         ChessQuest: {scenario.Title}
         Objective: {scenario.PublicObjective}
@@ -293,7 +339,9 @@ internal static class ChessQuestCommand
         - chess.play_move applies the host-controlled opponent reply after your accepted move unless the game is terminal.
         - Do not claim completion unless chess.complete_objective emits chessquest.objective_completed.
         - The strict surface does not provide move rankings, scores, tactical labels, or opponent policy details.
+        {phaseContract}
         """;
+    }
 
     private static IChessOpponent CreateOpponent(
         ChessQuestScenario scenario,
@@ -463,6 +511,7 @@ internal static class ChessQuestCommand
         ChessQuestRunOptions options,
         ChessQuestOpponentMode opponentMode,
         PlannerKind opponentPlanner,
+        ChessQuestPhaseTracker? phaseTracker = null,
         ChessQuestGameRecord? resumeRecord = null,
         string? resumeSource = null)
     {
@@ -472,6 +521,14 @@ internal static class ChessQuestCommand
         Console.WriteLine($"Agent Color: {scenario.AgentColor}");
         Console.WriteLine($"Surface: {scenario.DisclosurePolicy.Mode}");
         Console.WriteLine($"Opponent: {scenario.Difficulty.Opponent}");
+        if (phaseTracker is not null)
+        {
+            var phase = phaseTracker.Snapshot(session);
+            Console.WriteLine($"Strategy Mode: {options.StrategyMode}");
+            Console.WriteLine($"Phase: {phase.PhaseObjective.Phase}; Budget: {phase.PhaseObjective.MaxAgentTurns} agent turn(s)");
+            Console.WriteLine($"Strategy: {phase.StrategyFrame.StrategyName}");
+        }
+
         if (resumeRecord is not null)
         {
             Console.WriteLine($"Resume Source: {resumeSource}");
@@ -487,6 +544,21 @@ internal static class ChessQuestCommand
         Console.WriteLine(session.CurrentState.Fen);
         Console.WriteLine(ChessQuestRenderer.RenderBoardFromFen(session.CurrentState.Fen));
         Console.WriteLine();
+    }
+
+    private static void PrintPhaseReport(ChessQuestPhaseReport report)
+    {
+        Console.WriteLine();
+        Console.WriteLine("--- ChessQuest Phase Report ---");
+        Console.WriteLine($"Phase: {report.Phase}");
+        Console.WriteLine($"Strategy: {report.StrategyName}");
+        Console.WriteLine($"Status: {report.Status}");
+        Console.WriteLine($"Stop Reason: {report.StopReason}");
+        Console.WriteLine($"Agent Turns: {report.AgentTurnsPlayed}; Remaining: {report.AgentTurnsRemaining}");
+        Console.WriteLine($"Agent Moves: {(report.AgentMoves.Count == 0 ? "none" : string.Join(", ", report.AgentMoves))}");
+        Console.WriteLine($"Opponent Moves: {(report.OpponentMoves.Count == 0 ? "none" : string.Join(", ", report.OpponentMoves))}");
+        Console.WriteLine($"Material Delta: {report.MaterialBalanceDelta}");
+        Console.WriteLine($"Terminal: {report.Terminal}");
     }
 
     private static void PrintReplay(ChessQuestGameRecord record, string source)

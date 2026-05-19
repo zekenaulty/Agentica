@@ -31,6 +31,9 @@ internal sealed record ChessQuestRunOptions(
     bool VerboseEvents,
     bool TurnJson,
     bool VerboseEnvelope,
+    ChessQuestStrategyMode StrategyMode,
+    string Phase,
+    int PhaseMaxAgentTurns,
     bool LogRun,
     string? LogDir,
     bool IsValid,
@@ -66,6 +69,9 @@ internal sealed record ChessQuestRunOptions(
         var verboseEvents = false;
         var turnJson = false;
         var verboseEnvelope = false;
+        var strategyMode = ChessQuestStrategyMode.Off;
+        var phase = "opening";
+        var phaseMaxAgentTurns = 6;
         var logRun = false;
         string? logDir = null;
 
@@ -340,6 +346,46 @@ internal sealed record ChessQuestRunOptions(
                     verboseEnvelope = true;
                     break;
 
+                case "--strategy-mode":
+                    if (!TryReadValue(args, ref index, out var strategyModeValue))
+                    {
+                        return Invalid("Missing value for --strategy-mode.");
+                    }
+
+                    var normalizedStrategyMode = strategyModeValue.Trim().ToLowerInvariant();
+                    strategyMode = normalizedStrategyMode switch
+                    {
+                        "off" or "none" => ChessQuestStrategyMode.Off,
+                        "phase" => ChessQuestStrategyMode.Phase,
+                        _ => strategyMode
+                    };
+                    if (normalizedStrategyMode is not "off" and not "none" and not "phase")
+                    {
+                        return Invalid($"Unknown strategy mode '{strategyModeValue}'.");
+                    }
+
+                    break;
+
+                case "--phase":
+                    if (!TryReadValue(args, ref index, out phase) ||
+                        string.IsNullOrWhiteSpace(phase))
+                    {
+                        return Invalid("Missing value for --phase.");
+                    }
+
+                    phase = phase.Trim().ToLowerInvariant();
+                    break;
+
+                case "--phase-max-agent-turns":
+                    if (!TryReadValue(args, ref index, out var phaseMaxAgentTurnsValue) ||
+                        !int.TryParse(phaseMaxAgentTurnsValue, out phaseMaxAgentTurns) ||
+                        phaseMaxAgentTurns <= 0)
+                    {
+                        return Invalid("Missing or invalid value for --phase-max-agent-turns.");
+                    }
+
+                    break;
+
                 case "--log-run":
                     logRun = true;
                     break;
@@ -386,6 +432,9 @@ internal sealed record ChessQuestRunOptions(
             verboseEvents,
             turnJson,
             verboseEnvelope,
+            strategyMode,
+            phase,
+            phaseMaxAgentTurns,
             logRun,
             logDir,
             IsValid: true,
@@ -435,6 +484,9 @@ internal sealed record ChessQuestRunOptions(
             VerboseEvents: false,
             TurnJson: false,
             VerboseEnvelope: false,
+            StrategyMode: ChessQuestStrategyMode.Off,
+            Phase: "opening",
+            PhaseMaxAgentTurns: 6,
             LogRun: false,
             LogDir: null,
             IsValid: false,

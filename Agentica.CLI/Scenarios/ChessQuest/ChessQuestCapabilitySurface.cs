@@ -71,10 +71,14 @@ public sealed record ChessQuestPlanningFrame(
 public sealed class ChessQuestPlanningFrameProjector : IPlanningFrameProjector
 {
     private readonly ChessQuestSession _session;
+    private readonly ChessQuestPhaseTracker? _phaseTracker;
 
-    public ChessQuestPlanningFrameProjector(ChessQuestSession session)
+    public ChessQuestPlanningFrameProjector(
+        ChessQuestSession session,
+        ChessQuestPhaseTracker? phaseTracker = null)
     {
         _session = session;
+        _phaseTracker = phaseTracker;
     }
 
     public IReadOnlyList<PlanningFrame> Project(PlanningFrameProjectionRequest request)
@@ -92,6 +96,9 @@ public sealed class ChessQuestPlanningFrameProjector : IPlanningFrameProjector
                 Payload: new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
                     ["chessFrame"] = frame,
+                    ["strategyFrame"] = _phaseTracker?.Snapshot(_session).StrategyFrame,
+                    ["phaseObjective"] = _phaseTracker?.Snapshot(_session).PhaseObjective,
+                    ["phaseProgress"] = _phaseTracker?.Snapshot(_session).Progress,
                     ["agenticHarness"] = harnessContext,
                     ["activeCapabilitySurface"] = harnessContext.ActiveCapabilitySurface,
                     ["contextSurfaceReceipt"] = harnessContext.ContextSurfaceReceipt,
@@ -124,6 +131,8 @@ public static class ChessQuestCapabilitySurfaceCompiler
         - chess.project_line may be used only for self-authored hypothetical lines; it never chooses moves and never generates opponent replies.
         - chess.play_move requires a concise public turnIntent matching the selected move.
         - Do not claim completion unless chess.complete_objective emits chessquest.objective_completed.
+        - If strategyFrame and phaseObjective are present, treat them as public strategic guidance, not board truth.
+        - If strategyFrame or phaseObjective conflicts with chessFrame, prefer chessFrame and legal tool receipts.
         """;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -137,11 +146,16 @@ public static class ChessQuestCapabilitySurfaceCompiler
         JsonOptions.Converters.Add(new JsonStringEnumConverter());
     }
 
-    public static IReadOnlyDictionary<string, object?> BuildPlannerContext(ChessQuestSession session) =>
+    public static IReadOnlyDictionary<string, object?> BuildPlannerContext(
+        ChessQuestSession session,
+        ChessQuestPhaseTracker? phaseTracker = null) =>
         new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             [ContextKey] = BuildHarnessContext(session),
-            ["chessFrame"] = BuildPlanningFrame(session)
+            ["chessFrame"] = BuildPlanningFrame(session),
+            ["strategyFrame"] = phaseTracker?.Snapshot(session).StrategyFrame,
+            ["phaseObjective"] = phaseTracker?.Snapshot(session).PhaseObjective,
+            ["phaseProgress"] = phaseTracker?.Snapshot(session).Progress
         };
 
     public static ChessQuestHarnessContext BuildHarnessContext(ChessQuestSession session)

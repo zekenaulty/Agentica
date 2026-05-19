@@ -28,6 +28,8 @@ public sealed class ChessQuestSession
 
     public IReadOnlyList<ChessQuestRecordedPly> CommittedPlies => _committedPlies;
 
+    public int ProjectedLinesThisTurn => _projectedLinesThisTurn;
+
     public ChessPublicState CurrentState => _rules.GetState();
 
     public ChessQuestSessionContext SessionContext => BuildSessionContext();

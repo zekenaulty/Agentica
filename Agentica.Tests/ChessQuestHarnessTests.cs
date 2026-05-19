@@ -349,6 +349,57 @@ public sealed class ChessQuestHarnessTests
     }
 
     [Fact]
+    public void ChessQuest_phase_context_is_projected_into_planner_context()
+    {
+        var session = CreateSession();
+        var phase = ChessQuestPhaseTracker.Create(session, "opening", maxAgentTurns: 3);
+
+        var context = ChessQuestCapabilitySurfaceCompiler.BuildPlannerContext(session, phase);
+
+        var strategyFrame = Assert.IsType<ChessQuestStrategyFrame>(context["strategyFrame"]);
+        var objective = Assert.IsType<ChessQuestPhaseObjective>(context["phaseObjective"]);
+        var progress = Assert.IsType<ChessQuestPhaseProgress>(context["phaseProgress"]);
+        Assert.Equal("opening", strategyFrame.Phase);
+        Assert.Equal("opening", objective.Phase);
+        Assert.Equal(3, objective.MaxAgentTurns);
+        Assert.Equal(0, progress.AgentTurnsPlayed);
+        Assert.Equal(3, progress.AgentTurnsRemaining);
+    }
+
+    [Fact]
+    public async Task ChessQuest_phase_completion_stops_after_agent_turn_budget()
+    {
+        var session = CreateSession(opponentMoves: ["e7e5"]);
+        var phase = ChessQuestPhaseTracker.Create(session, "opening", maxAgentTurns: 1);
+        var events = new InMemoryEventSink();
+        var runner = new AgenticaRunner(
+            new SingleMovePlanner(),
+            ChessQuestTools.CreateCatalog(session),
+            events,
+            new ChessQuestPhaseOutcomeReporter(session, phase),
+            new ExecutionPolicy(
+                MaxSteps: 4,
+                MaxRefinements: 4,
+                MaxPlanContinuations: 4,
+                PlanningMode: PlanningMode.QueryAndBlockerDriven),
+            completionEvaluator: new ChessQuestPhaseCompletionEvaluator(session, phase),
+            planningFrameProjector: new ChessQuestPlanningFrameProjector(session, phase));
+
+        var envelope = await runner.RunAsync(new RunRequest(
+            "Execute one opening phase turn.",
+            RequestOrigin.User,
+            ChessQuestCapabilitySurfaceCompiler.BuildPlannerContext(session, phase)));
+
+        Assert.Equal(RunOutcomeStatus.Succeeded, envelope.Outcome.Status);
+        Assert.Equal(["e2e4", "e7e5"], session.CommittedPlies.Select(ply => ply.Move));
+        Assert.Single(session.CommittedPlies, ply => ply.Source == "agent");
+        var report = phase.BuildReport(session);
+        Assert.Equal("budget_complete", report.Status);
+        Assert.Equal("agent_turn_budget_exhausted", report.StopReason);
+        Assert.Equal(["e2e4"], report.AgentMoves);
+    }
+
+    [Fact]
     public async Task HeuristicChessOpponent_prefers_immediate_checkmate()
     {
         var rules = new GeraChessRulesEngine(FoolsMateBlackToMoveFen);
