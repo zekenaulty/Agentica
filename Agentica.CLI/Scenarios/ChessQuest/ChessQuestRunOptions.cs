@@ -357,9 +357,10 @@ internal sealed record ChessQuestRunOptions(
                     {
                         "off" or "none" => ChessQuestStrategyMode.Off,
                         "phase" => ChessQuestStrategyMode.Phase,
+                        "projected" or "projection" or "llm" => ChessQuestStrategyMode.Projected,
                         _ => strategyMode
                     };
-                    if (normalizedStrategyMode is not "off" and not "none" and not "phase")
+                    if (normalizedStrategyMode is not "off" and not "none" and not "phase" and not "projected" and not "projection" and not "llm")
                     {
                         return Invalid($"Unknown strategy mode '{strategyModeValue}'.");
                     }

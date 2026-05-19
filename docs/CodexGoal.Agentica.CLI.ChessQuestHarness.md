@@ -28,6 +28,7 @@ Implemented slices:
 - replay/resume game records.
 - bounded phase strategy mode.
 - board parsing probe with persisted prompt/response logs.
+- LLM strategy projection mode with a visible orchestration tier and active run tier.
 
 The next ChessQuest work should keep the model in the role of an actor, not merely a classifier.
 
@@ -211,9 +212,9 @@ Current `--strategy-mode phase` is host-authored. It injects:
 
 The phase report is deterministic and receipt-backed. It is deliberately not full adaptive orchestration yet.
 
-## Next Slice: LLM Strategy Projection
+## Implemented Slice: LLM Strategy Projection
 
-The next slice should be an LLM-authored strategy projection, not full task-graph orchestration.
+`--strategy-mode projected` adds an LLM-authored strategy projection before the active phase run. This is not full task-graph orchestration.
 
 Purpose:
 
@@ -223,7 +224,7 @@ Keep chess truth with the engine.
 Keep completion proof with receipts/verifier.
 ```
 
-Expected new contract:
+Projection contract:
 
 ```csharp
 public sealed record ChessQuestStrategyProjection(
@@ -311,4 +312,3 @@ LLM task planning should supervise the phase strategy, not replace the move loop
 - The model never gets a best-move tool in strict benchmark mode.
 - The model may use `project_line` only for self-authored lines.
 - Probe success does not imply game skill; probes identify capability gaps.
-

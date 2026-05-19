@@ -367,6 +367,53 @@ public sealed class ChessQuestHarnessTests
     }
 
     [Fact]
+    public void ChessQuest_projected_strategy_context_is_projected_into_planner_context()
+    {
+        var session = CreateSession();
+        var projection = ChessQuestPhaseTracker.DefaultProjection(
+            session,
+            "opening",
+            source: "test_projection");
+        var phase = ChessQuestPhaseTracker.Create(
+            session,
+            "opening",
+            maxAgentTurns: 3,
+            strategyProjection: projection);
+
+        var context = ChessQuestCapabilitySurfaceCompiler.BuildPlannerContext(session, phase);
+
+        var projected = Assert.IsType<ChessQuestStrategyProjection>(context["strategyProjection"]);
+        var frame = Assert.IsType<ChessQuestStrategyFrame>(context["strategyFrame"]);
+        Assert.Equal("test_projection", projected.Source);
+        Assert.Equal(projected.StrategyName, frame.StrategyName);
+        Assert.Equal(projected.ActiveObjectives, frame.ActiveObjectives);
+    }
+
+    [Fact]
+    public void ChessQuest_strategy_projection_parser_enforces_verification_rules()
+    {
+        var projection = ChessQuestStrategyProjectionRunner.ParseProjection(
+            """
+            {
+              "phase": "opening",
+              "strategyName": "center development",
+              "strategyIntent": "Develop pieces and contest the center.",
+              "activeObjectives": ["develop a minor piece"],
+              "stopTriggers": ["terminal game state"],
+              "progressSignals": ["minor piece developed"],
+              "verificationRules": ["legal move receipts override strategy claims"]
+            }
+            """,
+            ChessQuestColor.White,
+            "opening",
+            "test");
+
+        Assert.Equal("center development", projection.StrategyName);
+        Assert.Contains(projection.VerificationRules, rule => rule.Contains("project_line", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(projection.VerificationRules, rule => rule.Contains("receipt", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task ChessQuest_phase_completion_stops_after_agent_turn_budget()
     {
         var session = CreateSession(opponentMoves: ["e7e5"]);

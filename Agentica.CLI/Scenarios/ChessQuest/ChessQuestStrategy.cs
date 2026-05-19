@@ -7,8 +7,23 @@ namespace Agentica.CLI.Scenarios.ChessQuest;
 public enum ChessQuestStrategyMode
 {
     Off,
-    Phase
+    Phase,
+    Projected
 }
+
+public sealed record ChessQuestStrategyProjection(
+    string Kind,
+    string ProjectionId,
+    DateTimeOffset CreatedAt,
+    string Source,
+    ChessQuestColor AgentColor,
+    string Phase,
+    string StrategyName,
+    string StrategyIntent,
+    IReadOnlyList<string> ActiveObjectives,
+    IReadOnlyList<string> StopTriggers,
+    IReadOnlyList<string> ProgressSignals,
+    IReadOnlyList<string> VerificationRules);
 
 public sealed record ChessQuestStrategyFrame(
     string Kind,
@@ -43,6 +58,7 @@ public sealed record ChessQuestPhaseContext(
     int StartCommittedPlyCount,
     int StartAgentMoveCount,
     string StartFen,
+    ChessQuestStrategyProjection? StrategyProjection,
     ChessQuestStrategyFrame StrategyFrame,
     ChessQuestPhaseObjective PhaseObjective,
     ChessQuestPhaseProgress Progress);
@@ -81,10 +97,13 @@ public sealed class ChessQuestPhaseTracker
     public static ChessQuestPhaseTracker Create(
         ChessQuestSession session,
         string phase,
-        int maxAgentTurns)
+        int maxAgentTurns,
+        ChessQuestStrategyProjection? strategyProjection = null)
     {
         var normalizedPhase = NormalizePhase(phase);
-        var frame = DefaultStrategyFrame(normalizedPhase);
+        var frame = strategyProjection is null
+            ? DefaultStrategyFrame(normalizedPhase)
+            : ToStrategyFrame(strategyProjection);
         var objective = DefaultPhaseObjective(normalizedPhase, maxAgentTurns);
         var state = session.CurrentState;
         var context = new ChessQuestPhaseContext(
@@ -95,6 +114,7 @@ public sealed class ChessQuestPhaseTracker
             StartCommittedPlyCount: session.CommittedPlies.Count,
             StartAgentMoveCount: CountAgentMoves(session, session.CommittedPlies.Count),
             StartFen: state.Fen,
+            StrategyProjection: strategyProjection,
             StrategyFrame: frame,
             PhaseObjective: objective,
             Progress: BuildProgress(session, objective, state.Ply, CountAgentMoves(session, session.CommittedPlies.Count)));
@@ -270,6 +290,50 @@ public sealed class ChessQuestPhaseTracker
                     "phase turn budget exhausted"
                 ])
         };
+
+    public static ChessQuestStrategyProjection DefaultProjection(
+        ChessQuestSession session,
+        string phase,
+        string source = "host_default")
+    {
+        var normalizedPhase = NormalizePhase(phase);
+        var frame = DefaultStrategyFrame(normalizedPhase);
+        return new ChessQuestStrategyProjection(
+            Kind: "ChessQuestStrategyProjection",
+            ProjectionId: $"strategy_projection_{Guid.NewGuid():N}"[..31],
+            CreatedAt: DateTimeOffset.UtcNow,
+            Source: source,
+            AgentColor: session.Scenario.AgentColor,
+            Phase: frame.Phase,
+            StrategyName: frame.StrategyName,
+            StrategyIntent: frame.StrategyIntent,
+            ActiveObjectives: frame.ActiveObjectives,
+            StopTriggers: frame.ReplanTriggers,
+            ProgressSignals:
+            [
+                "legal agent move committed",
+                "phase objective visibly advanced",
+                "no unsupported checkmate claims",
+                "phase report remains receipt-backed"
+            ],
+            VerificationRules:
+            [
+                "chessFrame is authoritative board truth",
+                "legal move receipts override strategy claims",
+                "use chess.project_line to verify check and checkmate claims",
+                "strategy projection is guidance and never proves completion"
+            ]);
+    }
+
+    private static ChessQuestStrategyFrame ToStrategyFrame(ChessQuestStrategyProjection projection) =>
+        new(
+            Kind: "ChessQuestStrategyFrame",
+            StrategyFrameId: projection.ProjectionId.Replace("strategy_projection_", "strategy_", StringComparison.Ordinal),
+            Phase: projection.Phase,
+            StrategyName: projection.StrategyName,
+            StrategyIntent: projection.StrategyIntent,
+            ActiveObjectives: projection.ActiveObjectives,
+            ReplanTriggers: projection.StopTriggers);
 
     private static ChessQuestPhaseObjective DefaultPhaseObjective(string phase, int maxAgentTurns) =>
         new(

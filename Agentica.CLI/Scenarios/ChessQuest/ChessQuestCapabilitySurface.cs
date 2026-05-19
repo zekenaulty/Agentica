@@ -96,6 +96,7 @@ public sealed class ChessQuestPlanningFrameProjector : IPlanningFrameProjector
                 Payload: new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
                     ["chessFrame"] = frame,
+                    ["strategyProjection"] = _phaseTracker?.Snapshot(_session).StrategyProjection,
                     ["strategyFrame"] = _phaseTracker?.Snapshot(_session).StrategyFrame,
                     ["phaseObjective"] = _phaseTracker?.Snapshot(_session).PhaseObjective,
                     ["phaseProgress"] = _phaseTracker?.Snapshot(_session).Progress,
@@ -131,8 +132,8 @@ public static class ChessQuestCapabilitySurfaceCompiler
         - chess.project_line may be used only for self-authored hypothetical lines; it never chooses moves and never generates opponent replies.
         - chess.play_move requires a concise public turnIntent matching the selected move.
         - Do not claim completion unless chess.complete_objective emits chessquest.objective_completed.
-        - If strategyFrame and phaseObjective are present, treat them as public strategic guidance, not board truth.
-        - If strategyFrame or phaseObjective conflicts with chessFrame, prefer chessFrame and legal tool receipts.
+        - If strategyProjection, strategyFrame, and phaseObjective are present, treat them as public strategic guidance, not board truth.
+        - If strategyProjection, strategyFrame, or phaseObjective conflicts with chessFrame, prefer chessFrame and legal tool receipts.
         """;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -153,6 +154,7 @@ public static class ChessQuestCapabilitySurfaceCompiler
         {
             [ContextKey] = BuildHarnessContext(session),
             ["chessFrame"] = BuildPlanningFrame(session),
+            ["strategyProjection"] = phaseTracker?.Snapshot(session).StrategyProjection,
             ["strategyFrame"] = phaseTracker?.Snapshot(session).StrategyFrame,
             ["phaseObjective"] = phaseTracker?.Snapshot(session).PhaseObjective,
             ["phaseProgress"] = phaseTracker?.Snapshot(session).Progress

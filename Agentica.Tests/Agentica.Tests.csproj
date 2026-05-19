@@ -32,6 +32,7 @@
     <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestRenderer.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
     <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestSession.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
     <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestStrategy.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestStrategyProjectionRunner.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
     <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestToolIds.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
     <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestTools.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
     <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessRulesEngine.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />

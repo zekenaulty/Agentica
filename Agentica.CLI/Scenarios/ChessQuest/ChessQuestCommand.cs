@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Agentica.Clients.Gemini;
 using Agentica.Clients.Llm;
+using Agentica.CLI.Logging;
 using Agentica.CLI.Scenarios.ChessQuest;
 using Agentica.Events;
 using Agentica.Execution;
@@ -233,14 +234,6 @@ internal static class ChessQuestCommand
             }
         }
 
-        var phaseTracker = options.StrategyMode == ChessQuestStrategyMode.Phase
-            ? ChessQuestPhaseTracker.Create(session, options.Phase, options.PhaseMaxAgentTurns)
-            : null;
-        var effectivePlanningMode = phaseTracker is not null && options.PlanningMode == PlanningMode.Stepwise
-            ? PlanningMode.QueryAndBlockerDriven
-            : options.PlanningMode;
-        var runObjective = BuildObjective(scenario, phaseTracker);
-        var initialPlannerContext = ChessQuestCapabilitySurfaceCompiler.BuildPlannerContext(session, phaseTracker);
         var runLog = services.CreateRunLog(options.LogRun, options.LogDir, "chessquest", args);
         if (runLog is not null)
         {
@@ -248,11 +241,6 @@ internal static class ChessQuestCommand
         }
 
         runLog?.WriteJson("chessquest-scenario.json", scenario);
-        if (phaseTracker is not null)
-        {
-            runLog?.WriteJson("chessquest-phase-context.json", phaseTracker.Snapshot(session));
-        }
-
         if (resumeRecord is not null)
         {
             runLog?.WriteJson("chessquest-resume-source.json", new
@@ -260,6 +248,36 @@ internal static class ChessQuestCommand
                 source = resumeSource,
                 record = resumeRecord
             });
+        }
+
+        ChessQuestStrategyProjectionResult? strategyProjectionResult;
+        try
+        {
+            strategyProjectionResult = options.StrategyMode == ChessQuestStrategyMode.Projected
+                ? await CreateStrategyProjectionAsync(session, options, runLog).ConfigureAwait(false)
+                : null;
+        }
+        catch (Exception exception) when (exception is LlmClientException or JsonException or InvalidOperationException)
+        {
+            Console.Error.WriteLine($"ChessQuest strategy projection failed: {exception.Message}");
+            return 1;
+        }
+        var phaseTracker = options.StrategyMode is ChessQuestStrategyMode.Phase or ChessQuestStrategyMode.Projected
+            ? ChessQuestPhaseTracker.Create(
+                session,
+                options.Phase,
+                options.PhaseMaxAgentTurns,
+                strategyProjectionResult?.Projection)
+            : null;
+        var effectivePlanningMode = phaseTracker is not null && options.PlanningMode == PlanningMode.Stepwise
+            ? PlanningMode.QueryAndBlockerDriven
+            : options.PlanningMode;
+        var runObjective = BuildObjective(scenario, phaseTracker);
+        var initialPlannerContext = ChessQuestCapabilitySurfaceCompiler.BuildPlannerContext(session, phaseTracker);
+
+        if (phaseTracker is not null)
+        {
+            runLog?.WriteJson("chessquest-phase-context.json", phaseTracker.Snapshot(session));
         }
 
         runLog?.WriteJson("chessquest-initial-planning-context.json", initialPlannerContext);
@@ -361,6 +379,45 @@ internal static class ChessQuestCommand
         }
 
         return envelope.Outcome.Status == RunOutcomeStatus.Succeeded ? 0 : 1;
+    }
+
+    private static async Task<ChessQuestStrategyProjectionResult> CreateStrategyProjectionAsync(
+        ChessQuestSession session,
+        ChessQuestRunOptions options,
+        RunLogWriter? runLog)
+    {
+        ChessQuestStrategyProjectionResult result;
+        if (options.Planner == PlannerKind.Deterministic)
+        {
+            result = ChessQuestStrategyProjectionRunner.Deterministic(
+                session,
+                options.Phase,
+                options.PhaseMaxAgentTurns);
+        }
+        else
+        {
+            using var projectionTimeout = new CancellationTokenSource(
+                TimeSpan.FromSeconds(Math.Min(options.TimeoutSeconds, 120)));
+            var modelId = options.ModelId ?? GeminiModelId.Flash25;
+            var client = new RetryingLlmClient(
+                new GeminiLlmClient(GeminiClientOptions.FromEnvironment(modelId)),
+                new LlmRetryOptions(CallTimeout: TimeSpan.FromSeconds(Math.Min(options.TimeoutSeconds, 120))));
+            var runner = new ChessQuestStrategyProjectionRunner(client);
+            result = await runner.ProjectAsync(
+                    session,
+                    options.Phase,
+                    options.PhaseMaxAgentTurns,
+                    modelId,
+                    options.ThinkingBudget ?? "off",
+                    options.IncludeThoughts,
+                    options.MaxOutputTokens ?? 1024,
+                    projectionTimeout.Token)
+                .ConfigureAwait(false);
+        }
+
+        runLog?.WriteJson("chessquest-strategy-projection.json", result);
+        PrintStrategyProjection(result);
+        return result;
     }
 
     private static int ReplayGame(IReadOnlyList<string> args)
@@ -613,6 +670,37 @@ internal static class ChessQuestCommand
         Console.WriteLine("Completion requires terminal board verification through chess.complete_objective.");
     }
 
+    private static void PrintStrategyProjection(ChessQuestStrategyProjectionResult result)
+    {
+        var projection = result.Projection;
+        Console.WriteLine();
+        Console.WriteLine("=== ChessQuest Orchestration Tier | Strategy Projection ===");
+        Console.WriteLine($"Source: {projection.Source}");
+        Console.WriteLine($"Provider: {result.ProviderName ?? "unknown"}; Model: {result.ResponseModelId ?? "unknown"}; Finish: {result.FinishReason}");
+        Console.WriteLine($"Phase: {projection.Phase}");
+        Console.WriteLine($"Strategy: {projection.StrategyName}");
+        Console.WriteLine($"Intent: {projection.StrategyIntent}");
+        Console.WriteLine("Objectives:");
+        foreach (var objective in projection.ActiveObjectives)
+        {
+            Console.WriteLine($"  - {objective}");
+        }
+
+        Console.WriteLine("Stop Triggers:");
+        foreach (var trigger in projection.StopTriggers)
+        {
+            Console.WriteLine($"  - {trigger}");
+        }
+
+        Console.WriteLine("Verification Rules:");
+        foreach (var rule in projection.VerificationRules)
+        {
+            Console.WriteLine($"  - {rule}");
+        }
+
+        Console.WriteLine();
+    }
+
     private static void PrintOpening(
         ChessQuestScenario scenario,
         ChessQuestSession session,
@@ -623,6 +711,7 @@ internal static class ChessQuestCommand
         ChessQuestGameRecord? resumeRecord = null,
         string? resumeSource = null)
     {
+        Console.WriteLine("=== ChessQuest Active Run Tier | ChessQuest Execution ===");
         Console.WriteLine($"Agent has accepted ChessQuest: \"{scenario.Title}\"");
         Console.WriteLine($"Objective: {scenario.PublicObjective}");
         Console.WriteLine($"Scenario: {scenario.ScenarioId}");
