@@ -1,10 +1,15 @@
 using System.Text.Json;
 using Agentica.Clients.Gemini;
 using Agentica.Clients.Llm;
+using Agentica.Clients.Orchestration;
+using Agentica.Clients.Planning;
 using Agentica.CLI.Logging;
 using Agentica.CLI.Scenarios.ChessQuest;
 using Agentica.Events;
 using Agentica.Execution;
+using Agentica.Orchestration;
+using Agentica.Orchestration.Context;
+using Agentica.Orchestration.Planning;
 using Agentica.Outcomes;
 using Agentica.Planning;
 using Agentica.Requests;
@@ -51,6 +56,11 @@ internal static class ChessQuestCommand
         if (string.Equals(args[0], "resume", StringComparison.OrdinalIgnoreCase))
         {
             return await ResumeGameAsync(board, args.Skip(1).ToArray(), services).ConfigureAwait(false);
+        }
+
+        if (string.Equals(args[0], "orchestrate", StringComparison.OrdinalIgnoreCase))
+        {
+            return await RunStrategicOrchestrationAsync(board, args.Skip(1).ToArray(), services).ConfigureAwait(false);
         }
 
         if (!string.Equals(args[0], "run", StringComparison.OrdinalIgnoreCase))
@@ -161,6 +171,147 @@ internal static class ChessQuestCommand
             Console.Error.WriteLine(exception.Message);
             return 1;
         }
+    }
+
+    private static async Task<int> RunStrategicOrchestrationAsync(
+        IChessQuestBoard board,
+        IReadOnlyList<string> args,
+        CliCommandServices services)
+    {
+        var options = ChessQuestOrchestrationOptions.Parse(args);
+        if (!options.IsValid)
+        {
+            Console.Error.WriteLine(options.Error);
+            services.PrintUsage();
+            return 2;
+        }
+
+        if ((options.TaskPlanner == PlannerKind.Gemini || options.RunPlanner == PlannerKind.Gemini) &&
+            !services.GeminiCredentialsAvailable())
+        {
+            Console.Error.WriteLine("Gemini planner requested, but no Gemini API key was configured. Set GEMINI_API_KEY or GOOGLE_API_KEY.");
+            return 2;
+        }
+
+        ChessQuestScenario scenario;
+        try
+        {
+            scenario = board.Load(options.ScenarioId);
+        }
+        catch (InvalidOperationException exception)
+        {
+            Console.Error.WriteLine(exception.Message);
+            return 2;
+        }
+
+        var runOptions = options.ToRunOptions();
+        var opponentMode = ResolveOpponentMode(scenario, runOptions);
+        var opponentPlanner = runOptions.OpponentPlanner ?? runOptions.Planner;
+        if (opponentMode == ChessQuestOpponentMode.Agent &&
+            opponentPlanner == PlannerKind.Gemini &&
+            !services.GeminiCredentialsAvailable())
+        {
+            Console.Error.WriteLine("Agent opponent requested with Gemini planner, but no Gemini API key was configured. Set GEMINI_API_KEY or GOOGLE_API_KEY.");
+            return 2;
+        }
+
+        scenario = ApplyOpponentDifficulty(scenario, opponentMode, runOptions);
+        var opponent = CreateOpponent(scenario, runOptions, opponentMode, opponentPlanner, services);
+        var session = new ChessQuestSession(scenario, opponent: opponent);
+        var state = new ChessQuestStrategicOrchestrationState(session);
+        var runLog = services.CreateRunLog(options.LogRun, options.LogDir, "chessquest-orchestrate", args);
+        runLog?.WriteJson("chessquest-orchestration-options.json", options);
+        runLog?.WriteJson("chessquest-scenario.json", scenario);
+        runLog?.WriteJson("chessquest-initial-planning-frame.json", ChessQuestCapabilitySurfaceCompiler.BuildPlanningFrame(session));
+        if (runLog is not null)
+        {
+            ChessQuestGameRecordStore.WriteDirectory(runLog.DirectoryPath, session);
+        }
+
+        Action<ChessQuestCockpitTurnEnvelope>? turnRecorder = runLog is null
+            ? null
+            : turn =>
+            {
+                runLog.WriteJsonLine("chessquest-turns.jsonl", turn);
+                ChessQuestGameRecordStore.WriteDirectory(runLog.DirectoryPath, session);
+            };
+
+        Action<ChessQuestStrategyProjection, ChessQuestPhaseReport>? phaseCompleted = runLog is null
+            ? null
+            : (projection, report) =>
+            {
+                runLog.WriteJsonLine("chessquest-strategy-projections.jsonl", projection);
+                runLog.WriteJsonLine("chessquest-phase-reports.jsonl", report);
+                runLog.WriteJson("chessquest-latest-phase-report.json", report);
+                ChessQuestGameRecordStore.WriteDirectory(runLog.DirectoryPath, session);
+            };
+
+        PrintStrategicOrchestrationOpening(scenario, session, options, opponentMode, opponentPlanner);
+
+        var orchestrator = new TaskOrchestrator(
+            CreateChessQuestTaskPlanner(options),
+            new ChessQuestPhaseRunExecutor(
+                state,
+                phaseRequest => CreateChessQuestRunPlanner(session, phaseRequest, options, services),
+                phaseTracker => services.CreateEventSink(
+                    CreateEventSink(session, runOptions, turnRecorder),
+                    runLog),
+                options.PhaseMaxAgentTurns,
+                new ExecutionPolicy(
+                    MaxSteps: options.MaxSteps,
+                    MaxRefinements: options.MaxRefinements,
+                    Timeout: TimeSpan.FromSeconds(options.TimeoutSeconds),
+                    PlanningMode: PlanningMode.QueryAndBlockerDriven,
+                    MaxPlanContinuations: options.MaxPlanContinuations,
+                    PlanningContext: new PlanningContextOptions(MaxRecentObservations: 12, MaxRecentReceipts: 12),
+                    MaxBlockedRetries: options.MaxBlockedRetries),
+                phaseCompleted),
+            new ChessQuestTaskAcceptanceEvaluator(state, options.MaxOrchestrationRuns),
+            new DeterministicWorkContextCompiler(),
+            state.BuildHostState,
+            new OrchestrationPolicy(
+                MaxRuns: options.MaxOrchestrationRuns + 1,
+                MaxRefinements: options.MaxOrchestrationRefinements,
+                MaxGraphMutationsPerRefinement: options.MaxGraphMutations));
+
+        using var runCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(options.TimeoutSeconds));
+        ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
+        {
+            eventArgs.Cancel = true;
+            runCancellation.Cancel();
+        };
+
+        OrchestrationOutcomeEnvelope outcome;
+        Console.CancelKeyPress += cancelHandler;
+        try
+        {
+            outcome = await orchestrator.RunAsync(
+                new LargeTaskRequest(
+                    BuildStrategicOrchestrationObjective(scenario, options),
+                    RequestOrigin.User,
+                    BuildStrategicOrchestrationContext(session, options)),
+                runCancellation.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine($"ChessQuest strategic orchestration timed out after {options.TimeoutSeconds} second(s).");
+            return 1;
+        }
+        finally
+        {
+            Console.CancelKeyPress -= cancelHandler;
+        }
+
+        PrintStrategicOrchestrationSummary(outcome, state);
+        runLog?.WriteJson("chessquest-orchestration-outcome.json", outcome);
+        if (runLog is not null)
+        {
+            ChessQuestGameRecordStore.WriteDirectory(runLog.DirectoryPath, session);
+            Console.WriteLine();
+            Console.WriteLine($"Run log written: {runLog.DirectoryPath}");
+        }
+
+        return outcome.Status == OrchestrationStatus.Succeeded ? 0 : 1;
     }
 
     private static async Task<int> RunScenarioAsync(
@@ -379,6 +530,141 @@ internal static class ChessQuestCommand
         }
 
         return envelope.Outcome.Status == RunOutcomeStatus.Succeeded ? 0 : 1;
+    }
+
+    private static ITaskPlanner CreateChessQuestTaskPlanner(ChessQuestOrchestrationOptions options)
+    {
+        ITaskPlanner planner;
+        if (options.TaskPlanner == PlannerKind.Deterministic)
+        {
+            planner = new ChessQuestDeterministicTaskPlanner(options.PhaseMaxAgentTurns);
+        }
+        else
+        {
+            var modelId = options.TaskModelId ?? GeminiModelId.Flash25;
+            var llmClient = new RetryingLlmClient(
+                new GeminiLlmClient(GeminiClientOptions.FromEnvironment(modelId)),
+                new LlmRetryOptions(CallTimeout: TimeSpan.FromMinutes(10)));
+            planner = new LlmTaskPlanner(
+                llmClient,
+                new LlmTaskPlannerOptions(
+                    modelId,
+                    new LlmGenerationOptions(
+                        Temperature: 0,
+                        MaxOutputTokens: options.MaxOutputTokens ?? LlmPlannerOptions.DefaultMaxOutputTokens,
+                        Thinking: ToThinkingOptions(options.ThinkingBudget ?? "off", options.IncludeThoughts))));
+        }
+
+        return new ChessQuestConsoleTaskPlanner(planner);
+    }
+
+    private static IWorkflowPlanner CreateChessQuestRunPlanner(
+        ChessQuestSession session,
+        RunRequest phaseRequest,
+        ChessQuestOrchestrationOptions options,
+        CliCommandServices services)
+    {
+        if (options.RunPlanner == PlannerKind.Deterministic)
+        {
+            return new ChessQuestDeterministicPlanner(session);
+        }
+
+        return services.CreatePlanner(new CliRunOptions(
+            phaseRequest.Objective,
+            options.RunPlanner,
+            options.RunModelId ?? options.TaskModelId,
+            options.ThinkingBudget,
+            options.IncludeThoughts,
+            options.MaxOutputTokens,
+            PlanningMode.QueryAndBlockerDriven,
+            options.MaxBlockedRetries,
+            LogRun: false,
+            LogDir: null,
+            IsValid: true,
+            Error: null));
+    }
+
+    private static LlmThinkingOptions? ToThinkingOptions(
+        string? thinkingBudget,
+        bool includeThoughts) =>
+        thinkingBudget switch
+        {
+            null when includeThoughts => new LlmThinkingOptions(IncludeThoughts: true),
+            null => null,
+            "dynamic" => LlmThinkingOptions.Dynamic(includeThoughts),
+            "off" => LlmThinkingOptions.Off(includeThoughts),
+            "0" => LlmThinkingOptions.Off(includeThoughts),
+            var value when int.TryParse(value, out var tokens) && tokens > 0 =>
+                LlmThinkingOptions.Budget(tokens, includeThoughts),
+            _ => throw new InvalidOperationException($"Invalid thinking budget '{thinkingBudget}'.")
+        };
+
+    private static string BuildStrategicOrchestrationObjective(
+        ChessQuestScenario scenario,
+        ChessQuestOrchestrationOptions options) =>
+        $"""
+        ChessQuest strategic orchestration for scenario "{scenario.Title}".
+
+        Campaign objective:
+        {scenario.PublicObjective}
+
+        Orchestration role:
+        - Choose the next bounded strategic phase task for the active ChessQuest runner.
+        - Do not choose a chess move directly; the active runner chooses moves through ChessQuest strict referee tools.
+        - Initial plan should contain exactly one non-optional phase_run task.
+        - Refinement may add exactly one next phase_run task when a receipt-backed phase report shows the game is nonterminal and more phase budget remains.
+        - Strategy frames shape public intent only. chessFrame, legal move receipts, and objective verifier outputs are authoritative.
+
+        Required phase task contextProjection keys:
+        - chessquest.taskKind = "phase_run"
+        - chessquest.phase = one of opening, tactical, conversion, defense, endgame
+        - chessquest.taskDirection = short public strategic direction
+        - chessquest.publicRationale = concise evidence-based rationale from public context
+        - chessquest.phaseGoal = bounded goal for the active runner
+        - chessquest.maxAgentTurns = integer from 1 to {Math.Max(1, options.PhaseMaxAgentTurns)}
+        - chessquest.replanTriggers = public stop/replan triggers
+
+        Acceptance:
+        - Phase tasks should require artifact kind chessquest.phase_report.
+        - The host verifies all mutation and completion evidence.
+        """;
+
+    private static IReadOnlyDictionary<string, object?> BuildStrategicOrchestrationContext(
+        ChessQuestSession session,
+        ChessQuestOrchestrationOptions options)
+    {
+        var context = new Dictionary<string, object?>(
+            ChessQuestCapabilitySurfaceCompiler.BuildPlannerContext(session),
+            StringComparer.Ordinal)
+        {
+            ["chessquest.orchestration.kind"] = "strategic_phase_task_planner",
+            ["chessquest.orchestration.maxPhaseTasks"] = options.MaxOrchestrationRuns,
+            ["chessquest.orchestration.defaultMaxAgentTurnsPerPhase"] = options.PhaseMaxAgentTurns,
+            ["chessquest.orchestration.allowedPhases"] = new[]
+            {
+                "opening",
+                "tactical",
+                "conversion",
+                "defense",
+                "endgame"
+            },
+            ["chessquest.orchestration.allowedTaskKind"] = "phase_run",
+            ["chessquest.orchestration.acceptanceArtifactKind"] = "chessquest.phase_report",
+            ["chessquest.orchestration.requiredContextProjectionKeys"] = new[]
+            {
+                "chessquest.taskKind",
+                "chessquest.phase",
+                "chessquest.taskDirection",
+                "chessquest.publicRationale",
+                "chessquest.phaseGoal",
+                "chessquest.maxAgentTurns",
+                "chessquest.replanTriggers"
+            },
+            ["chessquest.orchestration.boundary"] =
+                "Orchestration selects phase envelopes; active ChessQuest runs select and commit legal moves."
+        };
+
+        return context;
     }
 
     private static async Task<ChessQuestStrategyProjectionResult> CreateStrategyProjectionAsync(
@@ -668,6 +954,61 @@ internal static class ChessQuestCommand
         Console.WriteLine("  chess.get_state, chess.render_board, chess.list_legal_moves, chess.project_line, chess.play_move, chess.complete_objective");
         Console.WriteLine();
         Console.WriteLine("Completion requires terminal board verification through chess.complete_objective.");
+    }
+
+    private static void PrintStrategicOrchestrationOpening(
+        ChessQuestScenario scenario,
+        ChessQuestSession session,
+        ChessQuestOrchestrationOptions options,
+        ChessQuestOpponentMode opponentMode,
+        PlannerKind opponentPlanner)
+    {
+        Console.WriteLine("=== ChessQuest Orchestration Tier | Strategic Session ===");
+        Console.WriteLine($"Scenario: {scenario.ScenarioId} ({scenario.Title})");
+        Console.WriteLine($"Campaign Objective: {scenario.PublicObjective}");
+        Console.WriteLine($"Agent Color: {scenario.AgentColor}");
+        Console.WriteLine($"Task Planner: {options.TaskPlanner}; Active Run Planner: {options.RunPlanner}");
+        Console.WriteLine($"Phase Budget: {options.PhaseMaxAgentTurns} agent turn(s) per phase; Max Phase Tasks: {options.MaxOrchestrationRuns}");
+        Console.WriteLine($"Opponent: {scenario.Difficulty.Opponent}");
+        if (opponentMode == ChessQuestOpponentMode.Agent)
+        {
+            Console.WriteLine($"Opponent Agent Planner: {opponentPlanner}");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Initial board:");
+        Console.WriteLine(session.CurrentState.Fen);
+        Console.WriteLine(ChessQuestRenderer.RenderBoardFromFen(session.CurrentState.Fen));
+        Console.WriteLine();
+    }
+
+    private static void PrintStrategicOrchestrationSummary(
+        OrchestrationOutcomeEnvelope outcome,
+        ChessQuestStrategicOrchestrationState state)
+    {
+        Console.WriteLine();
+        Console.WriteLine("--- ChessQuest Strategic Orchestration Summary ---");
+        Console.WriteLine($"Status: {outcome.Status}");
+        Console.WriteLine($"Stop Reason: {outcome.StopReason}");
+        Console.WriteLine($"Completed Phase Tasks: {outcome.State.CompletedTaskIds.Count}");
+        Console.WriteLine($"Run Outcomes: {outcome.RunOutcomes.Count}");
+        Console.WriteLine($"Terminal: {state.Session.CurrentState.IsTerminal}");
+        if (state.Session.CurrentState.TerminalState is not null)
+        {
+            Console.WriteLine($"Result: {state.Session.CurrentState.TerminalState.Result} ({state.Session.CurrentState.TerminalState.Reason})");
+        }
+
+        Console.WriteLine($"Final FEN: {state.Session.CurrentState.Fen}");
+        foreach (var report in state.PhaseReports)
+        {
+            Console.WriteLine();
+            Console.WriteLine($"Phase Report: {report.PhaseRunId}");
+            Console.WriteLine($"  Phase: {report.Phase}; Strategy: {report.StrategyName}");
+            Console.WriteLine($"  Status: {report.Status}; Stop: {report.StopReason}");
+            Console.WriteLine($"  Agent Moves: {(report.AgentMoves.Count == 0 ? "none" : string.Join(", ", report.AgentMoves))}");
+            Console.WriteLine($"  Opponent Moves: {(report.OpponentMoves.Count == 0 ? "none" : string.Join(", ", report.OpponentMoves))}");
+            Console.WriteLine($"  Material Delta: {report.MaterialBalanceDelta}; Terminal: {report.Terminal}");
+        }
     }
 
     private static void PrintStrategyProjection(ChessQuestStrategyProjectionResult result)

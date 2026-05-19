@@ -5,6 +5,8 @@ using Agentica.CLI.Scenarios.ChessQuest;
 using Agentica.Execution;
 using Agentica.Events;
 using Agentica.Observations;
+using Agentica.Orchestration;
+using Agentica.Orchestration.Planning;
 using Agentica.Outcomes;
 using Agentica.Planning;
 using Agentica.Requests;
@@ -444,6 +446,57 @@ public sealed class ChessQuestHarnessTests
         Assert.Equal("budget_complete", report.Status);
         Assert.Equal("agent_turn_budget_exhausted", report.StopReason);
         Assert.Equal(["e2e4"], report.AgentMoves);
+    }
+
+    [Fact]
+    public void ChessQuest_phase_task_envelope_projects_orchestration_context_into_strategy()
+    {
+        var session = CreateSession();
+        var envelope = ChessQuestPhaseTaskEnvelope.FromContext(
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["chessquest.taskKind"] = "phase_run",
+                ["chessquest.phase"] = "tactical",
+                ["chessquest.taskDirection"] = "verify_tactical_opportunity",
+                ["chessquest.publicRationale"] = "A public phase report suggests a forcing opportunity.",
+                ["chessquest.phaseGoal"] = "Verify forcing ideas before committing a move.",
+                ["chessquest.maxAgentTurns"] = 2,
+                ["chessquest.replanTriggers"] = new[] { "terminal game state" }
+            },
+            defaultMaxAgentTurns: 4,
+            taskNumber: 2);
+
+        var projection = envelope.ToProjection(session);
+
+        Assert.Equal("phase_run", envelope.TaskKind);
+        Assert.Equal("tactical", envelope.Phase);
+        Assert.Equal(2, envelope.MaxAgentTurns);
+        Assert.Equal("verify_tactical_opportunity", projection.StrategyName);
+        Assert.Equal("A public phase report suggests a forcing opportunity.", projection.StrategyIntent);
+        Assert.Contains("Verify forcing ideas before committing a move.", projection.ActiveObjectives);
+        Assert.Contains("terminal game state", projection.StopTriggers);
+    }
+
+    [Fact]
+    public async Task ChessQuest_deterministic_task_planner_creates_phase_task_envelope()
+    {
+        var planner = new ChessQuestDeterministicTaskPlanner(maxAgentTurns: 3);
+
+        var plan = await planner.CreatePlanAsync(new TaskPlanningRequest(
+            new LargeTaskRequest(
+                "Choose a ChessQuest phase task.",
+                RequestOrigin.User,
+                new Dictionary<string, object?>()),
+            new OrchestrationPolicy()));
+
+        var task = Assert.Single(plan.Tasks);
+        Assert.Equal("chessquest_phase_001", task.TaskId);
+        Assert.Equal("phase_run", task.ContextProjection["chessquest.taskKind"]);
+        Assert.Equal("opening", task.ContextProjection["chessquest.phase"]);
+        Assert.Equal(3, task.ContextProjection["chessquest.maxAgentTurns"]);
+        Assert.Contains(task.AcceptanceRequirements, requirement =>
+            requirement.Kind == TaskAcceptanceRequirementKind.Artifact &&
+            requirement.ArtifactKind == "chessquest.phase_report");
     }
 
     [Fact]
