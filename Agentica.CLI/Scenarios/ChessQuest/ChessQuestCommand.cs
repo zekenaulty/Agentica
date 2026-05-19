@@ -84,6 +84,8 @@ internal static class ChessQuestCommand
             new GeminiLlmClient(GeminiClientOptions.FromEnvironment(options.ModelId)),
             new LlmRetryOptions(CallTimeout: TimeSpan.FromSeconds(options.TimeoutSeconds)));
         var runner = new ChessQuestBoardProbeRunner(client);
+        var runLog = services.CreateRunLog(options.LogRun, options.LogDir, "chessquest-board-probe", args);
+        runLog?.WriteJson("chessquest-board-probe-options.json", options);
 
         if (!options.Json)
         {
@@ -101,9 +103,32 @@ internal static class ChessQuestCommand
         {
             var summary = await runner.RunAsync(
                     options,
-                    options.Json ? null : PrintBoardProbeTrial,
+                    (trial, result) =>
+                    {
+                        runLog?.WriteJsonLine(
+                            "chessquest-board-probe-trials.jsonl",
+                            new
+                            {
+                                trial.TrialNumber,
+                                trial.Seed,
+                                trial.Fen,
+                                trial.BoardLines,
+                                trial.Square,
+                                trial.Expected,
+                                Prompt = ChessQuestBoardProbeRunner.BuildPrompt(trial, options.Presentation),
+                                Result = result,
+                                RawResponse = result.RawResponse
+                            });
+
+                        if (!options.Json)
+                        {
+                            PrintBoardProbeTrial(trial, result);
+                        }
+                    },
                     timeout.Token)
                 .ConfigureAwait(false);
+
+            runLog?.WriteJson("chessquest-board-probe-summary.json", summary);
 
             if (options.Json)
             {
@@ -115,6 +140,12 @@ internal static class ChessQuestCommand
                 Console.WriteLine("--- Board Probe Summary ---");
                 Console.WriteLine($"Passed: {summary.Passed}/{summary.Trials}");
                 Console.WriteLine($"Failed: {summary.Failed}/{summary.Trials}");
+            }
+
+            if (runLog is not null)
+            {
+                Console.WriteLine();
+                Console.WriteLine($"Run log written: {runLog.DirectoryPath}");
             }
 
             return summary.Failed == 0 ? 0 : 1;

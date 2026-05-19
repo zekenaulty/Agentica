@@ -463,6 +463,23 @@ public sealed class ChessQuestHarnessTests
     }
 
     [Fact]
+    public void ChessQuest_board_probe_options_parse_logging_arguments()
+    {
+        var options = ChessQuestBoardProbeOptions.Parse(
+            [
+                "--trials", "2",
+                "--log-run",
+                "--log-dir", "probe-logs"
+            ],
+            "test-model");
+
+        Assert.True(options.IsValid);
+        Assert.True(options.LogRun);
+        Assert.Equal("probe-logs", options.LogDir);
+        Assert.Equal(2, options.Trials);
+    }
+
+    [Fact]
     public async Task HeuristicChessOpponent_prefers_immediate_checkmate()
     {
         var rules = new GeraChessRulesEngine(FoolsMateBlackToMoveFen);

@@ -30,6 +30,8 @@ public sealed record ChessQuestBoardProbeOptions(
     int MaxOutputTokens,
     int TimeoutSeconds,
     bool Json,
+    bool LogRun,
+    string? LogDir,
     bool IsValid,
     string? Error)
 {
@@ -48,6 +50,8 @@ public sealed record ChessQuestBoardProbeOptions(
         var maxOutputTokens = 512;
         var timeoutSeconds = 120;
         var json = false;
+        var logRun = false;
+        string? logDir = null;
 
         for (var index = 0; index < args.Count; index++)
         {
@@ -151,6 +155,18 @@ public sealed record ChessQuestBoardProbeOptions(
                     json = true;
                     break;
 
+                case "--log-run":
+                    logRun = true;
+                    break;
+
+                case "--log-dir":
+                    if (!TryReadValue(args, ref index, out logDir))
+                    {
+                        return Invalid("Missing value for --log-dir.", defaultModelId);
+                    }
+
+                    break;
+
                 default:
                     return Invalid($"Unknown board-probe option '{arg}'.", defaultModelId);
             }
@@ -168,6 +184,8 @@ public sealed record ChessQuestBoardProbeOptions(
             maxOutputTokens,
             timeoutSeconds,
             json,
+            logRun,
+            logDir,
             IsValid: true,
             Error: null);
     }
@@ -269,6 +287,8 @@ public sealed record ChessQuestBoardProbeOptions(
             MaxOutputTokens: 0,
             TimeoutSeconds: 0,
             Json: false,
+            LogRun: false,
+            LogDir: null,
             IsValid: false,
             Error: error);
 }
@@ -301,7 +321,12 @@ public sealed record ChessQuestBoardProbeTrialResult(
     ChessQuestBoardProbeExpected Expected,
     ChessQuestBoardProbeAnswer? Answer,
     string RawResponse,
-    string? FailureReason);
+    string? FailureReason,
+    string? ProviderName = null,
+    string? ResponseModelId = null,
+    LlmFinishReason FinishReason = LlmFinishReason.Unknown,
+    LlmUsage? Usage = null,
+    IReadOnlyDictionary<string, string>? ResponseMetadata = null);
 
 public sealed record ChessQuestBoardProbeSummary(
     int Trials,
@@ -544,7 +569,14 @@ public sealed class ChessQuestBoardProbeRunner
             StructuredOutput: new LlmStructuredOutputOptions(JsonSchema: AnswerJsonSchema));
 
         var response = await _client.GenerateAsync(request, cancellationToken).ConfigureAwait(false);
-        return Validate(trial, response.StructuredJson ?? response.Text);
+        return Validate(trial, response.StructuredJson ?? response.Text) with
+        {
+            ProviderName = response.ProviderName,
+            ResponseModelId = response.ModelId,
+            FinishReason = response.FinishReason,
+            Usage = response.Usage,
+            ResponseMetadata = response.Metadata
+        };
     }
 
     private static ChessQuestBoardProbeAnswer Normalize(ChessQuestBoardProbeAnswer answer)
