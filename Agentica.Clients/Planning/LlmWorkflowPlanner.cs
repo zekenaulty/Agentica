@@ -33,6 +33,7 @@ public sealed class LlmWorkflowPlanner : IWorkflowPlanner
         return await ParsePlanWithRepairAsync(
                 llmRequest,
                 response.StructuredJson ?? response.Text,
+                response.FinishReason,
                 version: 1,
                 isRefinement: false,
                 cancellationToken)
@@ -52,6 +53,7 @@ public sealed class LlmWorkflowPlanner : IWorkflowPlanner
         return await ParsePlanWithRepairAsync(
                 llmRequest,
                 response.StructuredJson ?? response.Text,
+                response.FinishReason,
                 version: 2,
                 isRefinement: true,
                 cancellationToken)
@@ -61,6 +63,7 @@ public sealed class LlmWorkflowPlanner : IWorkflowPlanner
     private async Task<WorkflowPlan> ParsePlanWithRepairAsync(
         LlmRequest originalRequest,
         string json,
+        LlmFinishReason finishReason,
         int version,
         bool isRefinement,
         CancellationToken cancellationToken)
@@ -68,14 +71,15 @@ public sealed class LlmWorkflowPlanner : IWorkflowPlanner
         try
         {
             return isRefinement
-                ? ParseRefinementPlan(json, version)
-                : ParsePlan(json, version);
+                ? ParseRefinementPlan(json, version, finishReason)
+                : ParsePlan(json, version, finishReason);
         }
         catch (LlmPlannerException exception) when (_options.InvalidJsonRepairAttempts > 0)
         {
             return await RepairPlanAsync(
                     originalRequest,
                     json,
+                    finishReason,
                     version,
                     isRefinement,
                     exception,
@@ -87,6 +91,7 @@ public sealed class LlmWorkflowPlanner : IWorkflowPlanner
     private async Task<WorkflowPlan> RepairPlanAsync(
         LlmRequest originalRequest,
         string invalidJson,
+        LlmFinishReason initialFinishReason,
         int version,
         bool isRefinement,
         LlmPlannerException firstException,
@@ -94,6 +99,7 @@ public sealed class LlmWorkflowPlanner : IWorkflowPlanner
     {
         var lastJson = invalidJson;
         LlmPlannerException lastException = firstException;
+        var lastRepairFinishReason = LlmFinishReason.Unknown;
 
         for (var attempt = 1; attempt <= _options.InvalidJsonRepairAttempts; attempt++)
         {
@@ -113,12 +119,13 @@ public sealed class LlmWorkflowPlanner : IWorkflowPlanner
 
             var repairResponse = await GenerateAsync(repairRequest, cancellationToken).ConfigureAwait(false);
             lastJson = repairResponse.StructuredJson ?? repairResponse.Text;
+            lastRepairFinishReason = repairResponse.FinishReason;
 
             try
             {
                 return isRefinement
-                    ? ParseRefinementPlan(lastJson, version)
-                    : ParsePlan(lastJson, version);
+                    ? ParseRefinementPlan(lastJson, version, repairResponse.FinishReason)
+                    : ParsePlan(lastJson, version, repairResponse.FinishReason);
             }
             catch (LlmPlannerException exception)
             {
@@ -127,21 +134,26 @@ public sealed class LlmWorkflowPlanner : IWorkflowPlanner
         }
 
         var payloadKind = isRefinement ? "refinement" : "plan";
+        var truncation = initialFinishReason == LlmFinishReason.MaxTokens ||
+            lastRepairFinishReason == LlmFinishReason.MaxTokens;
         throw new LlmPlannerException(
-            $"Planner returned invalid {payloadKind} JSON and repair failed after {_options.InvalidJsonRepairAttempts} attempt(s). Last repair error: {lastException.Message}",
+            $"Planner returned invalid {payloadKind} JSON and repair failed after {_options.InvalidJsonRepairAttempts} attempt(s). Initial finish reason: {initialFinishReason}; last repair finish reason: {lastRepairFinishReason}; truncation suspected: {truncation}. Last repair error: {lastException.Message}",
             lastException);
     }
 
-    private static WorkflowPlan ParseRefinementPlan(string json, int version)
+    private static WorkflowPlan ParseRefinementPlan(
+        string json,
+        int version,
+        LlmFinishReason finishReason)
     {
         try
         {
             var contract = JsonSerializer.Deserialize<PlanRefinementJsonContract>(json, JsonOptions)
-                ?? throw new LlmPlannerException("Planner returned an empty refinement payload.");
+                ?? throw new LlmPlannerException(InvalidPayloadMessage("refinement", finishReason, "empty payload"));
 
             if (contract.RefinedPlan is null)
             {
-                throw new LlmPlannerException("Planner refinement payload did not include refinedPlan.");
+                throw new LlmPlannerException(InvalidPayloadMessage("refinement", finishReason, "payload did not include refinedPlan"));
             }
 
             return contract.RefinedPlan.ToWorkflowPlan(version) with
@@ -153,24 +165,35 @@ public sealed class LlmWorkflowPlanner : IWorkflowPlanner
         }
         catch (JsonException exception)
         {
-            throw new LlmPlannerException("Planner returned invalid refinement JSON.", exception);
+            throw new LlmPlannerException(InvalidPayloadMessage("refinement", finishReason, "invalid JSON"), exception);
         }
     }
 
-    private static WorkflowPlan ParsePlan(string json, int version)
+    private static WorkflowPlan ParsePlan(
+        string json,
+        int version,
+        LlmFinishReason finishReason)
     {
         try
         {
             var contract = JsonSerializer.Deserialize<WorkflowPlanJsonContract>(json, JsonOptions)
-                ?? throw new LlmPlannerException("Planner returned an empty plan payload.");
+                ?? throw new LlmPlannerException(InvalidPayloadMessage("plan", finishReason, "empty payload"));
 
             return contract.ToWorkflowPlan(version);
         }
         catch (JsonException exception)
         {
-            throw new LlmPlannerException("Planner returned invalid plan JSON.", exception);
+            throw new LlmPlannerException(InvalidPayloadMessage("plan", finishReason, "invalid JSON"), exception);
         }
     }
+
+    private static string InvalidPayloadMessage(
+        string payloadKind,
+        LlmFinishReason finishReason,
+        string failure) =>
+        finishReason == LlmFinishReason.MaxTokens
+            ? $"Planner returned truncated {payloadKind} JSON ({failure}); provider finish reason was MaxTokens."
+            : $"Planner returned invalid {payloadKind} JSON ({failure}); provider finish reason was {finishReason}.";
 
     private async Task<LlmResponse> GenerateAsync(
         LlmRequest request,

@@ -281,6 +281,62 @@ public sealed record ChessQuestPhaseTaskEnvelope(
     }
 }
 
+public static class ChessQuestPhaseSanityPolicy
+{
+    public static IReadOnlyList<string> Evaluate(
+        ChessQuestPhaseTaskEnvelope envelope,
+        ChessQuestPhaseReport? latestReport)
+    {
+        if (latestReport is null)
+        {
+            return [];
+        }
+
+        var warnings = new List<string>();
+        var phase = Normalize(envelope.Phase);
+        if ((phase is "conversion" or "endgame") && latestReport.MaterialBalanceAfter < 0)
+        {
+            warnings.Add("conversion/endgame selected while materially behind; conversion framing should be evidence-backed by advantage, promotion, simplification, or a verified terminal route.");
+        }
+
+        if (phase is "tactical" &&
+            latestReport.MaterialBalanceDelta < 0 &&
+            !HasRecoveryRationale(envelope))
+        {
+            warnings.Add("tactical selected after material loss without recovery or stabilization rationale; tactical claims should model opponent replies or state uncertainty.");
+        }
+
+        return warnings;
+    }
+
+    private static bool HasRecoveryRationale(ChessQuestPhaseTaskEnvelope envelope)
+    {
+        var text = string.Join(
+            " ",
+            new[]
+                {
+                    envelope.TaskDirection,
+                    envelope.PublicRationale,
+                    envelope.PhaseGoal
+                }
+                .Concat(envelope.ActiveObjectives)
+                .Concat(envelope.SuccessSignals)
+                .Concat(envelope.ClaimDiscipline));
+
+        return text.Contains("stabil", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("recover", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("defen", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("counterplay", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("material loss", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("material deficit", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string Normalize(string phase) =>
+        string.IsNullOrWhiteSpace(phase)
+            ? "opening"
+            : phase.Trim().ToLowerInvariant().Replace('_', '-');
+}
+
 public sealed class ChessQuestStrategicOrchestrationState
 {
     public ChessQuestStrategicOrchestrationState(ChessQuestSession session)
@@ -376,6 +432,9 @@ public sealed class ChessQuestPhaseRunExecutor : IRunExecutor
             requestContext,
             _defaultMaxAgentTurns,
             taskNumber);
+        var phaseSanityWarnings = ChessQuestPhaseSanityPolicy.Evaluate(
+            envelope,
+            _state.LatestPhaseReport);
         var projection = envelope.ToProjection(_state.Session);
         _state.LatestTaskEnvelope = envelope;
         _state.StrategyProjections.Add(projection);
@@ -389,6 +448,7 @@ public sealed class ChessQuestPhaseRunExecutor : IRunExecutor
         PrintList("Objectives", envelope.ActiveObjectives);
         PrintList("Success signals", envelope.SuccessSignals);
         PrintList("Claim discipline", envelope.ClaimDiscipline);
+        PrintList("Phase sanity warnings", phaseSanityWarnings);
 
         var phaseTracker = ChessQuestPhaseTracker.Create(
             _state.Session,
@@ -402,6 +462,8 @@ public sealed class ChessQuestPhaseRunExecutor : IRunExecutor
         {
             runContext[pair.Key] = pair.Value;
         }
+
+        runContext["chessquest.phaseSanityWarnings"] = phaseSanityWarnings;
 
         var phaseObjective = BuildPhaseObjective(
             request.Objective,

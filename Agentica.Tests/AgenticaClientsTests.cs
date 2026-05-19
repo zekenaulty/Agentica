@@ -325,6 +325,33 @@ public sealed class AgenticaClientsTests
     }
 
     [Fact]
+    public async Task Max_tokens_model_json_failure_is_reported_as_truncation()
+    {
+        var tool = new CountingTool("known_tool");
+        var catalog = ToolCatalog.Create(new ToolRegistration(
+            new ToolDescriptor("known_tool", "Known", ToolKind.Query, ToolEffect.ReadOnly),
+            tool));
+        var runner = CreateRunner(
+            new LlmWorkflowPlanner(
+                new FakeLlmClient(new LlmResponse(
+                    "fake",
+                    "fake-model",
+                    "{not-json",
+                    StructuredJson: "{not-json",
+                    FinishReason: LlmFinishReason.MaxTokens)),
+                new LlmPlannerOptions(InvalidJsonRepairAttempts: 0)),
+            catalog);
+
+        var envelope = await runner.RunAsync(new RunRequest("Truncated JSON test"));
+
+        Assert.Equal(RunOutcomeStatus.PlanInvalid, envelope.Outcome.Status);
+        var issue = Assert.Single(envelope.Details.ValidationIssues, item => item.Code == "planner.create.failed");
+        Assert.Contains("MaxTokens", issue.Message, StringComparison.Ordinal);
+        Assert.Contains("truncated", issue.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, tool.ExecutionCount);
+    }
+
+    [Fact]
     public async Task Unknown_model_tool_id_fails_before_execution()
     {
         var tool = new CountingTool("known_tool");

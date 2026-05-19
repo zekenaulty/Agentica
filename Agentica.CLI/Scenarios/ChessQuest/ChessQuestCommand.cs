@@ -53,6 +53,16 @@ internal static class ChessQuestCommand
             return await RunBoardProbeAsync(args.Skip(1).ToArray(), services).ConfigureAwait(false);
         }
 
+        if (string.Equals(args[0], "legal-action-probe", StringComparison.OrdinalIgnoreCase))
+        {
+            return await RunLegalActionProbeAsync(args.Skip(1).ToArray(), services).ConfigureAwait(false);
+        }
+
+        if (string.Equals(args[0], "puzzle-probe", StringComparison.OrdinalIgnoreCase))
+        {
+            return await RunPuzzleProbeAsync(args.Skip(1).ToArray(), services).ConfigureAwait(false);
+        }
+
         if (string.Equals(args[0], "resume", StringComparison.OrdinalIgnoreCase))
         {
             return await ResumeGameAsync(board, args.Skip(1).ToArray(), services).ConfigureAwait(false);
@@ -170,6 +180,192 @@ internal static class ChessQuestCommand
         {
             Console.Error.WriteLine(exception.Message);
             return 1;
+        }
+    }
+
+    private static async Task<int> RunLegalActionProbeAsync(
+        IReadOnlyList<string> args,
+        CliCommandServices services)
+    {
+        var options = ChessQuestBoardProbeOptions.Parse(args, GeminiModelId.Flash25);
+        if (!options.IsValid)
+        {
+            Console.Error.WriteLine(options.Error);
+            services.PrintUsage();
+            return 2;
+        }
+
+        if (!services.GeminiCredentialsAvailable())
+        {
+            Console.Error.WriteLine("ChessQuest legal-action-probe requires Gemini credentials. Set GEMINI_API_KEY or GOOGLE_API_KEY.");
+            return 2;
+        }
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(options.TimeoutSeconds));
+        var client = new RetryingLlmClient(
+            new GeminiLlmClient(GeminiClientOptions.FromEnvironment(options.ModelId)),
+            new LlmRetryOptions(CallTimeout: TimeSpan.FromSeconds(options.TimeoutSeconds)));
+        var runner = new ChessQuestLegalActionProbeRunner(client);
+        var runLog = services.CreateRunLog(options.LogRun, options.LogDir, "chessquest-legal-action-probe", args);
+        runLog?.WriteJson("chessquest-legal-action-probe-options.json", options);
+
+        if (!options.Json)
+        {
+            Console.WriteLine("--- ChessQuest Legal Action Probe ---");
+            Console.WriteLine($"Model: {options.ModelId}");
+            Console.WriteLine($"Trials: {options.Trials}");
+            Console.WriteLine($"Seed: {options.Seed}");
+            Console.WriteLine($"Scramble Plies: {options.ScramblePlies}");
+            Console.WriteLine($"Presentation: {options.Presentation}");
+            Console.WriteLine();
+        }
+
+        try
+        {
+            var summary = await runner.RunAsync(
+                    options,
+                    (trial, result) =>
+                    {
+                        runLog?.WriteJsonLine(
+                            "chessquest-legal-action-probe-trials.jsonl",
+                            new
+                            {
+                                trial.TrialNumber,
+                                trial.Seed,
+                                trial.Fen,
+                                trial.BoardLines,
+                                trial.SideToMove,
+                                trial.LegalMoves,
+                                Prompt = ChessQuestLegalActionProbeRunner.BuildPrompt(trial, options.Presentation),
+                                Result = result,
+                                RawResponse = result.RawResponse
+                            });
+
+                        if (!options.Json)
+                        {
+                            PrintLegalActionProbeTrial(trial, result);
+                        }
+                    },
+                    timeout.Token)
+                .ConfigureAwait(false);
+
+            runLog?.WriteJson("chessquest-legal-action-probe-summary.json", summary);
+            if (options.Json)
+            {
+                Console.WriteLine(ChessQuestLegalActionProbeRunner.SerializeSummary(summary));
+            }
+            else
+            {
+                Console.WriteLine();
+                Console.WriteLine("--- Legal Action Probe Summary ---");
+                Console.WriteLine($"Passed: {summary.Passed}/{summary.Trials}");
+                Console.WriteLine($"Failed: {summary.Failed}/{summary.Trials}");
+            }
+
+            if (runLog is not null)
+            {
+                Console.WriteLine();
+                Console.WriteLine($"Run log written: {runLog.DirectoryPath}");
+            }
+
+            return summary.Failed == 0 ? 0 : 1;
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine("ChessQuest legal-action-probe timed out.");
+            return 124;
+        }
+    }
+
+    private static async Task<int> RunPuzzleProbeAsync(
+        IReadOnlyList<string> args,
+        CliCommandServices services)
+    {
+        var options = ChessQuestBoardProbeOptions.Parse(args, GeminiModelId.Flash25);
+        if (!options.IsValid)
+        {
+            Console.Error.WriteLine(options.Error);
+            services.PrintUsage();
+            return 2;
+        }
+
+        if (!services.GeminiCredentialsAvailable())
+        {
+            Console.Error.WriteLine("ChessQuest puzzle-probe requires Gemini credentials. Set GEMINI_API_KEY or GOOGLE_API_KEY.");
+            return 2;
+        }
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(options.TimeoutSeconds));
+        var client = new RetryingLlmClient(
+            new GeminiLlmClient(GeminiClientOptions.FromEnvironment(options.ModelId)),
+            new LlmRetryOptions(CallTimeout: TimeSpan.FromSeconds(options.TimeoutSeconds)));
+        var runner = new ChessQuestPuzzleProbeRunner(client);
+        var runLog = services.CreateRunLog(options.LogRun, options.LogDir, "chessquest-puzzle-probe", args);
+        runLog?.WriteJson("chessquest-puzzle-probe-options.json", options);
+
+        if (!options.Json)
+        {
+            Console.WriteLine("--- ChessQuest Puzzle Probe ---");
+            Console.WriteLine($"Model: {options.ModelId}");
+            Console.WriteLine($"Trials: {options.Trials}");
+            Console.WriteLine($"Presentation: {options.Presentation}");
+            Console.WriteLine();
+        }
+
+        try
+        {
+            var summary = await runner.RunAsync(
+                    options,
+                    (trial, result) =>
+                    {
+                        runLog?.WriteJsonLine(
+                            "chessquest-puzzle-probe-trials.jsonl",
+                            new
+                            {
+                                trial.TrialNumber,
+                                trial.PuzzleId,
+                                trial.Objective,
+                                trial.Fen,
+                                trial.BoardLines,
+                                trial.AgentColor,
+                                Prompt = ChessQuestPuzzleProbeRunner.BuildPrompt(trial, options.Presentation),
+                                Result = result,
+                                RawResponse = result.RawResponse
+                            });
+
+                        if (!options.Json)
+                        {
+                            PrintPuzzleProbeTrial(trial, result);
+                        }
+                    },
+                    timeout.Token)
+                .ConfigureAwait(false);
+
+            runLog?.WriteJson("chessquest-puzzle-probe-summary.json", summary);
+            if (options.Json)
+            {
+                Console.WriteLine(ChessQuestPuzzleProbeRunner.SerializeSummary(summary));
+            }
+            else
+            {
+                Console.WriteLine();
+                Console.WriteLine("--- Puzzle Probe Summary ---");
+                Console.WriteLine($"Passed: {summary.Passed}/{summary.Trials}");
+                Console.WriteLine($"Failed: {summary.Failed}/{summary.Trials}");
+            }
+
+            if (runLog is not null)
+            {
+                Console.WriteLine();
+                Console.WriteLine($"Run log written: {runLog.DirectoryPath}");
+            }
+
+            return summary.Failed == 0 ? 0 : 1;
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine("ChessQuest puzzle-probe timed out.");
+            return 124;
         }
     }
 
@@ -825,7 +1021,7 @@ internal static class ChessQuestCommand
         - You may use chess.project_line only for hypothetical UCI lines you authored yourself. It is read-only, can verify submitted check/checkmate claims, and does not generate opponent replies.
         - Commit exactly one selected agent move with chess.play_move. Include a concise public turnIntent matching the selected move.
         - turnIntent should separate goal, evidence, hypothesis, riskCheck, claimLevel, and publicReason. Public intent is audit text, not proof.
-        - If you selected the move from chess.list_legal_moves, pass that observation's legalMoveObservationId into chess.play_move. If the board changes or a move is refused as stale, refresh chess.list_legal_moves.
+        - Strict gameplay requires passing the current chess.list_legal_moves legalMoveObservationId into chess.play_move. If the board changes or a move is refused as stale, refresh chess.list_legal_moves.
         - Before describing a move as check or checkmate, call chess.project_line for that exact move or line with claims ["check"] or ["checkmate"] and use the returned claimVerification.
         {attackInspectionContract}
         - Do not describe a selected move as checkmate, a forced win, or objective completion unless a prior chess.project_line result or committed receipt has already verified that terminal state.
@@ -1161,6 +1357,54 @@ internal static class ChessQuestCommand
     {
         var status = result.Passed ? "PASS" : "FAIL";
         Console.WriteLine($"[{status}] trial={trial.TrialNumber} square={trial.Square} expected={FormatExpected(result.Expected)} answer={FormatAnswer(result.Answer)}");
+        if (!result.Passed)
+        {
+            Console.WriteLine($"  reason: {result.FailureReason}");
+            Console.WriteLine($"  provider: {result.ProviderName ?? "unknown"} finish={result.FinishReason} usage={FormatUsage(result.Usage)}");
+            if (!string.IsNullOrWhiteSpace(result.RawResponse))
+            {
+                Console.WriteLine($"  raw: {Preview(result.RawResponse, 240)}");
+            }
+
+            Console.WriteLine($"  fen: {trial.Fen}");
+            Console.WriteLine("  board:");
+            foreach (var line in trial.BoardLines)
+            {
+                Console.WriteLine($"  {line}");
+            }
+        }
+    }
+
+    private static void PrintLegalActionProbeTrial(
+        ChessQuestLegalActionProbeTrial trial,
+        ChessQuestLegalActionProbeTrialResult result)
+    {
+        var status = result.Passed ? "PASS" : "FAIL";
+        Console.WriteLine($"[{status}] trial={trial.TrialNumber} side={trial.SideToMove} move={result.Move ?? "none"} legalMoves={trial.LegalMoves.Count}");
+        if (!result.Passed)
+        {
+            Console.WriteLine($"  reason: {result.FailureReason}");
+            Console.WriteLine($"  provider: {result.ProviderName ?? "unknown"} finish={result.FinishReason} usage={FormatUsage(result.Usage)}");
+            if (!string.IsNullOrWhiteSpace(result.RawResponse))
+            {
+                Console.WriteLine($"  raw: {Preview(result.RawResponse, 240)}");
+            }
+
+            Console.WriteLine($"  fen: {trial.Fen}");
+            Console.WriteLine("  board:");
+            foreach (var line in trial.BoardLines)
+            {
+                Console.WriteLine($"  {line}");
+            }
+        }
+    }
+
+    private static void PrintPuzzleProbeTrial(
+        ChessQuestPuzzleProbeTrial trial,
+        ChessQuestPuzzleProbeTrialResult result)
+    {
+        var status = result.Passed ? "PASS" : "FAIL";
+        Console.WriteLine($"[{status}] trial={trial.TrialNumber} puzzle={trial.PuzzleId} role={trial.AgentColor} move={result.Move ?? "none"}");
         if (!result.Passed)
         {
             Console.WriteLine($"  reason: {result.FailureReason}");

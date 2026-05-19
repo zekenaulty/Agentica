@@ -70,7 +70,7 @@ public static class ChessQuestTools
                 new ToolInputField(
                     "legalMoveObservationId",
                     Required: false,
-                    Description: "Observation id from the current chess.list_legal_moves result that contained the selected move. Required when turnIntent.legalBasis uses the current legal move list.",
+                    Description: "Observation id from the current chess.list_legal_moves result that contained the selected move. Required in strict gameplay; omitted only by actor probes.",
                     Example: "observation_abc123"),
                 new ToolInputField(
                     "turnIntent",

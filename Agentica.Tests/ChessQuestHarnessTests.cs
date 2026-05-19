@@ -6,6 +6,7 @@ using Agentica.Execution;
 using Agentica.Events;
 using Agentica.Observations;
 using Agentica.Orchestration;
+using Agentica.Orchestration.Context;
 using Agentica.Orchestration.Planning;
 using Agentica.Outcomes;
 using Agentica.Planning;
@@ -320,6 +321,46 @@ public sealed class ChessQuestHarnessTests
     }
 
     [Fact]
+    public async Task ChessQuest_play_move_requires_legal_move_observation_id_in_strict_gameplay_before_listing_moves()
+    {
+        var session = CreateSession();
+
+        var result = await InvokeAsync(
+            session,
+            ChessQuestToolIds.PlayMove,
+            new Dictionary<string, object?>
+            {
+                ["move"] = "e2e4",
+                ["turnIntent"] = TurnIntent("white", "e2e4", "Use a legal opening move and keep playing for a win.")
+            });
+
+        Assert.Equal(ReceiptStatus.Refused, result.Receipt.Status);
+        Assert.Equal("missing_legal_move_observation_id", result.Receipt.Data["reason"]);
+        Assert.Equal(true, result.Receipt.Data["fenUnchanged"]);
+        Assert.Contains("e2e4", Assert.IsType<string[]>(result.Receipt.Data["currentLegalMoves"]));
+        Assert.Equal(StartFen, session.CurrentState.Fen);
+    }
+
+    [Fact]
+    public async Task ChessQuest_actor_probe_surface_allows_play_without_legal_move_observation_id()
+    {
+        var session = CreateSession(
+            policy: ChessQuestDisclosurePolicy.ActorProbe);
+
+        var result = await InvokeAsync(
+            session,
+            ChessQuestToolIds.PlayMove,
+            new Dictionary<string, object?>
+            {
+                ["move"] = "e2e4",
+                ["turnIntent"] = TurnIntent("white", "e2e4", "Actor probe submitted a raw legal move for host validation.")
+            });
+
+        Assert.Equal(ReceiptStatus.Succeeded, result.Receipt.Status);
+        Assert.Equal("e2e4", result.Receipt.Data["agentMove"]);
+    }
+
+    [Fact]
     public async Task ChessQuest_play_move_rejects_move_absent_from_bound_legal_observation()
     {
         var session = CreateSession();
@@ -384,14 +425,10 @@ public sealed class ChessQuestHarnessTests
     {
         var session = CreateSession(opponentMoves: ["e7e5"]);
 
-        var result = await InvokeAsync(
+        var result = await PlayLegalMoveAsync(
             session,
-            ChessQuestToolIds.PlayMove,
-            new Dictionary<string, object?>
-            {
-                ["move"] = "e2e4",
-                ["turnIntent"] = TurnIntent("white", "e2e4", "Use a legal opening move and keep playing for a win.")
-            });
+            "e2e4",
+            "Use a legal opening move and keep playing for a win.");
 
         Assert.Equal(ReceiptStatus.Succeeded, result.Receipt.Status);
         Assert.Equal("e2e4", result.Receipt.Data["agentMove"]);
@@ -406,14 +443,10 @@ public sealed class ChessQuestHarnessTests
     public async Task ChessQuest_game_record_replays_committed_plies()
     {
         var session = CreateSession(opponentMoves: ["e7e5"]);
-        await InvokeAsync(
+        await PlayLegalMoveAsync(
             session,
-            ChessQuestToolIds.PlayMove,
-            new Dictionary<string, object?>
-            {
-                ["move"] = "e2e4",
-                ["turnIntent"] = TurnIntent("white", "e2e4", "Use a legal opening move and keep playing for a win.")
-            });
+            "e2e4",
+            "Use a legal opening move and keep playing for a win.");
 
         var record = ChessQuestGameRecordStore.FromSession(session);
         Assert.Equal(["e2e4", "e7e5"], record.Plies.Select(ply => ply.Move));
@@ -431,14 +464,10 @@ public sealed class ChessQuestHarnessTests
     {
         var directory = Path.Combine(Path.GetTempPath(), $"agentica-chessquest-{Guid.NewGuid():N}");
         var session = CreateSession(opponentMoves: ["e7e5"]);
-        await InvokeAsync(
+        await PlayLegalMoveAsync(
             session,
-            ChessQuestToolIds.PlayMove,
-            new Dictionary<string, object?>
-            {
-                ["move"] = "e2e4",
-                ["turnIntent"] = TurnIntent("white", "e2e4", "Use a legal opening move and keep playing for a win.")
-            });
+            "e2e4",
+            "Use a legal opening move and keep playing for a win.");
 
         try
         {
@@ -463,14 +492,10 @@ public sealed class ChessQuestHarnessTests
     {
         var directory = Path.Combine(Path.GetTempPath(), $"agentica-chessquest-legacy-{Guid.NewGuid():N}");
         var session = CreateSession(opponentMoves: ["e7e5"]);
-        await InvokeAsync(
+        await PlayLegalMoveAsync(
             session,
-            ChessQuestToolIds.PlayMove,
-            new Dictionary<string, object?>
-            {
-                ["move"] = "e2e4",
-                ["turnIntent"] = TurnIntent("white", "e2e4", "Use a legal opening move and keep playing for a win.")
-            });
+            "e2e4",
+            "Use a legal opening move and keep playing for a win.");
 
         Directory.CreateDirectory(directory);
         try
@@ -539,6 +564,59 @@ public sealed class ChessQuestHarnessTests
         Assert.Equal("opening", protocol.Phase);
         Assert.Contains("not mean good or safe", protocol.ToolSemantics[ChessQuestToolIds.ListLegalMoves], StringComparison.OrdinalIgnoreCase);
         Assert.Contains(protocol.ClaimDiscipline, item => item.Contains("legal", StringComparison.OrdinalIgnoreCase) && item.Contains("safe", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ChessQuest_prompt_shape_preserves_legal_not_safe_and_project_line_not_evaluation_contract()
+    {
+        var prompt = ChessQuestCapabilitySurfaceCompiler.PromptTemplateShape;
+
+        Assert.Contains("legal move is not necessarily good or safe", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("one-ply project_line result does not prove tactical safety or move quality", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("legalMoveObservationId", prompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ChessQuest_tool_descriptors_explain_project_line_is_not_evaluation()
+    {
+        var session = CreateSession();
+        var catalog = ChessQuestTools.CreateCatalog(session);
+
+        var projectLine = catalog.Descriptors.Single(descriptor => descriptor.ToolId == ChessQuestToolIds.ProjectLine);
+        Assert.Contains("does not rank moves", projectLine.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prove safety", projectLine.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("evaluate quality", projectLine.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("generate opponent replies", projectLine.Description, StringComparison.OrdinalIgnoreCase);
+
+        var legalMoves = catalog.Descriptors.Single(descriptor => descriptor.ToolId == ChessQuestToolIds.ListLegalMoves);
+        Assert.Contains("legality does not imply safety", legalMoves.Description, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ChessQuest_tactical_decision_protocol_requires_opponent_reply_modeling_or_uncertainty_for_safety_claims()
+    {
+        var session = CreateSession();
+        var projection = ChessQuestPhaseTracker.DefaultProjection(
+            session,
+            "tactical",
+            source: "test");
+        var phase = ChessQuestPhaseTracker.Create(
+            session,
+            "tactical",
+            maxAgentTurns: 2,
+            strategyProjection: projection);
+
+        var protocol = ChessQuestGoalShapingPolicy.BuildDecisionProtocol(session, phase);
+
+        Assert.Equal("tactical", protocol.Phase);
+        Assert.Contains(protocol.ActiveObjectives, item =>
+            item.Contains("opponent replies", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(protocol.ClaimDiscipline, item =>
+            item.Contains("one-ply", StringComparison.OrdinalIgnoreCase) &&
+            item.Contains("safety", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(protocol.ForbiddenClaimLanguageWithoutEvidence, item =>
+            string.Equals(item, "safe", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("does not evaluate quality", protocol.ToolSemantics[ChessQuestToolIds.ProjectLine], StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -678,6 +756,65 @@ public sealed class ChessQuestHarnessTests
         Assert.NotEqual("Attack f7 with a concrete move hint.", envelope.PhaseGoal);
         Assert.DoesNotContain(envelope.ActiveObjectives, objective => objective.Contains("f7", StringComparison.OrdinalIgnoreCase));
         Assert.Contains("preserve material", envelope.ActiveObjectives);
+    }
+
+    [Fact]
+    public void ChessQuest_phase_sanity_warns_when_conversion_is_selected_while_materially_behind()
+    {
+        var envelope = ChessQuestPhaseTaskEnvelope.FromContext(
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["chessquest.phase"] = "conversion",
+                ["chessquest.phaseGoal"] = "Convert toward a win."
+            },
+            defaultMaxAgentTurns: 3,
+            taskNumber: 3);
+        var latest = PhaseReport(materialAfter: -3, materialDelta: -3);
+
+        var warnings = ChessQuestPhaseSanityPolicy.Evaluate(envelope, latest);
+
+        Assert.Contains(warnings, warning =>
+            warning.Contains("conversion/endgame selected while materially behind", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ChessQuest_phase_sanity_warns_when_tactical_phase_follows_material_loss_without_recovery_rationale()
+    {
+        var envelope = ChessQuestPhaseTaskEnvelope.FromContext(
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["chessquest.phase"] = "tactical",
+                ["chessquest.taskDirection"] = "press_attack",
+                ["chessquest.phaseGoal"] = "Find tactical pressure."
+            },
+            defaultMaxAgentTurns: 2,
+            taskNumber: 2);
+        var latest = PhaseReport(materialAfter: -3, materialDelta: -3);
+
+        var warnings = ChessQuestPhaseSanityPolicy.Evaluate(envelope, latest);
+
+        Assert.Contains(warnings, warning =>
+            warning.Contains("tactical selected after material loss", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ChessQuest_phase_sanity_allows_tactical_recovery_with_explicit_stabilization_rationale()
+    {
+        var envelope = ChessQuestPhaseTaskEnvelope.FromContext(
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["chessquest.phase"] = "tactical",
+                ["chessquest.taskDirection"] = "seek_counterplay_after_material_loss",
+                ["chessquest.phaseGoal"] = "Stabilize first, then seek counterplay only with modeled opponent replies."
+            },
+            defaultMaxAgentTurns: 2,
+            taskNumber: 2);
+        var latest = PhaseReport(materialAfter: -3, materialDelta: -3);
+
+        var warnings = ChessQuestPhaseSanityPolicy.Evaluate(envelope, latest);
+
+        Assert.DoesNotContain(warnings, warning =>
+            warning.Contains("tactical selected after material loss", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -823,6 +960,76 @@ public sealed class ChessQuestHarnessTests
     }
 
     [Fact]
+    public void ChessQuest_legal_action_probe_validates_actor_move_against_engine_without_prompting_legal_list()
+    {
+        var trial = ChessQuestLegalActionProbeRunner.CreateTrial(
+            seed: 4471,
+            trialNumber: 1,
+            scramblePlies: 12);
+        var legalMove = trial.LegalMoves.First();
+
+        var prompt = ChessQuestLegalActionProbeRunner.BuildPrompt(
+            trial,
+            ChessQuestBoardProbePresentation.Ascii);
+        var result = ChessQuestLegalActionProbeRunner.Validate(
+            trial,
+            JsonSerializer.Serialize(new ChessQuestMoveProbeAnswer(
+                legalMove,
+                "Choose a legal actor move.")));
+
+        Assert.True(result.Passed);
+        Assert.Contains("You are not given the legal move list", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Legal moves:", prompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ChessQuest_legal_action_probe_rejects_illegal_actor_move()
+    {
+        var trial = ChessQuestLegalActionProbeRunner.CreateTrial(
+            seed: 5519,
+            trialNumber: 1,
+            scramblePlies: 10);
+
+        var result = ChessQuestLegalActionProbeRunner.Validate(
+            trial,
+            JsonSerializer.Serialize(new ChessQuestMoveProbeAnswer(
+                "a1a8",
+                "Try an illegal move.")));
+
+        Assert.False(result.Passed);
+        Assert.Contains("illegal_move", result.FailureReason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ChessQuest_puzzle_probe_validates_single_correct_answer()
+    {
+        var trial = ChessQuestPuzzleProbeRunner.BuiltInPuzzle();
+
+        var result = ChessQuestPuzzleProbeRunner.Validate(
+            trial,
+            JsonSerializer.Serialize(new ChessQuestMoveProbeAnswer(
+                "d8h4",
+                "Black checkmates White.")));
+
+        Assert.True(result.Passed);
+    }
+
+    [Fact]
+    public void ChessQuest_puzzle_probe_rejects_wrong_legal_answer()
+    {
+        var trial = ChessQuestPuzzleProbeRunner.BuiltInPuzzle();
+
+        var result = ChessQuestPuzzleProbeRunner.Validate(
+            trial,
+            JsonSerializer.Serialize(new ChessQuestMoveProbeAnswer(
+                "b8c6",
+                "Develop a knight.")));
+
+        Assert.False(result.Passed);
+        Assert.Contains("wrong_move", result.FailureReason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task HeuristicChessOpponent_prefers_immediate_checkmate()
     {
         var rules = new GeraChessRulesEngine(FoolsMateBlackToMoveFen);
@@ -855,8 +1062,8 @@ public sealed class ChessQuestHarnessTests
             options: new PlannerChessOpponentOptions(
                 PlannerLabel: "test",
                 TimeoutSeconds: 10,
-                MaxSteps: 2,
-                MaxRefinements: 0,
+                MaxSteps: 3,
+                MaxRefinements: 1,
                 MaxPlanContinuations: 0,
                 Quiet: true),
             fallback: new RandomLegalMoveOpponent(seed: 1));
@@ -887,14 +1094,11 @@ public sealed class ChessQuestHarnessTests
         var early = await InvokeAsync(session, ChessQuestToolIds.CompleteObjective, new Dictionary<string, object?>());
         Assert.Equal(ReceiptStatus.Refused, early.Receipt.Status);
 
-        var move = await InvokeAsync(
+        var move = await PlayLegalMoveAsync(
             session,
-            ChessQuestToolIds.PlayMove,
-            new Dictionary<string, object?>
-            {
-                ["move"] = "d8h4",
-                ["turnIntent"] = TurnIntent("black", "d8h4", "Use the legal move that ends the current game.")
-            });
+            "d8h4",
+            "Use the legal move that ends the current game.",
+            agentColor: "black");
         Assert.Equal(ReceiptStatus.Succeeded, move.Receipt.Status);
         Assert.Equal(true, move.Receipt.Data["terminal"]);
 
@@ -934,6 +1138,47 @@ public sealed class ChessQuestHarnessTests
     }
 
     [Fact]
+    public async Task ChessQuest_orchestration_reports_terminal_checkmate_loss_as_failed_not_blocked()
+    {
+        const string beforeFoolsMateFen = "rnbqkbnr/pppp1ppp/8/4p3/8/5P2/PPPPP1PP/RNBQKBNR w KQkq - 0 2";
+        var session = CreateSession(
+            fen: beforeFoolsMateFen,
+            agentColor: ChessQuestColor.White,
+            opponentMoves: ["d8h4"]);
+        var state = new ChessQuestStrategicOrchestrationState(session);
+        var executor = new ChessQuestPhaseRunExecutor(
+            state,
+            _ => new FixedMovePlanner("g2g4", ChessQuestColor.White),
+            _ => new InMemoryEventSink(),
+            defaultMaxAgentTurns: 1,
+            policy: new ExecutionPolicy(
+                MaxSteps: 4,
+                MaxRefinements: 2,
+                MaxPlanContinuations: 0,
+                PlanningMode: PlanningMode.QueryAndBlockerDriven,
+                EvaluateCompletionAfterEachBatch: true));
+        var orchestrator = new TaskOrchestrator(
+            new SinglePhaseTaskPlanner("tactical", maxAgentTurns: 1),
+            executor,
+            new ChessQuestTaskAcceptanceEvaluator(state, targetPhaseTasks: 1),
+            new DeterministicWorkContextCompiler(),
+            state.BuildHostState,
+            new OrchestrationPolicy(MaxRuns: 1, MaxRefinements: 0));
+
+        var outcome = await orchestrator.RunAsync(new LargeTaskRequest(
+            "Run a bounded phase that should end in checkmate loss.",
+            RequestOrigin.User,
+            new Dictionary<string, object?>()));
+
+        Assert.True(session.CurrentState.IsTerminal);
+        Assert.Equal(ChessQuestColor.Black, session.CurrentState.TerminalState?.Winner);
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.Failed, outcome.StopReason);
+        Assert.NotEqual(OrchestrationStatus.Blocked, outcome.Status);
+        Assert.NotEqual(OrchestrationStopReason.MaxRefinementsReached, outcome.StopReason);
+    }
+
+    [Fact]
     public async Task ChessQuest_runner_uses_planning_frame_and_public_execution_intent()
     {
         var session = CreateSession(opponentMoves: ["e7e5"]);
@@ -943,7 +1188,11 @@ public sealed class ChessQuestHarnessTests
             ChessQuestTools.CreateCatalog(session),
             events,
             new ChessQuestOutcomeReporter(),
-            new ExecutionPolicy(MaxSteps: 1, MaxRefinements: 0, MaxPlanContinuations: 0),
+            new ExecutionPolicy(
+                MaxSteps: 3,
+                MaxRefinements: 1,
+                MaxPlanContinuations: 0,
+                PlanningMode: PlanningMode.QueryAndBlockerDriven),
             planningFrameProjector: new ChessQuestPlanningFrameProjector(session));
 
         var envelope = await runner.RunAsync(new RunRequest(
@@ -952,7 +1201,9 @@ public sealed class ChessQuestHarnessTests
             ChessQuestCapabilitySurfaceCompiler.BuildPlannerContext(session)));
 
         Assert.Contains(envelope.Details.PlanningFrames, frame => frame.Kind == "chessquest.cockpit");
-        var stepStarted = events.Events.First(item => item.Type == ExecutionEventType.StepStarted.WireName());
+        var stepStarted = events.Events.First(item =>
+            item.Type == ExecutionEventType.StepStarted.WireName() &&
+            item.Context?.ToolId == ChessQuestToolIds.PlayMove);
         Assert.NotNull(stepStarted.Intent);
         Assert.Equal("Play e2e4 as White.", stepStarted.Intent!.Action);
         Assert.Contains("public legal move", stepStarted.Intent.Rationale, StringComparison.OrdinalIgnoreCase);
@@ -962,12 +1213,15 @@ public sealed class ChessQuestHarnessTests
     public async Task ChessQuest_cockpit_projection_does_not_print_refused_move_as_accepted()
     {
         var session = CreateSession();
+        var legalMoves = await InvokeAsync(session, ChessQuestToolIds.ListLegalMoves, new Dictionary<string, object?>());
+        var legalMoveObservationId = Assert.IsType<string>(legalMoves.Receipt.Data["legalMoveObservationId"]);
         var result = await InvokeAsync(
             session,
             ChessQuestToolIds.PlayMove,
             new Dictionary<string, object?>
             {
                 ["move"] = "a1a3",
+                ["legalMoveObservationId"] = legalMoveObservationId,
                 ["turnIntent"] = TurnIntent("white", "a1a3", "Attempt an invalid rook move for projection testing.")
             });
         Assert.Equal(ReceiptStatus.Refused, result.Receipt.Status);
@@ -1012,12 +1266,15 @@ public sealed class ChessQuestHarnessTests
     public async Task ChessQuest_cockpit_warns_on_unsupported_safety_claim()
     {
         var session = CreateSession(opponentMoves: ["e7e5"]);
+        var legalMoves = await InvokeAsync(session, ChessQuestToolIds.ListLegalMoves, new Dictionary<string, object?>());
+        var legalMoveObservationId = Assert.IsType<string>(legalMoves.Receipt.Data["legalMoveObservationId"]);
         var result = await InvokeAsync(
             session,
             ChessQuestToolIds.PlayMove,
             new Dictionary<string, object?>
             {
                 ["move"] = "e2e4",
+                ["legalMoveObservationId"] = legalMoveObservationId,
                 ["turnIntent"] = new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
                     ["agentColor"] = "white",
@@ -1096,6 +1353,51 @@ public sealed class ChessQuestHarnessTests
         IReadOnlyDictionary<string, object?> input) =>
         session.ExecuteAsync(new ToolInvocation("run_test", $"step_{session.Turns.Count + 1:000}", toolId, input));
 
+    private static async Task<ToolResult> PlayLegalMoveAsync(
+        ChessQuestSession session,
+        string move,
+        string publicReason,
+        string agentColor = "white")
+    {
+        var legalMoves = await InvokeAsync(session, ChessQuestToolIds.ListLegalMoves, new Dictionary<string, object?>());
+        var legalMoveObservationId = Assert.IsType<string>(legalMoves.Receipt.Data["legalMoveObservationId"]);
+        return await InvokeAsync(
+            session,
+            ChessQuestToolIds.PlayMove,
+            new Dictionary<string, object?>
+            {
+                ["move"] = move,
+                ["legalMoveObservationId"] = legalMoveObservationId,
+                ["turnIntent"] = TurnIntent(agentColor, move, publicReason)
+            });
+    }
+
+    private static ChessQuestPhaseReport PhaseReport(
+        int materialAfter,
+        int materialDelta,
+        string phase = "tactical") =>
+        new(
+            Kind: "ChessQuestPhaseReport",
+            PhaseRunId: "phase_test",
+            Phase: phase,
+            StrategyName: "test",
+            Status: "budget_complete",
+            StopReason: "agent_turn_budget_exhausted",
+            AgentTurnsPlayed: 1,
+            AgentTurnsRemaining: 0,
+            StartPly: 0,
+            EndPly: 2,
+            StartFen: StartFen,
+            EndFen: StartFen,
+            MaterialBalanceBefore: materialAfter - materialDelta,
+            MaterialBalanceAfter: materialAfter,
+            MaterialBalanceDelta: materialDelta,
+            Terminal: false,
+            TerminalState: null,
+            AgentMoves: ["e2e4"],
+            OpponentMoves: ["e7e5"],
+            Evidence: []);
+
     private static Dictionary<string, object?> TurnIntent(
         string agentColor,
         string selectedMove,
@@ -1142,17 +1444,43 @@ public sealed class ChessQuestHarnessTests
             PlanningRequest request,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(new WorkflowPlan(
-                "chessquest_single_move",
+                "chessquest_single_move_list",
                 1,
                 [
                     new PlanStep(
                         "step_001",
+                        ChessQuestToolIds.ListLegalMoves,
+                        ToolKind.Query,
+                        ToolEffect.ReadOnly,
+                        new Dictionary<string, object?>())
+                    {
+                        Intent = new ExecutionIntent(
+                            "List legal moves for White.",
+                            "Strict ChessQuest play_move requires a fresh legalMoveObservationId.",
+                            "Receive legal UCI moves and the observation id for the current board.")
+                    }
+                ],
+                "Bind current legal moves before committing one ChessQuest move."));
+
+        public Task<WorkflowPlan> RefinePlanAsync(
+            PlanningRequest request,
+            Observation observation,
+            CancellationToken cancellationToken = default)
+        {
+            var legalMoveObservationId = Assert.IsType<string>(observation.Data["legalMoveObservationId"]);
+            return Task.FromResult(new WorkflowPlan(
+                "chessquest_single_move_play",
+                2,
+                [
+                    new PlanStep(
+                        "step_002",
                         ChessQuestToolIds.PlayMove,
                         ToolKind.Action,
                         ToolEffect.WritesLocalState,
                         new Dictionary<string, object?>
                         {
                             ["move"] = "e2e4",
+                            ["legalMoveObservationId"] = legalMoveObservationId,
                             ["turnIntent"] = TurnIntent("white", "e2e4", "Use a public legal move and keep playing for a win.")
                         })
                     {
@@ -1163,12 +1491,7 @@ public sealed class ChessQuestHarnessTests
                     }
                 ],
                 "Commit one ChessQuest move."));
-
-        public Task<WorkflowPlan> RefinePlanAsync(
-            PlanningRequest request,
-            Observation observation,
-            CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException("Refinement should not run.");
+        }
     }
 
     private sealed class FixedMovePlanner : IWorkflowPlanner
@@ -1186,8 +1509,33 @@ public sealed class ChessQuestHarnessTests
             PlanningRequest request,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(new WorkflowPlan(
-                "fixed_chessquest_move",
+                "fixed_chessquest_move_list",
                 1,
+                [
+                    new PlanStep(
+                        "step_fixed_list",
+                        ChessQuestToolIds.ListLegalMoves,
+                        ToolKind.Query,
+                        ToolEffect.ReadOnly,
+                        new Dictionary<string, object?>())
+                    {
+                        Intent = new ExecutionIntent(
+                            $"List legal moves as {_agentColor}.",
+                            "Strict ChessQuest play_move requires a fresh legalMoveObservationId.",
+                            "Receive legal UCI moves and the observation id for the current board.")
+                    }
+                ],
+                "Bind legal moves for fixed ChessQuest move."));
+
+        public Task<WorkflowPlan> RefinePlanAsync(
+            PlanningRequest request,
+            Observation observation,
+            CancellationToken cancellationToken = default)
+        {
+            var legalMoveObservationId = Assert.IsType<string>(observation.Data["legalMoveObservationId"]);
+            return Task.FromResult(new WorkflowPlan(
+                "fixed_chessquest_move_play",
+                2,
                 [
                     new PlanStep(
                         "step_fixed_move",
@@ -1197,6 +1545,7 @@ public sealed class ChessQuestHarnessTests
                         new Dictionary<string, object?>
                         {
                             ["move"] = _move,
+                            ["legalMoveObservationId"] = legalMoveObservationId,
                             ["turnIntent"] = TurnIntent(
                                 _agentColor.ToString().ToLowerInvariant(),
                                 _move,
@@ -1209,13 +1558,58 @@ public sealed class ChessQuestHarnessTests
                             "Commit exactly one opponent-agent move.")
                     }
                 ],
-                "Fixed ChessQuest move."));
+            "Fixed ChessQuest move."));
+        }
+    }
 
-        public Task<WorkflowPlan> RefinePlanAsync(
-            PlanningRequest request,
-            Observation observation,
+    private sealed class SinglePhaseTaskPlanner : ITaskPlanner
+    {
+        private readonly string _phase;
+        private readonly int _maxAgentTurns;
+
+        public SinglePhaseTaskPlanner(string phase, int maxAgentTurns)
+        {
+            _phase = phase;
+            _maxAgentTurns = maxAgentTurns;
+        }
+
+        public Task<TaskGraphPlan> CreatePlanAsync(
+            TaskPlanningRequest request,
             CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException("Refinement should not run.");
+            Task.FromResult(new TaskGraphPlan(
+                "single_phase_plan",
+                request.Request.Objective,
+                [
+                    new TaskNode(
+                        "phase_001",
+                        "Execute one bounded ChessQuest phase.",
+                        DependsOn: [],
+                        Optional: false,
+                        Priority: 0,
+                        MaxRuns: 1,
+                        ContextProjection: new Dictionary<string, object?>(StringComparer.Ordinal)
+                        {
+                            ["chessquest.taskKind"] = "phase_run",
+                            ["chessquest.phase"] = _phase,
+                            ["chessquest.taskDirection"] = "terminal_loss_regression",
+                            ["chessquest.publicRationale"] = "Exercise top-level terminal loss handling.",
+                            ["chessquest.phaseGoal"] = "Commit one legal move and let the verifier classify terminal state.",
+                            ["chessquest.maxAgentTurns"] = _maxAgentTurns
+                        },
+                        AcceptanceRequirements:
+                        [
+                            new TaskAcceptanceRequirement(
+                                TaskAcceptanceRequirementKind.Artifact,
+                                ArtifactKind: "chessquest.phase_report")
+                        ])
+                ],
+                DefinitionOfDone: [],
+                CreatedAt: DateTimeOffset.UtcNow));
+
+        public Task<TaskGraphRefinement> RefinePlanAsync(
+            TaskRefinementRequest request,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Single phase regression should not refine.");
     }
 
     private sealed class InvalidTaskPlanner : ITaskPlanner

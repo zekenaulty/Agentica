@@ -13,7 +13,8 @@ public sealed record ChessQuestDisclosurePolicy(
     int MaxProjectedLinesPerTurn,
     int MaxProjectedPliesPerLine,
     bool IncludeProjectionCaptures,
-    bool AllowAttackInspection)
+    bool AllowAttackInspection,
+    bool RequireLegalMoveObservationForPlay)
 {
     public static ChessQuestDisclosurePolicy StrictRefereeHard { get; } = new(
         Mode: ChessQuestMode.StrictRefereeHard,
@@ -28,7 +29,8 @@ public sealed record ChessQuestDisclosurePolicy(
         MaxProjectedLinesPerTurn: 0,
         MaxProjectedPliesPerLine: 0,
         IncludeProjectionCaptures: false,
-        AllowAttackInspection: false);
+        AllowAttackInspection: false,
+        RequireLegalMoveObservationForPlay: true);
 
     public static ChessQuestDisclosurePolicy StrictRefereeProjected { get; } = new(
         Mode: ChessQuestMode.StrictRefereeProjected,
@@ -43,7 +45,8 @@ public sealed record ChessQuestDisclosurePolicy(
         MaxProjectedLinesPerTurn: 3,
         MaxProjectedPliesPerLine: 4,
         IncludeProjectionCaptures: true,
-        AllowAttackInspection: false);
+        AllowAttackInspection: false,
+        RequireLegalMoveObservationForPlay: true);
 
     public static ChessQuestDisclosurePolicy StrictRefereeThreatAware { get; } = new(
         Mode: ChessQuestMode.StrictRefereeThreatAware,
@@ -58,5 +61,22 @@ public sealed record ChessQuestDisclosurePolicy(
         MaxProjectedLinesPerTurn: 4,
         MaxProjectedPliesPerLine: 6,
         IncludeProjectionCaptures: true,
-        AllowAttackInspection: true);
+        AllowAttackInspection: true,
+        RequireLegalMoveObservationForPlay: true);
+
+    public static ChessQuestDisclosurePolicy ActorProbe { get; } = new(
+        Mode: ChessQuestMode.ActorProbe,
+        IncludeSan: false,
+        IncludeCurrentCheckStatus: true,
+        IncludeHostCandidateConsequences: false,
+        IncludeMaterialCounts: false,
+        IncludeTacticalLabels: false,
+        IncludeEngineEvaluation: false,
+        IncludeHiddenObjectiveHints: false,
+        AllowLineProjection: false,
+        MaxProjectedLinesPerTurn: 0,
+        MaxProjectedPliesPerLine: 0,
+        IncludeProjectionCaptures: false,
+        AllowAttackInspection: false,
+        RequireLegalMoveObservationForPlay: false);
 }

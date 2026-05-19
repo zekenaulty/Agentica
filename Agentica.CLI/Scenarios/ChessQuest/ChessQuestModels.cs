@@ -13,6 +13,7 @@ public enum ChessQuestMode
     StrictRefereeHard,
     StrictRefereeProjected,
     StrictRefereeThreatAware,
+    ActorProbe,
     StrictRefereeAssisted,
     Coach
 }

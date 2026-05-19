@@ -573,6 +573,7 @@ public sealed class ChessQuestPhaseTracker
                 ActiveObjectives:
                 [
                     "verify check and checkmate claims with chess.project_line",
+                    "model opponent replies before claiming safety or material gain",
                     "prefer forcing legal moves when they are publicly verified",
                     "avoid unsupported tactical claims",
                     "continue playing for a win if the tactic is not terminal"

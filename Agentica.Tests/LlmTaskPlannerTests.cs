@@ -79,6 +79,23 @@ public sealed class LlmTaskPlannerTests
     }
 
     [Fact]
+    public async Task Llm_task_planner_distinguishes_max_tokens_truncation_from_plain_invalid_json()
+    {
+        var planner = new LlmTaskPlanner(new FakeLlmClient("{not-json", LlmFinishReason.MaxTokens));
+
+        var exception = await Assert.ThrowsAsync<LlmTaskPlannerException>(() =>
+            planner.CreatePlanAsync(new TaskPlanningRequest(
+                new LargeTaskRequest(
+                    "Create a task graph.",
+                    RequestOrigin.User,
+                    new Dictionary<string, object?>()),
+                new OrchestrationPolicy())));
+
+        Assert.Contains("truncated", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("MaxTokens", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Llm_task_planner_parses_initial_task_graph()
     {
         var client = new FakeLlmClient(
@@ -309,10 +326,14 @@ public sealed class LlmTaskPlannerTests
     private sealed class FakeLlmClient : ILlmClient
     {
         private readonly string _json;
+        private readonly LlmFinishReason _finishReason;
 
-        public FakeLlmClient(string json)
+        public FakeLlmClient(
+            string json,
+            LlmFinishReason finishReason = LlmFinishReason.Stop)
         {
             _json = json;
+            _finishReason = finishReason;
         }
 
         public List<LlmRequest> Requests { get; } = [];
@@ -327,7 +348,7 @@ public sealed class LlmTaskPlannerTests
                 request.ModelId,
                 _json,
                 StructuredJson: _json,
-                FinishReason: LlmFinishReason.Stop));
+                FinishReason: _finishReason));
         }
     }
 }

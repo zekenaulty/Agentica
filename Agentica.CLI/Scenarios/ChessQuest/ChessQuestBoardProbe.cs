@@ -341,7 +341,7 @@ public sealed record ChessQuestBoardProbeSummary(
 
 public sealed class ChessQuestBoardProbeRunner
 {
-    private const string StartFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    internal const string StartFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -646,7 +646,7 @@ public sealed class ChessQuestBoardProbeRunner
             RawResponse: rawResponse,
             FailureReason: reason);
 
-    private static string ExtractJson(string rawResponse)
+    internal static string ExtractJson(string rawResponse)
     {
         var trimmed = rawResponse.Trim();
         if (trimmed.StartsWith('{') && trimmed.EndsWith('}'))
@@ -758,7 +758,7 @@ public sealed class ChessQuestBoardProbeRunner
             _ => "empty"
         };
 
-    private static LlmThinkingOptions? ToThinkingOptions(
+    internal static LlmThinkingOptions? ToThinkingOptions(
         string? thinkingBudget,
         bool includeThoughts) =>
         thinkingBudget switch
@@ -796,4 +796,453 @@ public sealed class ChessQuestBoardProbeRunner
           "required": ["square", "occupied", "color", "piece"]
         }
         """;
+}
+
+public sealed record ChessQuestMoveProbeAnswer(
+    string Move,
+    string? PublicReason = null);
+
+public sealed record ChessQuestLegalActionProbeTrial(
+    int TrialNumber,
+    int Seed,
+    string Fen,
+    IReadOnlyList<string> BoardLines,
+    ChessQuestColor SideToMove,
+    IReadOnlyList<string> LegalMoves);
+
+public sealed record ChessQuestLegalActionProbeTrialResult(
+    int TrialNumber,
+    bool Passed,
+    string? Move,
+    string RawResponse,
+    string? FailureReason,
+    string? ProviderName = null,
+    string? ResponseModelId = null,
+    LlmFinishReason FinishReason = LlmFinishReason.Unknown,
+    LlmUsage? Usage = null,
+    IReadOnlyDictionary<string, string>? ResponseMetadata = null);
+
+public sealed record ChessQuestLegalActionProbeSummary(
+    int Trials,
+    int Passed,
+    int Failed,
+    int Seed,
+    int ScramblePlies,
+    ChessQuestBoardProbePresentation Presentation,
+    string ModelId,
+    IReadOnlyList<ChessQuestLegalActionProbeTrialResult> Results);
+
+public sealed class ChessQuestLegalActionProbeRunner
+{
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true
+    };
+
+    private readonly ILlmClient _client;
+
+    public ChessQuestLegalActionProbeRunner(ILlmClient client)
+    {
+        _client = client;
+    }
+
+    public async Task<ChessQuestLegalActionProbeSummary> RunAsync(
+        ChessQuestBoardProbeOptions options,
+        Action<ChessQuestLegalActionProbeTrial, ChessQuestLegalActionProbeTrialResult>? onTrialCompleted = null,
+        CancellationToken cancellationToken = default)
+    {
+        var results = new List<ChessQuestLegalActionProbeTrialResult>(options.Trials);
+        for (var index = 0; index < options.Trials; index++)
+        {
+            var trial = CreateTrial(
+                unchecked(options.Seed + index * 7919),
+                index + 1,
+                options.ScramblePlies);
+            var result = await RunTrialAsync(trial, options, cancellationToken).ConfigureAwait(false);
+            results.Add(result);
+            onTrialCompleted?.Invoke(trial, result);
+        }
+
+        return new ChessQuestLegalActionProbeSummary(
+            Trials: results.Count,
+            Passed: results.Count(result => result.Passed),
+            Failed: results.Count(result => !result.Passed),
+            Seed: options.Seed,
+            ScramblePlies: options.ScramblePlies,
+            Presentation: options.Presentation,
+            ModelId: options.ModelId,
+            Results: results);
+    }
+
+    public static ChessQuestLegalActionProbeTrial CreateTrial(
+        int seed,
+        int trialNumber,
+        int scramblePlies)
+    {
+        var random = new Random(seed);
+        var rules = new GeraChessRulesEngine(ChessQuestBoardProbeRunner.StartFen);
+        for (var ply = 0; ply < scramblePlies; ply++)
+        {
+            var legalMoves = rules.ListLegalMoves();
+            if (legalMoves.Count == 0 || rules.GetState().IsTerminal)
+            {
+                break;
+            }
+
+            var result = rules.TryPlayMove(legalMoves[random.Next(legalMoves.Count)].Uci);
+            if (!result.Accepted)
+            {
+                break;
+            }
+        }
+
+        var state = rules.GetState();
+        return new ChessQuestLegalActionProbeTrial(
+            TrialNumber: trialNumber,
+            Seed: seed,
+            Fen: rules.GetFen(),
+            BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen(rules.GetFen()),
+            SideToMove: state.SideToMove,
+            LegalMoves: rules.ListLegalMoves().Select(move => move.Uci).ToArray());
+    }
+
+    public static string BuildPrompt(
+        ChessQuestLegalActionProbeTrial trial,
+        ChessQuestBoardProbePresentation presentation)
+    {
+        var boardSection = presentation is ChessQuestBoardProbePresentation.Ascii or ChessQuestBoardProbePresentation.Both
+            ? $"""
+
+            ASCII board:
+            {string.Join(Environment.NewLine, trial.BoardLines)}
+            """
+            : string.Empty;
+
+        var fenSection = presentation is ChessQuestBoardProbePresentation.Fen or ChessQuestBoardProbePresentation.Both
+            ? $"""
+
+            FEN:
+            {trial.Fen}
+            """
+            : string.Empty;
+
+        return
+            $$"""
+            You are {{trial.SideToMove}} to move. Produce one legal chess move in UCI notation from the supplied current board.
+            You are not given the legal move list. The host will verify legality after your answer.
+            {{boardSection}}
+            {{fenSection}}
+
+            Return JSON only:
+            {
+              "move": "e2e4",
+              "publicReason": "one short public reason"
+            }
+            """;
+    }
+
+    public static ChessQuestLegalActionProbeTrialResult Validate(
+        ChessQuestLegalActionProbeTrial trial,
+        string rawResponse)
+    {
+        ChessQuestMoveProbeAnswer? answer;
+        try
+        {
+            answer = JsonSerializer.Deserialize<ChessQuestMoveProbeAnswer>(
+                ChessQuestBoardProbeRunner.ExtractJson(rawResponse),
+                JsonOptions);
+        }
+        catch (JsonException exception)
+        {
+            return Failure(trial, rawResponse, $"invalid_json: {exception.Message}");
+        }
+
+        if (answer is null || string.IsNullOrWhiteSpace(answer.Move))
+        {
+            return Failure(trial, rawResponse, "empty_move");
+        }
+
+        var move = answer.Move.Trim().ToLowerInvariant();
+        var passed = trial.LegalMoves.Contains(move, StringComparer.Ordinal);
+        return new ChessQuestLegalActionProbeTrialResult(
+            TrialNumber: trial.TrialNumber,
+            Passed: passed,
+            Move: move,
+            RawResponse: rawResponse,
+            FailureReason: passed ? null : $"illegal_move: '{move}' is not legal for {trial.SideToMove} in the supplied position");
+    }
+
+    public static string SerializeSummary(ChessQuestLegalActionProbeSummary summary) =>
+        JsonSerializer.Serialize(summary, JsonOptions);
+
+    private async Task<ChessQuestLegalActionProbeTrialResult> RunTrialAsync(
+        ChessQuestLegalActionProbeTrial trial,
+        ChessQuestBoardProbeOptions options,
+        CancellationToken cancellationToken)
+    {
+        var response = await _client.GenerateAsync(new LlmRequest(
+                options.ModelId,
+                [
+                    new LlmMessage(
+                        LlmMessageRole.System,
+                        """
+                        You are being tested as a chess actor. Choose one legal UCI move from public board state only.
+                        Do not ask for a legal move list. Do not output SAN. Return only the requested JSON object.
+                        """),
+                    new LlmMessage(
+                        LlmMessageRole.User,
+                        BuildPrompt(trial, options.Presentation))
+                ],
+                GenerationOptions: new LlmGenerationOptions(
+                    Temperature: 0,
+                    MaxOutputTokens: options.MaxOutputTokens,
+                    Thinking: ChessQuestBoardProbeRunner.ToThinkingOptions(options.ThinkingBudget, options.IncludeThoughts)),
+                StructuredOutput: new LlmStructuredOutputOptions(JsonSchema: MoveAnswerJsonSchema)),
+            cancellationToken).ConfigureAwait(false);
+
+        return Validate(trial, response.StructuredJson ?? response.Text) with
+        {
+            ProviderName = response.ProviderName,
+            ResponseModelId = response.ModelId,
+            FinishReason = response.FinishReason,
+            Usage = response.Usage,
+            ResponseMetadata = response.Metadata
+        };
+    }
+
+    private static ChessQuestLegalActionProbeTrialResult Failure(
+        ChessQuestLegalActionProbeTrial trial,
+        string rawResponse,
+        string reason) =>
+        new(
+            TrialNumber: trial.TrialNumber,
+            Passed: false,
+            Move: null,
+            RawResponse: rawResponse,
+            FailureReason: reason);
+
+    internal const string MoveAnswerJsonSchema =
+        """
+        {
+          "type": "object",
+          "properties": {
+            "move": { "type": "string" },
+            "publicReason": { "type": "string" }
+          },
+          "required": ["move"]
+        }
+        """;
+}
+
+public sealed record ChessQuestPuzzleProbeTrial(
+    int TrialNumber,
+    string PuzzleId,
+    string Objective,
+    string Fen,
+    IReadOnlyList<string> BoardLines,
+    ChessQuestColor AgentColor,
+    IReadOnlyList<string> AcceptedMoves);
+
+public sealed record ChessQuestPuzzleProbeTrialResult(
+    int TrialNumber,
+    string PuzzleId,
+    bool Passed,
+    string? Move,
+    string RawResponse,
+    string? FailureReason,
+    string? ProviderName = null,
+    string? ResponseModelId = null,
+    LlmFinishReason FinishReason = LlmFinishReason.Unknown,
+    LlmUsage? Usage = null,
+    IReadOnlyDictionary<string, string>? ResponseMetadata = null);
+
+public sealed record ChessQuestPuzzleProbeSummary(
+    int Trials,
+    int Passed,
+    int Failed,
+    ChessQuestBoardProbePresentation Presentation,
+    string ModelId,
+    IReadOnlyList<ChessQuestPuzzleProbeTrialResult> Results);
+
+public sealed class ChessQuestPuzzleProbeRunner
+{
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true
+    };
+
+    private static readonly ChessQuestPuzzleProbeTrial[] BuiltInPuzzles =
+    [
+        new(
+            TrialNumber: 1,
+            PuzzleId: "fools_mate_black_mate_in_one",
+            Objective: "Find the single UCI move for Black that checkmates White.",
+            Fen: "rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq g3 0 2",
+            BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen("rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq g3 0 2"),
+            AgentColor: ChessQuestColor.Black,
+            AcceptedMoves: ["d8h4"])
+    ];
+
+    private readonly ILlmClient _client;
+
+    public ChessQuestPuzzleProbeRunner(ILlmClient client)
+    {
+        _client = client;
+    }
+
+    public async Task<ChessQuestPuzzleProbeSummary> RunAsync(
+        ChessQuestBoardProbeOptions options,
+        Action<ChessQuestPuzzleProbeTrial, ChessQuestPuzzleProbeTrialResult>? onTrialCompleted = null,
+        CancellationToken cancellationToken = default)
+    {
+        var results = new List<ChessQuestPuzzleProbeTrialResult>(options.Trials);
+        for (var index = 0; index < options.Trials; index++)
+        {
+            var puzzle = BuiltInPuzzles[index % BuiltInPuzzles.Length] with
+            {
+                TrialNumber = index + 1
+            };
+            var result = await RunTrialAsync(puzzle, options, cancellationToken).ConfigureAwait(false);
+            results.Add(result);
+            onTrialCompleted?.Invoke(puzzle, result);
+        }
+
+        return new ChessQuestPuzzleProbeSummary(
+            Trials: results.Count,
+            Passed: results.Count(result => result.Passed),
+            Failed: results.Count(result => !result.Passed),
+            Presentation: options.Presentation,
+            ModelId: options.ModelId,
+            Results: results);
+    }
+
+    public static string BuildPrompt(
+        ChessQuestPuzzleProbeTrial trial,
+        ChessQuestBoardProbePresentation presentation)
+    {
+        var boardSection = presentation is ChessQuestBoardProbePresentation.Ascii or ChessQuestBoardProbePresentation.Both
+            ? $"""
+
+            ASCII board:
+            {string.Join(Environment.NewLine, trial.BoardLines)}
+            """
+            : string.Empty;
+
+        var fenSection = presentation is ChessQuestBoardProbePresentation.Fen or ChessQuestBoardProbePresentation.Both
+            ? $"""
+
+            FEN:
+            {trial.Fen}
+            """
+            : string.Empty;
+
+        return
+            $$"""
+            Puzzle: {{trial.PuzzleId}}
+            Role: {{trial.AgentColor}}
+            Objective: {{trial.Objective}}
+            There is exactly one accepted answer for this probe.
+            {{boardSection}}
+            {{fenSection}}
+
+            Return JSON only:
+            {
+              "move": "d8h4",
+              "publicReason": "one short public reason"
+            }
+            """;
+    }
+
+    public static ChessQuestPuzzleProbeTrialResult Validate(
+        ChessQuestPuzzleProbeTrial trial,
+        string rawResponse)
+    {
+        ChessQuestMoveProbeAnswer? answer;
+        try
+        {
+            answer = JsonSerializer.Deserialize<ChessQuestMoveProbeAnswer>(
+                ChessQuestBoardProbeRunner.ExtractJson(rawResponse),
+                JsonOptions);
+        }
+        catch (JsonException exception)
+        {
+            return Failure(trial, rawResponse, $"invalid_json: {exception.Message}");
+        }
+
+        if (answer is null || string.IsNullOrWhiteSpace(answer.Move))
+        {
+            return Failure(trial, rawResponse, "empty_move");
+        }
+
+        var move = answer.Move.Trim().ToLowerInvariant();
+        var rules = new GeraChessRulesEngine(trial.Fen);
+        var legal = rules.ListLegalMoves().Any(legalMove => legalMove.Uci == move);
+        var accepted = legal && trial.AcceptedMoves.Contains(move, StringComparer.Ordinal);
+        return new ChessQuestPuzzleProbeTrialResult(
+            TrialNumber: trial.TrialNumber,
+            PuzzleId: trial.PuzzleId,
+            Passed: accepted,
+            Move: move,
+            RawResponse: rawResponse,
+            FailureReason: accepted
+                ? null
+                : legal
+                    ? $"wrong_move: '{move}' is legal but not the single accepted answer"
+                    : $"illegal_move: '{move}' is not legal in the puzzle position");
+    }
+
+    public static string SerializeSummary(ChessQuestPuzzleProbeSummary summary) =>
+        JsonSerializer.Serialize(summary, JsonOptions);
+
+    public static ChessQuestPuzzleProbeTrial BuiltInPuzzle(string puzzleId = "fools_mate_black_mate_in_one") =>
+        BuiltInPuzzles.Single(puzzle => string.Equals(puzzle.PuzzleId, puzzleId, StringComparison.Ordinal));
+
+    private async Task<ChessQuestPuzzleProbeTrialResult> RunTrialAsync(
+        ChessQuestPuzzleProbeTrial trial,
+        ChessQuestBoardProbeOptions options,
+        CancellationToken cancellationToken)
+    {
+        var response = await _client.GenerateAsync(new LlmRequest(
+                options.ModelId,
+                [
+                    new LlmMessage(
+                        LlmMessageRole.System,
+                        """
+                        You are being tested as a chess puzzle solver. Return one UCI move only through the requested JSON object.
+                        Use the supplied public board state. Do not output SAN or prose outside JSON.
+                        """),
+                    new LlmMessage(
+                        LlmMessageRole.User,
+                        BuildPrompt(trial, options.Presentation))
+                ],
+                GenerationOptions: new LlmGenerationOptions(
+                    Temperature: 0,
+                    MaxOutputTokens: options.MaxOutputTokens,
+                    Thinking: ChessQuestBoardProbeRunner.ToThinkingOptions(options.ThinkingBudget, options.IncludeThoughts)),
+                StructuredOutput: new LlmStructuredOutputOptions(JsonSchema: ChessQuestLegalActionProbeRunner.MoveAnswerJsonSchema)),
+            cancellationToken).ConfigureAwait(false);
+
+        return Validate(trial, response.StructuredJson ?? response.Text) with
+        {
+            ProviderName = response.ProviderName,
+            ResponseModelId = response.ModelId,
+            FinishReason = response.FinishReason,
+            Usage = response.Usage,
+            ResponseMetadata = response.Metadata
+        };
+    }
+
+    private static ChessQuestPuzzleProbeTrialResult Failure(
+        ChessQuestPuzzleProbeTrial trial,
+        string rawResponse,
+        string reason) =>
+        new(
+            TrialNumber: trial.TrialNumber,
+            PuzzleId: trial.PuzzleId,
+            Passed: false,
+            Move: null,
+            RawResponse: rawResponse,
+            FailureReason: reason);
 }

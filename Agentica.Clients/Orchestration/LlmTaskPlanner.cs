@@ -29,7 +29,7 @@ public sealed class LlmTaskPlanner : ITaskPlanner
             TaskGraphPromptBuilder.BuildInitialPlanRequest(request, _options),
             cancellationToken).ConfigureAwait(false);
 
-        return ParsePlan(response.StructuredJson ?? response.Text);
+        return ParsePlan(response.StructuredJson ?? response.Text, response.FinishReason);
     }
 
     public async Task<TaskGraphRefinement> RefinePlanAsync(
@@ -44,22 +44,24 @@ public sealed class LlmTaskPlanner : ITaskPlanner
         try
         {
             var contract = JsonSerializer.Deserialize<TaskGraphRefinementJsonContract>(json, JsonOptions)
-                ?? throw new LlmTaskPlannerException("Task planner returned an empty refinement payload.");
+                ?? throw new LlmTaskPlannerException(InvalidPayloadMessage("refinement", response.FinishReason, "empty payload"));
 
             return contract.ToRefinement();
         }
         catch (JsonException exception)
         {
-            throw new LlmTaskPlannerException("Task planner returned invalid refinement JSON.", exception);
+            throw new LlmTaskPlannerException(InvalidPayloadMessage("refinement", response.FinishReason, "invalid JSON"), exception);
         }
     }
 
-    private static TaskGraphPlan ParsePlan(string json)
+    private static TaskGraphPlan ParsePlan(
+        string json,
+        LlmFinishReason finishReason)
     {
         try
         {
             var contract = JsonSerializer.Deserialize<TaskGraphPlanJsonContract>(json, JsonOptions)
-                ?? throw new LlmTaskPlannerException("Task planner returned an empty plan payload.");
+                ?? throw new LlmTaskPlannerException(InvalidPayloadMessage("plan", finishReason, "empty payload"));
 
             var plan = contract.ToTaskGraphPlan();
             TaskGraphValidator.Validate(plan);
@@ -67,9 +69,17 @@ public sealed class LlmTaskPlanner : ITaskPlanner
         }
         catch (JsonException exception)
         {
-            throw new LlmTaskPlannerException("Task planner returned invalid plan JSON.", exception);
+            throw new LlmTaskPlannerException(InvalidPayloadMessage("plan", finishReason, "invalid JSON"), exception);
         }
     }
+
+    private static string InvalidPayloadMessage(
+        string payloadKind,
+        LlmFinishReason finishReason,
+        string failure) =>
+        finishReason == LlmFinishReason.MaxTokens
+            ? $"Task planner returned truncated {payloadKind} JSON ({failure}); provider finish reason was MaxTokens."
+            : $"Task planner returned invalid {payloadKind} JSON ({failure}); provider finish reason was {finishReason}.";
 
     private async Task<LlmResponse> GenerateAsync(
         LlmRequest request,

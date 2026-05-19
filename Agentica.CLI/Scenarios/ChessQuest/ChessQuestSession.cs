@@ -473,23 +473,20 @@ public sealed class ChessQuestSession
     {
         var normalizedMove = move.Trim().ToLowerInvariant();
         var observationId = ReadString(invocation, "legalMoveObservationId");
-        var legalBasis = ReadString(turnIntent, "legalBasis");
         var currentLegalMoveSnapshot = _latestLegalMoveObservation is { } latest &&
             string.Equals(latest.Fen, currentState.Fen, StringComparison.Ordinal) &&
             latest.Ply == currentState.Ply &&
             latest.SideToMove == currentState.SideToMove
                 ? latest
                 : null;
-        var claimsCurrentLegalMoveList = legalBasis?.Contains("legal_move_list", StringComparison.OrdinalIgnoreCase) == true ||
-            legalBasis?.Contains("current_legal", StringComparison.OrdinalIgnoreCase) == true;
 
         if (string.IsNullOrWhiteSpace(observationId))
         {
-            return currentLegalMoveSnapshot is not null && claimsCurrentLegalMoveList
+            return Scenario.DisclosurePolicy.RequireLegalMoveObservationForPlay
                 ? Refused(
                     invocation,
                     "missing_legal_move_observation_id",
-                    "Play move requires legalMoveObservationId from the current chess.list_legal_moves observation when legalBasis uses the current legal move list.",
+                    "Strict gameplay requires legalMoveObservationId from the current chess.list_legal_moves observation before chess.play_move. Actor probes are the only surface that may bypass this binding.",
                     LegalMoveRefusalData(currentState, normalizedMove, currentLegalMoveSnapshot))
                 : null;
         }

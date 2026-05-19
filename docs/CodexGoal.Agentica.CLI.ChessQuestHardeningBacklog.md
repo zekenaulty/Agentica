@@ -578,6 +578,7 @@ Remaining work:
    - captures by material value
    - promotions
    - checks
+
 2. Keep noise by difficulty.
 3. Add tests for:
    - mate preference
@@ -595,6 +596,21 @@ Remaining work:
    - opponent implementation
    - coach/postmortem mode
    - never strict planner-visible tools
+
+## Implemented 2026-05-19 Hardening Pass
+
+1. Strict gameplay `chess.play_move` now requires a fresh `legalMoveObservationId`; `ActorProbe` is the only bypass surface.
+2. Added an end-to-end orchestration regression proving terminal checkmate loss is reported as `Failed`, not `Blocked` or budget exhaustion.
+3. Added prompt/context/tool descriptor regressions for:
+   - legal does not mean safe
+   - `project_line` is not evaluation
+   - tactical safety claims require opponent-reply modeling or explicit uncertainty
+4. Planner and task planner JSON parse failures now carry provider finish reasons and distinguish `MaxTokens` truncation from ordinary malformed JSON.
+5. Added phase sanity warnings for:
+   - conversion/endgame while materially behind
+   - tactical phase after material loss without recovery/stabilization rationale
+6. Added `chessquest legal-action-probe`, which asks the model to produce a legal UCI move without receiving the legal move list and verifies it against the rules engine.
+7. Added `chessquest puzzle-probe`, starting with a single-answer mate-in-one probe verified by the rules engine.
 
 ## Recommended Next Implementation Order
 

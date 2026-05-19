@@ -135,7 +135,7 @@ public static class ChessQuestCapabilitySurfaceCompiler
         - Use UCI notation only for legal moves and submitted lines.
         - chess.project_line may be used only for self-authored hypothetical lines; it never chooses moves and never generates opponent replies.
         - chess.play_move requires a concise public turnIntent matching the selected move.
-        - If the move was selected from chess.list_legal_moves, include that result's legalMoveObservationId in chess.play_move.
+        - Strict gameplay requires chess.play_move to include the current chess.list_legal_moves legalMoveObservationId. Actor probes are the only bypass surface.
         - Do not claim completion unless chess.complete_objective emits chessquest.objective_completed.
         - Use chessFrame.decisionProtocol as the current operating grammar for goals, claim discipline, evidence, and risk checks.
         - A legal move is not necessarily good or safe. A one-ply project_line result does not prove tactical safety or move quality.
@@ -379,6 +379,7 @@ public static class ChessQuestCapabilitySurfaceCompiler
             ["attackInspectionAllowed"] = session.Scenario.DisclosurePolicy.AllowAttackInspection,
             ["lineProjectionDoesNotGenerateOpponentMoves"] = true,
             ["attackInspectionDoesNotChooseMoves"] = true,
+            ["legalMoveObservationRequired"] = session.Scenario.DisclosurePolicy.RequireLegalMoveObservationForPlay,
             ["nonPublicOracleDataHidden"] = true,
             ["opponentPolicyHidden"] = true,
             ["hiddenObjectiveHintsHidden"] = true,
