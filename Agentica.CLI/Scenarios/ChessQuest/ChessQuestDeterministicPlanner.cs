@@ -8,6 +8,8 @@ namespace Agentica.CLI.Scenarios.ChessQuest;
 public sealed class ChessQuestDeterministicPlanner : IWorkflowPlanner
 {
     private readonly ChessQuestSession _session;
+    private string? _latestLegalMoveObservationId;
+    private string? _latestLegalMoveObservationFen;
     private int _nextStepNumber = 1;
 
     public ChessQuestDeterministicPlanner(ChessQuestSession session)
@@ -17,14 +19,21 @@ public sealed class ChessQuestDeterministicPlanner : IWorkflowPlanner
 
     public Task<WorkflowPlan> CreatePlanAsync(
         PlanningRequest request,
-        CancellationToken cancellationToken = default) =>
-        Task.FromResult(NextPlan());
+        CancellationToken cancellationToken = default)
+    {
+        CaptureLatestLegalMoveObservation(request.Observations);
+        return Task.FromResult(NextPlan());
+    }
 
     public Task<WorkflowPlan> RefinePlanAsync(
         PlanningRequest request,
         Observation observation,
-        CancellationToken cancellationToken = default) =>
-        Task.FromResult(NextPlan());
+        CancellationToken cancellationToken = default)
+    {
+        CaptureLatestLegalMoveObservation(request.Observations);
+        CaptureLatestLegalMoveObservation([observation]);
+        return Task.FromResult(NextPlan());
+    }
 
     private WorkflowPlan NextPlan()
     {
@@ -72,13 +81,19 @@ public sealed class ChessQuestDeterministicPlanner : IWorkflowPlanner
     private PlanStep PlayMoveStep(int stepNumber, string move)
     {
         var agentColor = _session.SessionContext.AgentColor.ToString().ToLowerInvariant();
-        return Step(
-            stepNumber,
-            ChessQuestToolIds.PlayMove,
-            ToolKind.Action,
-            ToolEffect.WritesLocalState,
-            ("move", move),
-            ("turnIntent", new Dictionary<string, object?>(StringComparer.Ordinal)
+        var input = new List<(string Key, object? Value)>
+        {
+            ("move", move)
+        };
+        if (!string.IsNullOrWhiteSpace(_latestLegalMoveObservationId) &&
+            string.Equals(_latestLegalMoveObservationFen, _session.CurrentState.Fen, StringComparison.Ordinal))
+        {
+            input.Add(("legalMoveObservationId", _latestLegalMoveObservationId));
+        }
+
+        input.Add((
+            "turnIntent",
+            new Dictionary<string, object?>(StringComparer.Ordinal)
             {
                 ["agentColor"] = agentColor,
                 ["selectedMove"] = move,
@@ -86,6 +101,39 @@ public sealed class ChessQuestDeterministicPlanner : IWorkflowPlanner
                 ["publicReason"] = "Use a legal move from the strict referee surface and keep playing for a win.",
                 ["completionClaim"] = false
             }));
+
+        return Step(
+            stepNumber,
+            ChessQuestToolIds.PlayMove,
+            ToolKind.Action,
+            ToolEffect.WritesLocalState,
+            input.ToArray());
+    }
+
+    private void CaptureLatestLegalMoveObservation(IEnumerable<Observation> observations)
+    {
+        foreach (var observation in observations)
+        {
+            if (!observation.Data.TryGetValue("operation", out var operation) ||
+                !string.Equals(Convert.ToString(operation), "list_legal_moves", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!observation.Data.TryGetValue("fen", out var fenValue))
+            {
+                continue;
+            }
+
+            var fen = Convert.ToString(fenValue);
+            if (string.IsNullOrWhiteSpace(fen))
+            {
+                continue;
+            }
+
+            _latestLegalMoveObservationId = observation.ObservationId;
+            _latestLegalMoveObservationFen = fen;
+        }
     }
 
     private string[] CandidateLine()

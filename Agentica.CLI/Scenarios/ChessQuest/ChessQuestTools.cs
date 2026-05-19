@@ -58,6 +58,11 @@ public static class ChessQuestTools
                     Description: "Exact UCI move selected by the agent from current legal moves or its public line projection.",
                     Example: "g1f3"),
                 new ToolInputField(
+                    "legalMoveObservationId",
+                    Required: false,
+                    Description: "Observation id from the current chess.list_legal_moves result that contained the selected move. Required when turnIntent.legalBasis uses the current legal move list.",
+                    Example: "observation_abc123"),
+                new ToolInputField(
                     "turnIntent",
                     ToolInputValueType.Object,
                     Required: true,
@@ -97,7 +102,7 @@ public static class ChessQuestTools
         {
             ChessQuestToolIds.GetState => "Returns current public ChessQuest session state, role, goal, FEN, turn, terminal state, and strict surface contract.",
             ChessQuestToolIds.RenderBoard => "Returns a plain ASCII board render for spatial inspection of the current public position.",
-            ChessQuestToolIds.ListLegalMoves => "Returns legal moves for the current side in UCI notation only.",
+            ChessQuestToolIds.ListLegalMoves => "Returns legal moves for the current side in UCI notation only, plus the legalMoveObservationId that binds a later play_move to this exact board state.",
             ChessQuestToolIds.ProjectLine => "Projects an agent-authored hypothetical UCI line under public chess rules and verifies submitted check/checkmate claims without mutating the session or generating opponent replies.",
             ChessQuestToolIds.PlayMove => "Commits one legal agent UCI move, then applies one host-controlled opponent move when the game remains non-terminal.",
             ChessQuestToolIds.CompleteObjective => "Checks whether the current terminal board state satisfies the ChessQuest objective and emits the completion artifact only when verified.",
@@ -151,7 +156,7 @@ public static class ChessQuestTools
                 NotEnoughWhen = "The planner needs the exact legal UCI move set."
             },
             ChessQuestToolIds.ListLegalMoves => new ToolContextHint(
-                Produces: "legal UCI moves for the current side",
+                Produces: "legal UCI moves for the current side and a legalMoveObservationId for the exact observed board state",
                 Complements:
                 [
                     ChessQuestToolIds.GetState,
@@ -169,7 +174,7 @@ public static class ChessQuestTools
                     ChessQuestToolIds.PlayMove
                 ])
             {
-                UseWhen = "The planner needs exact legal action affordances before selecting a move.",
+                UseWhen = "The planner needs exact legal action affordances before selecting a move, or must refresh after a stale/illegal move refusal.",
                 NotEnoughWhen = "The planner wants to inspect a self-authored hypothetical line."
             },
             ChessQuestToolIds.ProjectLine => new ToolContextHint(
@@ -213,7 +218,7 @@ public static class ChessQuestTools
         };
 
     private static ToolCooldownPolicy? CooldownFor(string toolId) =>
-        toolId is ChessQuestToolIds.GetState or ChessQuestToolIds.RenderBoard or ChessQuestToolIds.ListLegalMoves
+        toolId is ChessQuestToolIds.GetState or ChessQuestToolIds.RenderBoard
             ? new ToolCooldownPolicy(
                 PlanStepCount: 2,
                 Reason: "ChessQuest public query data normally remains stable until a move changes the board.",

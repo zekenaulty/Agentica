@@ -131,6 +131,7 @@ public static class ChessQuestCapabilitySurfaceCompiler
         - Use UCI notation only for legal moves and submitted lines.
         - chess.project_line may be used only for self-authored hypothetical lines; it never chooses moves and never generates opponent replies.
         - chess.play_move requires a concise public turnIntent matching the selected move.
+        - If the move was selected from chess.list_legal_moves, include that result's legalMoveObservationId in chess.play_move.
         - Do not claim completion unless chess.complete_objective emits chessquest.objective_completed.
         - If strategyProjection, strategyFrame, and phaseObjective are present, treat them as public strategic guidance, not board truth.
         - If strategyProjection, strategyFrame, or phaseObjective conflicts with chessFrame, prefer chessFrame and legal tool receipts.
@@ -248,6 +249,7 @@ public static class ChessQuestCapabilitySurfaceCompiler
             {
                 ["fen"] = state.Fen,
                 ["ply"] = state.Ply,
+                ["sideToMoveInCheck"] = !state.IsTerminal && session.IsSideToMoveInCheck(),
                 ["recentMovesUci"] = state.RecentMovesUci
             },
             TurnContract: TurnContract(session));

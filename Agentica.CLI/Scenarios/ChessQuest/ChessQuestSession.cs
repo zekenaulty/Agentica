@@ -10,6 +10,8 @@ public sealed class ChessQuestSession
     private readonly IChessOpponent _opponent;
     private readonly List<ChessQuestToolTurn> _turns = [];
     private readonly List<ChessQuestRecordedPly> _committedPlies = [];
+    private readonly Dictionary<string, ChessQuestLegalMoveObservation> _legalMoveObservations = new(StringComparer.Ordinal);
+    private ChessQuestLegalMoveObservation? _latestLegalMoveObservation;
     private int _projectedLinesThisTurn;
 
     public ChessQuestSession(
@@ -33,6 +35,12 @@ public sealed class ChessQuestSession
     public ChessPublicState CurrentState => _rules.GetState();
 
     public ChessQuestSessionContext SessionContext => BuildSessionContext();
+
+    public bool IsSideToMoveInCheck()
+    {
+        var state = CurrentState;
+        return !state.IsTerminal && _rules.IsKingInCheck(state.SideToMove);
+    }
 
     public async Task<ToolResult> ExecuteAsync(
         ToolInvocation invocation,
@@ -118,10 +126,15 @@ public sealed class ChessQuestSession
     {
         var data = Snapshot("list_legal_moves");
         data["notation"] = "uci";
-        data["legalMoves"] = _rules.ListLegalMoves().Select(move => move.Uci).ToArray();
+        var legalMoves = _rules.ListLegalMoves().Select(move => move.Uci).ToArray();
+        data["legalMoves"] = legalMoves;
 
         var receipt = Receipt(invocation, ReceiptStatus.Succeeded, "Legal UCI moves returned.", data);
-        return new ToolResult(receipt, Observation(invocation, receipt, "Legal UCI moves observed.", data));
+        var observation = Observation(invocation, receipt, "Legal UCI moves observed.", data);
+        data["legalMoveObservationId"] = observation.ObservationId;
+        data["legalMoveReceiptId"] = receipt.ReceiptId;
+        StoreLegalMoveObservation(observation, receipt, legalMoves);
+        return new ToolResult(receipt, observation);
     }
 
     private ToolResult ProjectLine(ToolInvocation invocation)
@@ -196,6 +209,11 @@ public sealed class ChessQuestSession
         }
 
         var before = CurrentState;
+        if (ValidateLegalMoveObservation(invocation, turnIntent, move, before) is { } refusal)
+        {
+            return refusal;
+        }
+
         var agentResult = _rules.TryPlayMove(move);
         if (!agentResult.Accepted || agentResult.Move is null)
         {
@@ -208,7 +226,8 @@ public sealed class ChessQuestSession
                     ["agentMoveAccepted"] = false,
                     ["requestedMove"] = move.Trim().ToLowerInvariant(),
                     ["fenUnchanged"] = string.Equals(before.Fen, _rules.GetFen(), StringComparison.Ordinal),
-                    ["agentToMove"] = SessionContext.AgentToMove
+                    ["agentToMove"] = SessionContext.AgentToMove,
+                    ["currentLegalMoves"] = _rules.ListLegalMoves().Select(item => item.Uci).ToArray()
                 });
         }
 
@@ -270,6 +289,7 @@ public sealed class ChessQuestSession
         var state = CurrentState;
         var data = Snapshot("play_move");
         data["turnIntent"] = turnIntent;
+        data["legalMoveObservationId"] = ReadString(invocation, "legalMoveObservationId");
         data["agentMoveAccepted"] = true;
         data["agentMove"] = agentResult.Move;
         data["agentMoveProjection"] = new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -370,6 +390,7 @@ public sealed class ChessQuestSession
             ["ply"] = state.Ply,
             ["recentMovesUci"] = state.RecentMovesUci,
             ["sideToMove"] = state.SideToMove.ToString().ToLowerInvariant(),
+            ["sideToMoveInCheck"] = !state.IsTerminal && _rules.IsKingInCheck(state.SideToMove),
             ["agentToMove"] = context.AgentToMove,
             ["terminal"] = state.IsTerminal,
             ["terminalState"] = state.TerminalState
@@ -397,8 +418,110 @@ public sealed class ChessQuestSession
                 ResignationAllowed: false),
             Difficulty: Scenario.Difficulty,
             Ply: state.Ply,
+            SideToMoveInCheck: !state.IsTerminal && _rules.IsKingInCheck(state.SideToMove),
             Terminal: state.IsTerminal);
     }
+
+    private void StoreLegalMoveObservation(
+        Observation observation,
+        Receipt receipt,
+        IReadOnlyList<string> legalMoves)
+    {
+        var state = CurrentState;
+        var snapshot = new ChessQuestLegalMoveObservation(
+            observation.ObservationId,
+            receipt.ReceiptId,
+            state.Fen,
+            state.Ply,
+            state.SideToMove,
+            legalMoves);
+        _legalMoveObservations[observation.ObservationId] = snapshot;
+        _legalMoveObservations[receipt.ReceiptId] = snapshot;
+        _latestLegalMoveObservation = snapshot;
+    }
+
+    private ToolResult? ValidateLegalMoveObservation(
+        ToolInvocation invocation,
+        IReadOnlyDictionary<string, object?> turnIntent,
+        string move,
+        ChessPublicState currentState)
+    {
+        var normalizedMove = move.Trim().ToLowerInvariant();
+        var observationId = ReadString(invocation, "legalMoveObservationId");
+        var legalBasis = ReadString(turnIntent, "legalBasis");
+        var currentLegalMoveSnapshot = _latestLegalMoveObservation is { } latest &&
+            string.Equals(latest.Fen, currentState.Fen, StringComparison.Ordinal) &&
+            latest.Ply == currentState.Ply &&
+            latest.SideToMove == currentState.SideToMove
+                ? latest
+                : null;
+        var claimsCurrentLegalMoveList = legalBasis?.Contains("legal_move_list", StringComparison.OrdinalIgnoreCase) == true ||
+            legalBasis?.Contains("current_legal", StringComparison.OrdinalIgnoreCase) == true;
+
+        if (string.IsNullOrWhiteSpace(observationId))
+        {
+            return currentLegalMoveSnapshot is not null && claimsCurrentLegalMoveList
+                ? Refused(
+                    invocation,
+                    "missing_legal_move_observation_id",
+                    "Play move requires legalMoveObservationId from the current chess.list_legal_moves observation when legalBasis uses the current legal move list.",
+                    LegalMoveRefusalData(currentState, normalizedMove, currentLegalMoveSnapshot))
+                : null;
+        }
+
+        if (!_legalMoveObservations.TryGetValue(observationId, out var snapshot))
+        {
+            return Refused(
+                invocation,
+                "unknown_legal_move_observation_id",
+                "The supplied legalMoveObservationId is not known in this ChessQuest session.",
+                LegalMoveRefusalData(currentState, normalizedMove, legalMoveObservationId: observationId));
+        }
+
+        if (!string.Equals(snapshot.Fen, currentState.Fen, StringComparison.Ordinal) ||
+            snapshot.Ply != currentState.Ply ||
+            snapshot.SideToMove != currentState.SideToMove)
+        {
+            return Refused(
+                invocation,
+                "stale_legal_move_observation",
+                "The supplied legalMoveObservationId was produced for a previous board state. Refresh chess.list_legal_moves before playing.",
+                LegalMoveRefusalData(currentState, normalizedMove, snapshot));
+        }
+
+        if (!snapshot.LegalMoves.Contains(normalizedMove, StringComparer.Ordinal))
+        {
+            return Refused(
+                invocation,
+                "move_not_in_legal_move_observation",
+                $"The selected move '{normalizedMove}' was not present in the supplied legal move observation.",
+                LegalMoveRefusalData(currentState, normalizedMove, snapshot));
+        }
+
+        return null;
+    }
+
+    private Dictionary<string, object?> LegalMoveRefusalData(
+        ChessPublicState currentState,
+        string requestedMove,
+        ChessQuestLegalMoveObservation? observation = null,
+        string? legalMoveObservationId = null) =>
+        new(StringComparer.Ordinal)
+        {
+            ["agentMoveAccepted"] = false,
+            ["requestedMove"] = requestedMove,
+            ["fenUnchanged"] = true,
+            ["agentToMove"] = SessionContext.AgentToMove,
+            ["legalMoveObservationId"] = observation?.ObservationId ?? legalMoveObservationId,
+            ["legalMoveObservationFen"] = observation?.Fen,
+            ["legalMoveObservationPly"] = observation?.Ply,
+            ["legalMoveObservationSideToMove"] = observation?.SideToMove.ToString().ToLowerInvariant(),
+            ["legalMovesFromObservation"] = observation?.LegalMoves,
+            ["currentFen"] = currentState.Fen,
+            ["currentPly"] = currentState.Ply,
+            ["currentSideToMove"] = currentState.SideToMove.ToString().ToLowerInvariant(),
+            ["currentLegalMoves"] = _rules.ListLegalMoves().Select(item => item.Uci).ToArray()
+        };
 
     private ChessQuestColor OpponentColor() =>
         Scenario.AgentColor == ChessQuestColor.White ? ChessQuestColor.Black : ChessQuestColor.White;
@@ -455,6 +578,11 @@ public sealed class ChessQuestSession
 
     private static string? ReadString(ToolInvocation invocation, string key) =>
         invocation.Input.TryGetValue(key, out var value)
+            ? Convert.ToString(value)
+            : null;
+
+    private static string? ReadString(IReadOnlyDictionary<string, object?> source, string key) =>
+        source.TryGetValue(key, out var value)
             ? Convert.ToString(value)
             : null;
 

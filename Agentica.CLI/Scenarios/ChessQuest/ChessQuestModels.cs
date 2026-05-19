@@ -56,7 +56,16 @@ public sealed record ChessQuestSessionContext(
     ChessQuestResultPolicy ResultPolicy,
     ChessQuestDifficulty Difficulty,
     int Ply,
+    bool SideToMoveInCheck,
     bool Terminal);
+
+public sealed record ChessQuestLegalMoveObservation(
+    string ObservationId,
+    string ReceiptId,
+    string Fen,
+    int Ply,
+    ChessQuestColor SideToMove,
+    IReadOnlyList<string> LegalMoves);
 
 public sealed record ChessQuestObjective(
     string Kind,

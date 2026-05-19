@@ -785,6 +785,7 @@ internal static class ChessQuestCommand
         - Use chess.get_state, chess.render_board, and chess.list_legal_moves to inspect current public state.
         - You may use chess.project_line only for hypothetical UCI lines you authored yourself. It is read-only, can verify submitted check/checkmate claims, and does not generate opponent replies.
         - Commit exactly one selected agent move with chess.play_move. Include a concise public turnIntent matching the selected move.
+        - If you selected the move from chess.list_legal_moves, pass that observation's legalMoveObservationId into chess.play_move. If the board changes or a move is refused as stale, refresh chess.list_legal_moves.
         - Before describing a move as check or checkmate, call chess.project_line for that exact move or line with claims ["check"] or ["checkmate"] and use the returned claimVerification.
         - Do not describe a selected move as checkmate, a forced win, or objective completion unless a prior chess.project_line result or committed receipt has already verified that terminal state.
         - chess.play_move applies the host-controlled opponent reply after your accepted move unless the game is terminal.

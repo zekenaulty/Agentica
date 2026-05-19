@@ -405,6 +405,7 @@ public sealed class PlannerChessOpponent : IChessOpponent
         Choose exactly one legal UCI move for {request.OpponentColor} from the current public board state.
         Your goal is to win the game as {request.OpponentColor}; draw is not success.
         Use the strict chess tools to inspect public state, list legal moves, optionally project self-authored lines, then commit one selected move with chess.play_move.
+        If you selected the move from chess.list_legal_moves, pass that observation's legalMoveObservationId into chess.play_move. If the board changes or a move is refused as stale, refresh chess.list_legal_moves.
         Before describing a move as check or checkmate, call chess.project_line for that exact move or line with claims ["check"] or ["checkmate"] and use the returned claimVerification.
         Do not describe a selected move as checkmate, a forced win, or objective completion unless a prior chess.project_line result has already verified that terminal state.
         Do not call chess.complete_objective unless your selected move has already ended the game.
