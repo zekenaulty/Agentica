@@ -597,6 +597,37 @@ public sealed class ChessQuestHarnessTests
     }
 
     [Fact]
+    public async Task ChessQuest_console_task_planner_falls_back_after_invalid_llm_graph()
+    {
+        var planner = new ChessQuestConsoleTaskPlanner(
+            new InvalidTaskPlanner(),
+            new ChessQuestDeterministicTaskPlanner(maxAgentTurns: 2));
+
+        using var writer = new StringWriter();
+        var originalOut = Console.Out;
+        try
+        {
+            Console.SetOut(writer);
+            var plan = await planner.CreatePlanAsync(new TaskPlanningRequest(
+                new LargeTaskRequest(
+                    "Choose a ChessQuest phase task.",
+                    RequestOrigin.User,
+                    new Dictionary<string, object?>()),
+                new OrchestrationPolicy()));
+
+            var task = Assert.Single(plan.Tasks);
+            Assert.Equal("chessquest_phase_001", task.TaskId);
+            Assert.Equal("phase_run", task.ContextProjection["chessquest.taskKind"]);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+
+        Assert.Contains("Planner Repair", writer.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ChessQuest_board_probe_validates_piece_identification_against_fen_oracle()
     {
         var trial = ChessQuestBoardProbeRunner.CreateTrial(
@@ -988,5 +1019,18 @@ public sealed class ChessQuestHarnessTests
             Observation observation,
             CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("Refinement should not run.");
+    }
+
+    private sealed class InvalidTaskPlanner : ITaskPlanner
+    {
+        public Task<TaskGraphPlan> CreatePlanAsync(
+            TaskPlanningRequest request,
+            CancellationToken cancellationToken = default) =>
+            throw new TaskGraphValidationException("Invalid LLM task graph for testing.");
+
+        public Task<TaskGraphRefinement> RefinePlanAsync(
+            TaskRefinementRequest request,
+            CancellationToken cancellationToken = default) =>
+            throw new TaskGraphValidationException("Invalid LLM task refinement for testing.");
     }
 }

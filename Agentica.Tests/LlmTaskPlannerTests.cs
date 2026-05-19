@@ -120,6 +120,45 @@ public sealed class LlmTaskPlannerTests
     }
 
     [Fact]
+    public async Task Llm_task_planner_infers_acceptance_kind_from_evidence_fields()
+    {
+        var client = new FakeLlmClient(
+            """
+            {
+              "planId": "task_plan_test",
+              "objective": "Run ChessQuest phase.",
+              "tasks": [
+                {
+                  "taskId": "phase_001",
+                  "objective": "Execute a bounded phase.",
+                  "dependsOn": [],
+                  "optional": false,
+                  "priority": 1,
+                  "maxRuns": 1,
+                  "contextProjection": {},
+                  "acceptanceRequirements": [
+                    {
+                      "kind": "ObjectiveVerifier",
+                      "artifactKind": "chessquest.phase_report"
+                    }
+                  ]
+                }
+              ],
+              "definitionOfDone": []
+            }
+            """);
+        var planner = new LlmTaskPlanner(client);
+
+        var plan = await planner.CreatePlanAsync(new TaskPlanningRequest(
+            new LargeTaskRequest("Run ChessQuest phase.", RequestOrigin.User, new Dictionary<string, object?>()),
+            new OrchestrationPolicy()));
+
+        var requirement = Assert.Single(plan.Tasks[0].AcceptanceRequirements);
+        Assert.Equal(TaskAcceptanceRequirementKind.Artifact, requirement.Kind);
+        Assert.Equal("chessquest.phase_report", requirement.ArtifactKind);
+    }
+
+    [Fact]
     public async Task Llm_task_planner_rejects_semantically_invalid_task_graph()
     {
         var client = new FakeLlmClient(

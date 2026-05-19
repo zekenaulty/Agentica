@@ -1,5 +1,6 @@
 using Agentica;
 using Agentica.Artifacts;
+using Agentica.Clients.Orchestration;
 using Agentica.Events;
 using Agentica.Execution;
 using Agentica.Observations;
@@ -484,7 +485,8 @@ public sealed class ChessQuestDeterministicTaskPlanner : ITaskPlanner
             _ => "continue_development"
         };
         var rationale = $"Continue with {phase} phase after receipt-backed phase report {nextIndex - 1}.";
-        var task = PhaseTask(nextIndex, phase, direction, rationale);
+        var previousTaskId = request.State.CompletedTaskIds.LastOrDefault() ?? request.ActiveTask.TaskId;
+        var task = PhaseTask(nextIndex, phase, direction, rationale, previousTaskId);
 
         return Task.FromResult(new TaskGraphRefinement(
             $"add_{phase}_phase_{nextIndex:000}",
@@ -497,11 +499,12 @@ public sealed class ChessQuestDeterministicTaskPlanner : ITaskPlanner
         int index,
         string phase,
         string direction,
-        string rationale) =>
+        string rationale,
+        string? previousTaskId = null) =>
         new(
             TaskId: $"chessquest_phase_{index:000}",
             Objective: $"Execute ChessQuest {phase} phase task {index} under a bounded strategic envelope.",
-            DependsOn: index <= 1 ? [] : [$"chessquest_phase_{index - 1:000}"],
+            DependsOn: index <= 1 ? [] : [previousTaskId ?? $"chessquest_phase_{index - 1:000}"],
             Optional: false,
             Priority: index,
             MaxRuns: 1,
@@ -581,17 +584,25 @@ public sealed class ChessQuestDeterministicTaskPlanner : ITaskPlanner
 public sealed class ChessQuestConsoleTaskPlanner : ITaskPlanner
 {
     private readonly ITaskPlanner _inner;
+    private readonly ITaskPlanner? _fallback;
 
-    public ChessQuestConsoleTaskPlanner(ITaskPlanner inner)
+    public ChessQuestConsoleTaskPlanner(
+        ITaskPlanner inner,
+        ITaskPlanner? fallback = null)
     {
         _inner = inner;
+        _fallback = fallback;
     }
 
     public async Task<TaskGraphPlan> CreatePlanAsync(
         TaskPlanningRequest request,
         CancellationToken cancellationToken = default)
     {
-        var plan = await _inner.CreatePlanAsync(request, cancellationToken).ConfigureAwait(false);
+        var plan = await RunWithFallbackAsync(
+                () => _inner.CreatePlanAsync(request, cancellationToken),
+                () => _fallback?.CreatePlanAsync(request, cancellationToken),
+                "initial task plan")
+            .ConfigureAwait(false);
         Console.WriteLine();
         Console.WriteLine("=== ChessQuest Orchestration Tier | Task Plan ===");
         foreach (var task in plan.Tasks.OrderBy(task => task.Priority))
@@ -606,7 +617,11 @@ public sealed class ChessQuestConsoleTaskPlanner : ITaskPlanner
         TaskRefinementRequest request,
         CancellationToken cancellationToken = default)
     {
-        var refinement = await _inner.RefinePlanAsync(request, cancellationToken).ConfigureAwait(false);
+        var refinement = await RunWithFallbackAsync(
+                () => _inner.RefinePlanAsync(request, cancellationToken),
+                () => _fallback?.RefinePlanAsync(request, cancellationToken),
+                "task refinement")
+            .ConfigureAwait(false);
         Console.WriteLine();
         Console.WriteLine("=== ChessQuest Orchestration Tier | Refinement ===");
         Console.WriteLine($"Reason: {refinement.Reason}");
@@ -652,4 +667,32 @@ public sealed class ChessQuestConsoleTaskPlanner : ITaskPlanner
         task.ContextProjection.TryGetValue(key, out var value)
             ? value?.ToString()
             : null;
+
+    private static async Task<T> RunWithFallbackAsync<T>(
+        Func<Task<T>> action,
+        Func<Task<T>?> fallback,
+        string operation)
+    {
+        try
+        {
+            return await action().ConfigureAwait(false);
+        }
+        catch (Exception exception) when (IsRecoverablePlannerFailure(exception))
+        {
+            var fallbackTask = fallback();
+            if (fallbackTask is null)
+            {
+                throw;
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("=== ChessQuest Orchestration Tier | Planner Repair ===");
+            Console.WriteLine($"Recovered from invalid {operation}: {exception.Message}");
+            Console.WriteLine("Using deterministic ChessQuest phase task fallback for this orchestration step.");
+            return await fallbackTask.ConfigureAwait(false);
+        }
+    }
+
+    private static bool IsRecoverablePlannerFailure(Exception exception) =>
+        exception is LlmTaskPlannerException or TaskGraphValidationException;
 }

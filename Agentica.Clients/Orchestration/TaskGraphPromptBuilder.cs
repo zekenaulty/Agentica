@@ -57,6 +57,8 @@ public static class TaskGraphPromptBuilder
         Use a multi-node task graph when the objective needs decomposition, dependencies, acceptance gates, or adaptation.
         The graph must be acyclic. Dependencies must reference known task ids.
         Acceptance criteria must be evidence-checkable through outcome status, artifacts, receipts, or host state.
+        Valid acceptance requirement kind values are exactly: OutcomeStatus, Artifact, Receipt, HostState.
+        Do not invent requirement kinds such as ObjectiveVerifier, Verifier, ObjectiveStatus, Completion, or PhaseReport.
         Do not treat report prose, confidence, hypotheses, or hidden reasoning as proof.
         Refinements must be explicit graph mutations.
         Do not create recursive orchestration layers. Decomposition is bounded by the supplied policy.

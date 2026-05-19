@@ -535,6 +535,7 @@ internal static class ChessQuestCommand
     private static ITaskPlanner CreateChessQuestTaskPlanner(ChessQuestOrchestrationOptions options)
     {
         ITaskPlanner planner;
+        ITaskPlanner? fallback = null;
         if (options.TaskPlanner == PlannerKind.Deterministic)
         {
             planner = new ChessQuestDeterministicTaskPlanner(options.PhaseMaxAgentTurns);
@@ -553,9 +554,10 @@ internal static class ChessQuestCommand
                         Temperature: 0,
                         MaxOutputTokens: options.MaxOutputTokens ?? LlmPlannerOptions.DefaultMaxOutputTokens,
                         Thinking: ToThinkingOptions(options.ThinkingBudget ?? "off", options.IncludeThoughts))));
+            fallback = new ChessQuestDeterministicTaskPlanner(options.PhaseMaxAgentTurns);
         }
 
-        return new ChessQuestConsoleTaskPlanner(planner);
+        return new ChessQuestConsoleTaskPlanner(planner, fallback);
     }
 
     private static IWorkflowPlanner CreateChessQuestRunPlanner(
@@ -625,7 +627,8 @@ internal static class ChessQuestCommand
         - chessquest.replanTriggers = public stop/replan triggers
 
         Acceptance:
-        - Phase tasks should require artifact kind chessquest.phase_report.
+        - Phase tasks must use an acceptance requirement with kind "Artifact" and artifactKind "chessquest.phase_report".
+        - Do not use ObjectiveVerifier, Verifier, PhaseReport, Completion, or any other acceptance kind. Valid kinds are only OutcomeStatus, Artifact, Receipt, HostState.
         - The host verifies all mutation and completion evidence.
         """;
 

@@ -89,7 +89,7 @@ public sealed record TaskAcceptanceRequirementJsonContract(
 {
     public TaskAcceptanceRequirement ToRequirement()
     {
-        if (!Enum.TryParse<TaskAcceptanceRequirementKind>(Kind, ignoreCase: true, out var kind))
+        if (!TryResolveKind(out var kind))
         {
             throw new LlmTaskPlannerException($"Task acceptance requirement has invalid kind '{Kind}'.");
         }
@@ -114,5 +114,48 @@ public sealed record TaskAcceptanceRequirementJsonContract(
             HostStateValue.HasValue
                 ? Agentica.Clients.Planning.JsonValueConverter.Convert(HostStateValue.Value)
                 : null);
+    }
+
+    private bool TryResolveKind(out TaskAcceptanceRequirementKind kind)
+    {
+        if (Enum.TryParse(Kind, ignoreCase: true, out kind))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(ArtifactKind))
+        {
+            kind = TaskAcceptanceRequirementKind.Artifact;
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(ToolId))
+        {
+            kind = TaskAcceptanceRequirementKind.Receipt;
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(HostStateKey))
+        {
+            kind = TaskAcceptanceRequirementKind.HostState;
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(RequiredOutcomeStatus))
+        {
+            kind = TaskAcceptanceRequirementKind.OutcomeStatus;
+            return true;
+        }
+
+        if (Kind is not null &&
+            (Kind.Equals("ObjectiveVerifier", StringComparison.OrdinalIgnoreCase) ||
+             Kind.Equals("ObjectiveVerification", StringComparison.OrdinalIgnoreCase) ||
+             Kind.Equals("Verifier", StringComparison.OrdinalIgnoreCase)))
+        {
+            kind = TaskAcceptanceRequirementKind.OutcomeStatus;
+            return true;
+        }
+
+        return false;
     }
 }
