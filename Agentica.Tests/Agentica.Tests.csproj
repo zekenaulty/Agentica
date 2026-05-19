@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestCapabilitySurface.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestBoardProbe.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
     <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestCockpitModels.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
     <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestDisclosurePolicy.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
     <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestGameRecordStore.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />

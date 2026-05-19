@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Agentica.Clients.Gemini;
+using Agentica.Clients.Llm;
 using Agentica.CLI.Scenarios.ChessQuest;
 using Agentica.Events;
 using Agentica.Execution;
@@ -40,6 +42,11 @@ internal static class ChessQuestCommand
             return ReplayGame(args.Skip(1).ToArray());
         }
 
+        if (string.Equals(args[0], "board-probe", StringComparison.OrdinalIgnoreCase))
+        {
+            return await RunBoardProbeAsync(args.Skip(1).ToArray(), services).ConfigureAwait(false);
+        }
+
         if (string.Equals(args[0], "resume", StringComparison.OrdinalIgnoreCase))
         {
             return await ResumeGameAsync(board, args.Skip(1).ToArray(), services).ConfigureAwait(false);
@@ -52,6 +59,76 @@ internal static class ChessQuestCommand
         }
 
         return await RunScenarioAsync(board, args.Skip(1).ToArray(), services).ConfigureAwait(false);
+    }
+
+    private static async Task<int> RunBoardProbeAsync(
+        IReadOnlyList<string> args,
+        CliCommandServices services)
+    {
+        var options = ChessQuestBoardProbeOptions.Parse(args, GeminiModelId.Flash25);
+        if (!options.IsValid)
+        {
+            Console.Error.WriteLine(options.Error);
+            services.PrintUsage();
+            return 2;
+        }
+
+        if (!services.GeminiCredentialsAvailable())
+        {
+            Console.Error.WriteLine("ChessQuest board-probe requires Gemini credentials. Set GEMINI_API_KEY or GOOGLE_API_KEY.");
+            return 2;
+        }
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(options.TimeoutSeconds));
+        var client = new RetryingLlmClient(
+            new GeminiLlmClient(GeminiClientOptions.FromEnvironment(options.ModelId)),
+            new LlmRetryOptions(CallTimeout: TimeSpan.FromSeconds(options.TimeoutSeconds)));
+        var runner = new ChessQuestBoardProbeRunner(client);
+
+        if (!options.Json)
+        {
+            Console.WriteLine("--- ChessQuest Board Probe ---");
+            Console.WriteLine($"Model: {options.ModelId}");
+            Console.WriteLine($"Trials: {options.Trials}");
+            Console.WriteLine($"Seed: {options.Seed}");
+            Console.WriteLine($"Scramble Plies: {options.ScramblePlies}");
+            Console.WriteLine($"Presentation: {options.Presentation}");
+            Console.WriteLine($"Target: {options.TargetMode}");
+            Console.WriteLine();
+        }
+
+        try
+        {
+            var summary = await runner.RunAsync(
+                    options,
+                    options.Json ? null : PrintBoardProbeTrial,
+                    timeout.Token)
+                .ConfigureAwait(false);
+
+            if (options.Json)
+            {
+                Console.WriteLine(ChessQuestBoardProbeRunner.SerializeSummary(summary));
+            }
+            else
+            {
+                Console.WriteLine();
+                Console.WriteLine("--- Board Probe Summary ---");
+                Console.WriteLine($"Passed: {summary.Passed}/{summary.Trials}");
+                Console.WriteLine($"Failed: {summary.Failed}/{summary.Trials}");
+            }
+
+            return summary.Failed == 0 ? 0 : 1;
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine($"ChessQuest board-probe timed out after {options.TimeoutSeconds} second(s).");
+            return 1;
+        }
+        catch (LlmClientException exception)
+        {
+            Console.Error.WriteLine(exception.Message);
+            return 1;
+        }
     }
 
     private static async Task<int> RunScenarioAsync(
@@ -560,6 +637,34 @@ internal static class ChessQuestCommand
         Console.WriteLine($"Material Delta: {report.MaterialBalanceDelta}");
         Console.WriteLine($"Terminal: {report.Terminal}");
     }
+
+    private static void PrintBoardProbeTrial(
+        ChessQuestBoardProbeTrial trial,
+        ChessQuestBoardProbeTrialResult result)
+    {
+        var status = result.Passed ? "PASS" : "FAIL";
+        Console.WriteLine($"[{status}] trial={trial.TrialNumber} square={trial.Square} expected={FormatExpected(result.Expected)} answer={FormatAnswer(result.Answer)}");
+        if (!result.Passed)
+        {
+            Console.WriteLine($"  reason: {result.FailureReason}");
+            Console.WriteLine($"  fen: {trial.Fen}");
+            Console.WriteLine("  board:");
+            foreach (var line in trial.BoardLines)
+            {
+                Console.WriteLine($"  {line}");
+            }
+        }
+    }
+
+    private static string FormatExpected(ChessQuestBoardProbeExpected expected) =>
+        expected.Occupied
+            ? $"{expected.Color}_{expected.Piece}"
+            : "empty";
+
+    private static string FormatAnswer(ChessQuestBoardProbeAnswer? answer) =>
+        answer is null
+            ? "none"
+            : answer.Occupied ? $"{answer.Color}_{answer.Piece}" : "empty";
 
     private static void PrintReplay(ChessQuestGameRecord record, string source)
     {

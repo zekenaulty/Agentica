@@ -400,6 +400,69 @@ public sealed class ChessQuestHarnessTests
     }
 
     [Fact]
+    public void ChessQuest_board_probe_validates_piece_identification_against_fen_oracle()
+    {
+        var trial = ChessQuestBoardProbeRunner.CreateTrial(
+            seed: 1147,
+            trialNumber: 1,
+            scramblePlies: 18,
+            targetMode: ChessQuestBoardProbeTargetMode.Occupied);
+        var expected = trial.Expected;
+
+        var result = ChessQuestBoardProbeRunner.Validate(
+            trial,
+            JsonSerializer.Serialize(new ChessQuestBoardProbeAnswer(
+                expected.Square,
+                expected.Occupied,
+                expected.Color,
+                expected.Piece)));
+
+        Assert.True(result.Passed);
+        Assert.True(expected.Occupied);
+        Assert.NotEqual("empty", expected.Piece);
+    }
+
+    [Fact]
+    public void ChessQuest_board_probe_flags_wrong_piece_claim()
+    {
+        var trial = ChessQuestBoardProbeRunner.CreateTrial(
+            seed: 2219,
+            trialNumber: 1,
+            scramblePlies: 22,
+            targetMode: ChessQuestBoardProbeTargetMode.Occupied);
+        var wrongPiece = trial.Expected.Piece == "queen" ? "rook" : "queen";
+
+        var result = ChessQuestBoardProbeRunner.Validate(
+            trial,
+            JsonSerializer.Serialize(new ChessQuestBoardProbeAnswer(
+                trial.Expected.Square,
+                Occupied: true,
+                trial.Expected.Color,
+                wrongPiece)));
+
+        Assert.False(result.Passed);
+        Assert.Contains("piece expected", result.FailureReason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ChessQuest_board_probe_ascii_prompt_does_not_include_fen()
+    {
+        var trial = ChessQuestBoardProbeRunner.CreateTrial(
+            seed: 3331,
+            trialNumber: 1,
+            scramblePlies: 12,
+            targetMode: ChessQuestBoardProbeTargetMode.Occupied);
+
+        var prompt = ChessQuestBoardProbeRunner.BuildPrompt(
+            trial,
+            ChessQuestBoardProbePresentation.Ascii);
+
+        Assert.Contains("ASCII board:", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("FEN:", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain(trial.Fen, prompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task HeuristicChessOpponent_prefers_immediate_checkmate()
     {
         var rules = new GeraChessRulesEngine(FoolsMateBlackToMoveFen);
