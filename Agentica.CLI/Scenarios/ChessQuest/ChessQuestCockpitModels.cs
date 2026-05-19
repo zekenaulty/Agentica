@@ -35,5 +35,11 @@ public sealed record ChessQuestCockpitTurnEnvelope(
     int? LegalMoveCountBeforeMove,
     IReadOnlyList<ChessQuestProjectedLineSummary> CandidateLinesExplored)
 {
+    public bool AgentMoveAccepted { get; init; } = true;
+
+    public bool FenUnchanged { get; init; }
+
+    public int? CommittedAgentTurnNumber { get; init; }
+
     public IReadOnlyList<string> Warnings { get; init; } = [];
 }

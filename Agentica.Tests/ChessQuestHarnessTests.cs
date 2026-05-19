@@ -695,6 +695,56 @@ public sealed class ChessQuestHarnessTests
         Assert.Contains("public legal move", stepStarted.Intent.Rationale, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task ChessQuest_cockpit_projection_does_not_print_refused_move_as_accepted()
+    {
+        var session = CreateSession();
+        var result = await InvokeAsync(
+            session,
+            ChessQuestToolIds.PlayMove,
+            new Dictionary<string, object?>
+            {
+                ["move"] = "a1a3",
+                ["turnIntent"] = TurnIntent("white", "a1a3", "Attempt an invalid rook move for projection testing.")
+            });
+        Assert.Equal(ReceiptStatus.Refused, result.Receipt.Status);
+
+        var sink = new ChessQuestCockpitEventSink(session);
+        using var writer = new StringWriter();
+        var originalOut = Console.Out;
+        try
+        {
+            Console.SetOut(writer);
+            sink.Emit(new ExecutionEvent(
+                "event_test",
+                "receipt.emitted",
+                DateTimeOffset.UtcNow,
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["receipt"] = result.Receipt.ReceiptId,
+                    ["status"] = "refused"
+                })
+            {
+                Context = new ExecutionEventContext(
+                    RunId: "run_test",
+                    AttemptNumber: 1,
+                    StepId: "step_001",
+                    ToolId: ChessQuestToolIds.PlayMove,
+                    ReceiptId: result.Receipt.ReceiptId)
+            });
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+
+        var output = writer.ToString();
+        Assert.Contains("Outcome: move refused", output);
+        Assert.Contains("FEN unchanged: True", output);
+        Assert.Contains("Opponent move: none because the agent move was not committed.", output);
+        Assert.DoesNotContain("Outcome: move accepted; no opponent reply applied.", output);
+    }
+
     private static ChessQuestSession CreateSession(
         string fen = StartFen,
         ChessQuestColor agentColor = ChessQuestColor.White,

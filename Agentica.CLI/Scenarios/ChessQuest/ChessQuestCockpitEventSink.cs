@@ -178,10 +178,14 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
             ReadDictionary(data, "turnIntent");
         var publicReason = ReadString(turnIntent, "publicReason");
         var selectedMove = ReadString(data, "agentMove") ??
+            ReadString(data, "requestedMove") ??
             ReadString(turn.Invocation.Input, "move") ??
             "unknown";
+        var agentMoveAccepted = turn.Result.Receipt.Status == Agentica.Artifacts.ReceiptStatus.Succeeded &&
+            ReadBool(data, "agentMoveAccepted");
         var opponentMove = ReadString(data, "opponentMove");
         var opponentMoveApplied = ReadBool(data, "opponentMoveApplied");
+        var fenUnchanged = ReadBool(data, "fenUnchanged");
         var fenAfter = ReadString(data, "fenAfter") ?? turn.StateAfter.Fen;
         var terminal = ReadBool(data, "terminal") || turn.StateAfter.IsTerminal;
         var terminalResult = turn.StateAfter.TerminalState?.Result;
@@ -212,13 +216,20 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
             LegalMoveCountBeforeMove: _lastLegalMoveCount,
             CandidateLinesExplored: _pendingProjections.ToArray())
         {
+            AgentMoveAccepted = agentMoveAccepted,
+            FenUnchanged = fenUnchanged,
+            CommittedAgentTurnNumber = agentMoveAccepted
+                ? _session.CommittedPlies.Count(ply => string.Equals(ply.Source, "agent", StringComparison.Ordinal))
+                : null,
             Warnings = BuildWarnings(
                 intent,
                 publicReason,
                 completionClaim,
                 agentMoveGivesCheck,
                 agentMoveGivesCheckmate,
-                terminal)
+                terminal,
+                agentMoveAccepted,
+                fenUnchanged)
         };
 
         _turnRecorder?.Invoke(envelope);
@@ -230,7 +241,12 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
     private void PrintMoveEnvelope(ChessQuestCockpitTurnEnvelope envelope)
     {
         Console.WriteLine();
-        Console.WriteLine($"=== ChessQuest Turn {envelope.TurnNumber:000} | role={envelope.AgentColor} ===");
+        Console.WriteLine($"=== ChessQuest Move Attempt {envelope.TurnNumber:000} | role={envelope.AgentColor} ===");
+        if (envelope.CommittedAgentTurnNumber is not null)
+        {
+            Console.WriteLine($"Committed agent turn: {envelope.CommittedAgentTurnNumber}");
+        }
+
         if (envelope.LegalMoveCountBeforeMove is not null)
         {
             Console.WriteLine($"Legal moves considered: {envelope.LegalMoveCountBeforeMove}");
@@ -273,9 +289,13 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
             Console.WriteLine($"Trace warning: {warning}");
         }
 
-        Console.WriteLine(envelope.OpponentMoveApplied
-            ? $"Outcome: move accepted; opponent replied {envelope.OpponentMove}."
-            : "Outcome: move accepted; no opponent reply applied.");
+        Console.WriteLine(FormatOutcome(envelope));
+        if (!envelope.AgentMoveAccepted)
+        {
+            Console.WriteLine($"FEN unchanged: {envelope.FenUnchanged}");
+            Console.WriteLine("Opponent move: none because the agent move was not committed.");
+        }
+
         Console.WriteLine($"State: ply={envelope.PlyAfter} sideToMove={envelope.SideToMoveAfter} terminal={envelope.Terminal}");
         Console.WriteLine($"FEN: {envelope.FenAfter}");
 
@@ -381,7 +401,9 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
         bool completionClaim,
         bool agentMoveGivesCheck,
         bool agentMoveGivesCheckmate,
-        bool terminal)
+        bool terminal,
+        bool agentMoveAccepted,
+        bool fenUnchanged)
     {
         var warnings = new List<string>();
         var declaredText = string.Join(
@@ -393,6 +415,13 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
                 intent?.ExpectedOutcome,
                 publicReason
             }.Where(item => !string.IsNullOrWhiteSpace(item)));
+
+        if (!agentMoveAccepted)
+        {
+            warnings.Add(fenUnchanged
+                ? "selected move was refused and did not mutate the board."
+                : "selected move was refused; verify board state before retrying.");
+        }
 
         if (MentionsMate(declaredText) && !agentMoveGivesCheckmate)
         {
@@ -409,6 +438,18 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
         }
 
         return warnings;
+    }
+
+    private static string FormatOutcome(ChessQuestCockpitTurnEnvelope envelope)
+    {
+        if (!envelope.AgentMoveAccepted)
+        {
+            return $"Outcome: move refused; reason: {Compact(envelope.ReceiptMessage)}";
+        }
+
+        return envelope.OpponentMoveApplied
+            ? $"Outcome: move accepted; opponent replied {envelope.OpponentMove}."
+            : "Outcome: move accepted; no opponent reply applied.";
     }
 
     private static bool MentionsMate(string text) =>
