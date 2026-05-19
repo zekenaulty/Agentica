@@ -52,6 +52,9 @@ public sealed class RunLogWriter
     public void WriteTurn(MazeQuestTurnEnvelope turnEnvelope) =>
         AppendJsonLine("turns.jsonl", turnEnvelope);
 
+    public void WriteJsonLine(string fileName, object value) =>
+        AppendJsonLine(fileName, value);
+
     public void WriteOutcome(OutcomeEnvelope envelope) =>
         WriteJson("outcome.json", envelope);
 

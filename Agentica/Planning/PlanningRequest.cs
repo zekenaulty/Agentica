@@ -12,4 +12,8 @@ public sealed record PlanningRequest(
     IReadOnlyList<Receipt> Receipts)
 {
     public PlanningExecutionContext ExecutionContext { get; init; } = PlanningExecutionContext.Empty;
+
+    public ToolSurfaceSnapshot? ToolSurface { get; init; }
+
+    public IReadOnlyList<PlanningFrame> ContextFrames { get; init; } = [];
 }

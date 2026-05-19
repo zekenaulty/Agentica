@@ -96,6 +96,7 @@ internal static class WorkbenchQuestCommand
                 options.ModelId,
                 options.ThinkingBudget,
                 options.IncludeThoughts,
+                null,
                 options.PlanningMode,
                 options.MaxBlockedRetries,
                 LogRun: false,

@@ -4,13 +4,17 @@ This file names work that is intentionally outside the current Agentica core sta
 
 ## Higher-Level Orchestration
 
-Long-horizon orchestration belongs in a separate host/package unless repeated use proves a generic runtime seam is necessary.
+Status: incubating in core.
+
+The reusable orchestration contracts were migrated into `Agentica/Orchestration` to discover and stabilize the generic task-level supervision shape beside the bounded run runtime. This is intentional incubation, not a final package boundary.
+
+Long-horizon orchestration should still become a separate `Agentica.Orchestration` package if the contracts stabilize as reusable API surface, durable state/replay becomes real, or the orchestration layer starts changing independently from the bounded run runtime.
 
 Current host campaign code in `Agentica.CLI/Scenarios/Campaign` is a harness and design probe, not core runtime identity.
 
 Deferred:
 
-- orchestration package
+- separate orchestration package split
 - campaign persistence
 - campaign resume
 - task routing/classification
@@ -96,4 +100,3 @@ Before promoting anything from host harness to core runtime, require:
 - tests proving the abstraction is generic
 - no domain vocabulary leakage
 - no weakening of the proof envelope
-

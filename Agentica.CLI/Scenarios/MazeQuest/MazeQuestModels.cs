@@ -227,6 +227,35 @@ public sealed record MazeMoveEvaluation(
     int FrontierGain,
     string Summary);
 
+public sealed record MazeKnownTravelOption(
+    MazePoint Destination,
+    IReadOnlyList<MazePoint> Path,
+    IReadOnlyList<string> Directions,
+    int HopCount,
+    int TotalTerrainCost,
+    int FrontierGain,
+    double MaxVisibleRisk,
+    int GuaranteedHazardDamage,
+    string ObjectiveDelta,
+    bool Legal,
+    string Reason,
+    string Summary);
+
+public sealed record MazeKnownTravelHop(
+    int Index,
+    string Direction,
+    MazePoint From,
+    MazePoint To,
+    int TerrainCost,
+    double VisibleRisk,
+    int FrontierGain,
+    string ObjectiveDelta,
+    int EnergyBefore,
+    int EnergyAfter,
+    int HealthBefore,
+    int HealthAfter,
+    string ActiveObjectiveIdAfter);
+
 public enum MazeObjectiveKind
 {
     FindItem,

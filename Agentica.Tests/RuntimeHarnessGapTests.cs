@@ -319,6 +319,184 @@ public sealed class RuntimeHarnessGapTests
     }
 
     [Fact]
+    public async Task Tool_cooldown_refuses_repeated_tool_before_plan_step_cooldown_expires()
+    {
+        var tool = new CountingTool();
+        var catalog = ToolCatalog.Create(new ToolRegistration(
+            new ToolDescriptor(
+                "workbench.read",
+                "Workbench Read",
+                ToolKind.Query,
+                ToolEffect.ReadOnly,
+                Cooldown: new ToolCooldownPolicy(PlanStepCount: 1)),
+            tool));
+        var runner = CreateRunner(
+            new StaticPlanner(Plan(
+                Step("step_a", "workbench.read", ToolKind.Query, ToolEffect.ReadOnly),
+                Step("step_b", "workbench.read", ToolKind.Query, ToolEffect.ReadOnly),
+                Step("step_c", "workbench.read", ToolKind.Query, ToolEffect.ReadOnly))),
+            catalog,
+            policy: new ExecutionPolicy(
+                MaxSteps: 4,
+                MaxRefinements: 0,
+                PlanningMode: PlanningMode.PlanOnly,
+                MaxBlockedRetries: 0));
+
+        var envelope = await runner.RunAsync(Request());
+
+        Assert.Equal(1, tool.ExecutionCount);
+        Assert.Equal(
+            [ReceiptStatus.Succeeded, ReceiptStatus.Refused],
+            envelope.Receipts.Items.Select(receipt => receipt.Status).ToArray());
+        var cooldownReceipt = envelope.Receipts.Items[1];
+        Assert.True(cooldownReceipt.Data.ContainsKey("cooldown"));
+        Assert.Contains(envelope.Details.Events, executionEvent =>
+            executionEvent.Type == "receipt.emitted" &&
+            executionEvent.Diagnostics?.Code == "tool.cooldown.active");
+    }
+
+    [Fact]
+    public async Task Tool_cooldown_allows_repeated_tool_after_plan_step_cooldown_expires()
+    {
+        var cooledTool = new CountingTool();
+        var otherTool = new CountingTool();
+        var catalog = ToolCatalog.Create(
+            new ToolRegistration(
+                new ToolDescriptor(
+                    "workbench.read",
+                    "Workbench Read",
+                    ToolKind.Query,
+                    ToolEffect.ReadOnly,
+                    Cooldown: new ToolCooldownPolicy(PlanStepCount: 1)),
+                cooledTool),
+            new ToolRegistration(
+                new ToolDescriptor("workbench.other", "Workbench Other", ToolKind.Query, ToolEffect.ReadOnly),
+                otherTool));
+        var runner = CreateRunner(
+            new StaticPlanner(Plan(
+                Step("step_a", "workbench.read", ToolKind.Query, ToolEffect.ReadOnly),
+                Step("step_b", "workbench.other", ToolKind.Query, ToolEffect.ReadOnly),
+                Step("step_c", "workbench.read", ToolKind.Query, ToolEffect.ReadOnly))),
+            catalog,
+            policy: new ExecutionPolicy(
+                MaxSteps: 4,
+                MaxRefinements: 0,
+                PlanningMode: PlanningMode.PlanOnly,
+                MaxBlockedRetries: 0));
+
+        var envelope = await runner.RunAsync(Request());
+
+        Assert.Equal(2, cooledTool.ExecutionCount);
+        Assert.Equal(1, otherTool.ExecutionCount);
+        Assert.All(envelope.Receipts.Items, receipt => Assert.Equal(ReceiptStatus.Succeeded, receipt.Status));
+    }
+
+    [Fact]
+    public async Task Tool_cooldown_scope_can_include_selected_input_keys()
+    {
+        var tool = new CountingTool();
+        var catalog = ToolCatalog.Create(new ToolRegistration(
+            new ToolDescriptor(
+                "workbench.lookup",
+                "Workbench Lookup",
+                ToolKind.Query,
+                ToolEffect.ReadOnly,
+                Cooldown: new ToolCooldownPolicy(
+                    PlanStepCount: 5,
+                    ScopeInputKeys: ["query"])),
+            tool));
+        var runner = CreateRunner(
+            new StaticPlanner(Plan(
+                Step("step_a", "workbench.lookup", ToolKind.Query, ToolEffect.ReadOnly, ("query", "alpha")),
+                Step("step_b", "workbench.lookup", ToolKind.Query, ToolEffect.ReadOnly, ("query", "beta")),
+                Step("step_c", "workbench.lookup", ToolKind.Query, ToolEffect.ReadOnly, ("query", "alpha")))),
+            catalog,
+            policy: new ExecutionPolicy(
+                MaxSteps: 4,
+                MaxRefinements: 0,
+                PlanningMode: PlanningMode.PlanOnly,
+                MaxBlockedRetries: 0));
+
+        var envelope = await runner.RunAsync(Request());
+
+        Assert.Equal(2, tool.ExecutionCount);
+        Assert.Equal(
+            [ReceiptStatus.Succeeded, ReceiptStatus.Succeeded, ReceiptStatus.Refused],
+            envelope.Receipts.Items.Select(receipt => receipt.Status).ToArray());
+    }
+
+    [Fact]
+    public async Task Tool_cooldown_can_reset_after_successful_mutation()
+    {
+        var queryTool = new CountingTool();
+        var actionTool = new CountingTool();
+        var catalog = ToolCatalog.Create(
+            new ToolRegistration(
+                new ToolDescriptor(
+                    "workbench.read",
+                    "Workbench Read",
+                    ToolKind.Query,
+                    ToolEffect.ReadOnly,
+                    Cooldown: new ToolCooldownPolicy(
+                        PlanStepCount: 5,
+                        ResetOnMutation: true)),
+                queryTool),
+            new ToolRegistration(
+                new ToolDescriptor("workbench.write", "Workbench Write", ToolKind.Action, ToolEffect.WritesLocalState),
+                actionTool));
+        var runner = CreateRunner(
+            new StaticPlanner(Plan(
+                Step("step_read_a", "workbench.read", ToolKind.Query, ToolEffect.ReadOnly),
+                Step("step_write", "workbench.write", ToolKind.Action, ToolEffect.WritesLocalState),
+                Step("step_read_b", "workbench.read", ToolKind.Query, ToolEffect.ReadOnly))),
+            catalog,
+            policy: new ExecutionPolicy(
+                MaxSteps: 4,
+                MaxRefinements: 0,
+                PlanningMode: PlanningMode.PlanOnly,
+                MaxBlockedRetries: 0));
+
+        var envelope = await runner.RunAsync(Request());
+
+        Assert.Equal(2, queryTool.ExecutionCount);
+        Assert.Equal(1, actionTool.ExecutionCount);
+        Assert.All(envelope.Receipts.Items, receipt => Assert.NotEqual(ReceiptStatus.Refused, receipt.Status));
+    }
+
+    [Fact]
+    public async Task Tool_cooldown_refuses_duplicate_scope_inside_parallel_batch()
+    {
+        var tool = new CountingTool();
+        var catalog = ToolCatalog.Create(new ToolRegistration(
+            new ToolDescriptor(
+                "workbench.read",
+                "Workbench Read",
+                ToolKind.Query,
+                ToolEffect.ReadOnly,
+                Cooldown: new ToolCooldownPolicy(
+                    PlanStepCount: 5,
+                    ScopeInputKeys: ["topic"])),
+            tool));
+        var runner = CreateRunner(
+            new StaticPlanner(Plan(
+                Step("step_a", "workbench.read", ToolKind.Query, ToolEffect.ReadOnly, ("topic", "maze")) with { BatchId = "reads" },
+                Step("step_b", "workbench.read", ToolKind.Query, ToolEffect.ReadOnly, ("topic", "maze")) with { BatchId = "reads" })),
+            catalog,
+            policy: new ExecutionPolicy(
+                MaxSteps: 4,
+                MaxRefinements: 0,
+                PlanningMode: PlanningMode.PlanOnly,
+                MaxBlockedRetries: 0));
+
+        var envelope = await runner.RunAsync(Request());
+
+        Assert.Equal(1, tool.ExecutionCount);
+        Assert.Equal(
+            [ReceiptStatus.Succeeded, ReceiptStatus.Refused],
+            envelope.Receipts.Items.Select(receipt => receipt.Status).ToArray());
+    }
+
+    [Fact]
     public async Task Refined_plan_can_depend_on_a_completed_prior_plan_step()
     {
         var planner = new DependencyRefinementPlanner(_ => Plan(

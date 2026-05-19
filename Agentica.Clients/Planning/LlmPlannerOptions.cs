@@ -5,8 +5,12 @@ namespace Agentica.Clients.Planning;
 
 public sealed record LlmPlannerOptions(
     string ModelId = GeminiModelId.Flash25,
-    LlmGenerationOptions? GenerationOptions = null)
+    LlmGenerationOptions? GenerationOptions = null,
+    int InvalidJsonRepairAttempts = 2,
+    int MaxRepairPayloadCharacters = 8000)
 {
+    public const int DefaultMaxOutputTokens = 12_288;
+
     public static LlmPlannerOptions Default { get; } =
-        new(GenerationOptions: new LlmGenerationOptions(Temperature: 0, MaxOutputTokens: 4096));
+        new(GenerationOptions: new LlmGenerationOptions(Temperature: 0, MaxOutputTokens: DefaultMaxOutputTokens));
 }

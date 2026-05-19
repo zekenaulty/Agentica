@@ -96,6 +96,7 @@ internal static class HexQuestCommand
                 options.ModelId,
                 options.ThinkingBudget,
                 options.IncludeThoughts,
+                null,
                 options.PlanningMode,
                 options.MaxBlockedRetries,
                 LogRun: false,

@@ -220,7 +220,7 @@ Strongest argument that the contracts are too abstract:
 
 Strongest argument that the contracts are too thin:
 
-- `LlmStructuredOutputOptions` currently carries MIME type and optional schema text; Gemini adapter only uses `ResponseMimeType` in this slice. Schema-specific provider mapping is deferred until it has a concrete payoff.
+- `LlmStructuredOutputOptions` currently carries MIME type and optional schema text. Gemini now maps valid schema text into provider-enforced `ResponseJsonSchema`; deeper cross-provider schema validation and richer schema generation remain future adapter work.
 
 Provider leakage check:
 
@@ -244,7 +244,7 @@ Truthfulness check:
 Deferred:
 
 - LLM-backed `IOutcomeReporter`.
-- Strong provider-specific JSON Schema mapping.
+- Strong cross-provider JSON Schema generation/normalization beyond the current Gemini schema mapping.
 - Streaming.
 - MCP host/client adapters.
 - Recording/storage adapters.
@@ -301,7 +301,7 @@ Files changed or added in this slice:
 Known limitations:
 
 - Real Gemini planning did not complete due provider availability/request errors during verification.
-- The adapter requests JSON via `ResponseMimeType = application/json`; provider-specific schema object mapping is not implemented yet.
+- The adapter requests JSON via `ResponseMimeType = application/json` and maps optional schema text to Gemini `ResponseJsonSchema`; full cross-provider schema generation remains future work.
 - `OutcomeReport` remains deterministic in this slice.
 - No MCP, storage, queue, auth, deployment, vector memory, or multi-agent orchestration was added.
 

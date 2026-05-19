@@ -25,11 +25,18 @@ public sealed class LlmWorkflowPlanner : IWorkflowPlanner
         PlanningRequest request,
         CancellationToken cancellationToken = default)
     {
+        var llmRequest = WorkflowPlanPromptBuilder.BuildInitialPlanRequest(request, _options);
         var response = await GenerateAsync(
-            WorkflowPlanPromptBuilder.BuildInitialPlanRequest(request, _options),
+            llmRequest,
             cancellationToken).ConfigureAwait(false);
 
-        return ParsePlan(response.StructuredJson ?? response.Text, version: 1);
+        return await ParsePlanWithRepairAsync(
+                llmRequest,
+                response.StructuredJson ?? response.Text,
+                version: 1,
+                isRefinement: false,
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public async Task<WorkflowPlan> RefinePlanAsync(
@@ -37,11 +44,96 @@ public sealed class LlmWorkflowPlanner : IWorkflowPlanner
         Observation observation,
         CancellationToken cancellationToken = default)
     {
+        var llmRequest = WorkflowPlanPromptBuilder.BuildRefinementRequest(request, observation, _options);
         var response = await GenerateAsync(
-            WorkflowPlanPromptBuilder.BuildRefinementRequest(request, observation, _options),
+            llmRequest,
             cancellationToken).ConfigureAwait(false);
 
-        var json = response.StructuredJson ?? response.Text;
+        return await ParsePlanWithRepairAsync(
+                llmRequest,
+                response.StructuredJson ?? response.Text,
+                version: 2,
+                isRefinement: true,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<WorkflowPlan> ParsePlanWithRepairAsync(
+        LlmRequest originalRequest,
+        string json,
+        int version,
+        bool isRefinement,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return isRefinement
+                ? ParseRefinementPlan(json, version)
+                : ParsePlan(json, version);
+        }
+        catch (LlmPlannerException exception) when (_options.InvalidJsonRepairAttempts > 0)
+        {
+            return await RepairPlanAsync(
+                    originalRequest,
+                    json,
+                    version,
+                    isRefinement,
+                    exception,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
+    private async Task<WorkflowPlan> RepairPlanAsync(
+        LlmRequest originalRequest,
+        string invalidJson,
+        int version,
+        bool isRefinement,
+        LlmPlannerException firstException,
+        CancellationToken cancellationToken)
+    {
+        var lastJson = invalidJson;
+        LlmPlannerException lastException = firstException;
+
+        for (var attempt = 1; attempt <= _options.InvalidJsonRepairAttempts; attempt++)
+        {
+            var repairRequest = isRefinement
+                ? WorkflowPlanPromptBuilder.BuildRefinementRepairRequest(
+                    originalRequest,
+                    lastJson,
+                    lastException.Message,
+                    attempt,
+                    _options)
+                : WorkflowPlanPromptBuilder.BuildInitialPlanRepairRequest(
+                    originalRequest,
+                    lastJson,
+                    lastException.Message,
+                    attempt,
+                    _options);
+
+            var repairResponse = await GenerateAsync(repairRequest, cancellationToken).ConfigureAwait(false);
+            lastJson = repairResponse.StructuredJson ?? repairResponse.Text;
+
+            try
+            {
+                return isRefinement
+                    ? ParseRefinementPlan(lastJson, version)
+                    : ParsePlan(lastJson, version);
+            }
+            catch (LlmPlannerException exception)
+            {
+                lastException = exception;
+            }
+        }
+
+        var payloadKind = isRefinement ? "refinement" : "plan";
+        throw new LlmPlannerException(
+            $"Planner returned invalid {payloadKind} JSON and repair failed after {_options.InvalidJsonRepairAttempts} attempt(s). Last repair error: {lastException.Message}",
+            lastException);
+    }
+
+    private static WorkflowPlan ParseRefinementPlan(string json, int version)
+    {
         try
         {
             var contract = JsonSerializer.Deserialize<PlanRefinementJsonContract>(json, JsonOptions)
@@ -52,7 +144,7 @@ public sealed class LlmWorkflowPlanner : IWorkflowPlanner
                 throw new LlmPlannerException("Planner refinement payload did not include refinedPlan.");
             }
 
-            return contract.RefinedPlan.ToWorkflowPlan(version: 2) with
+            return contract.RefinedPlan.ToWorkflowPlan(version) with
             {
                 PlanningReason = PlanRefinementReasons.Normalize(
                     contract.Reason,

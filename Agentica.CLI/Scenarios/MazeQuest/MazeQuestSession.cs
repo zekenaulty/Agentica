@@ -16,12 +16,21 @@ public sealed class MazeQuestSession
 
     public MazeQuestSessionState State { get; }
 
+    private readonly List<MazeQuestToolTurn> _turns = [];
+
+    public IReadOnlyList<MazeQuestToolTurn> Turns => _turns;
+
     public MazeQuestToolTurn? LastTurn { get; private set; }
 
     public ToolResult Execute(ToolInvocation invocation)
     {
+        var before = CurrentRunState;
         var result = ExecuteCore(invocation);
-        LastTurn = new MazeQuestToolTurn(invocation, result, CurrentRunState);
+        LastTurn = new MazeQuestToolTurn(invocation, result, CurrentRunState)
+        {
+            BeforeRunState = before
+        };
+        _turns.Add(LastTurn);
         return result;
     }
 
@@ -34,7 +43,10 @@ public sealed class MazeQuestSession
             MazeQuestToolIds.Scan => Scan(invocation),
             MazeQuestToolIds.SenseObjective => SenseObjective(invocation),
             MazeQuestToolIds.EvaluateMoves => EvaluateMoves(invocation),
+            MazeQuestToolIds.AnalyzeProgress => AnalyzeProgress(invocation),
+            MazeQuestToolIds.EvaluateEscapeMoves => EvaluateEscapeMoves(invocation),
             MazeQuestToolIds.Move => Move(invocation),
+            MazeQuestToolIds.MoveTo => MoveTo(invocation),
             MazeQuestToolIds.Take => Take(invocation),
             MazeQuestToolIds.Use => Use(invocation),
             MazeQuestToolIds.Rest => Rest(invocation),
@@ -99,6 +111,34 @@ public sealed class MazeQuestSession
         return new ToolResult(receipt, Observation(invocation, receipt, "Local move evaluations observed.", data));
     }
 
+    private ToolResult AnalyzeProgress(ToolInvocation invocation)
+    {
+        var data = Snapshot("analyze_progress");
+        var cockpitFrame = MazeQuestCockpitFrameCompiler.BuildFrame(Stage, CurrentRunState, Turns);
+        data["cockpitFrame"] = cockpitFrame;
+        data["trajectorySummary"] = cockpitFrame.RecentTrajectory;
+        data["progressSignals"] = cockpitFrame.ProgressSignals;
+        data["loopSignals"] = cockpitFrame.LoopSignals;
+        data["resourceRisk"] = cockpitFrame.ResourceRisk;
+
+        var receipt = Receipt(invocation, ReceiptStatus.Succeeded, "MazeQuest progress analyzed.", data);
+        return new ToolResult(receipt, Observation(invocation, receipt, "MazeQuest progress and loop signals observed.", data));
+    }
+
+    private ToolResult EvaluateEscapeMoves(ToolInvocation invocation)
+    {
+        var data = Snapshot("evaluate_escape_moves");
+        var cockpitFrame = MazeQuestCockpitFrameCompiler.BuildFrame(Stage, CurrentRunState, Turns);
+        data["escapeCandidateMoves"] = cockpitFrame.EscapeCandidateMoves;
+        data["loopSignals"] = cockpitFrame.LoopSignals;
+        data["resourceRisk"] = cockpitFrame.ResourceRisk;
+        data["recommendedPlannerPosture"] = cockpitFrame.RecommendedPlannerPosture;
+        data["plannerGuidance"] = cockpitFrame.PlannerGuidance;
+
+        var receipt = Receipt(invocation, ReceiptStatus.Succeeded, "MazeQuest escape moves evaluated.", data);
+        return new ToolResult(receipt, Observation(invocation, receipt, "MazeQuest escape move candidates observed.", data));
+    }
+
     private ToolResult Move(ToolInvocation invocation)
     {
         var direction = ReadString(invocation, "direction");
@@ -145,23 +185,118 @@ public sealed class MazeQuestSession
                 });
         }
 
-        State.Position = move.To;
-        State.StepCount++;
-        State.Energy = Math.Max(0, State.Energy - move.TerrainCost);
-        State.Discovered.UnionWith(MazeVisibility.VisiblePoints(Stage.Grid, State.Position, Stage.VisibilityRadius));
-
-        ApplyHazard();
-        UpdateProgressFromLocation();
+        var applied = ApplyMoveEvaluation(move);
 
         var data = Snapshot("move");
         data["direction"] = direction;
+        data["from"] = Point(applied.From);
         data["to"] = Point(State.Position);
         data["terrainCost"] = move.TerrainCost;
+        data["visibleRisk"] = move.VisibleRisk;
+        data["objectiveDelta"] = move.ObjectiveDelta;
+        data["frontierGain"] = applied.FrontierGain;
+        data["moveSummary"] = move.Summary;
         data["hazard"] = CurrentCell.Hazard.ToString();
         data["hazardRisk"] = CurrentCell.HazardRisk;
 
         var receipt = Receipt(invocation, ReceiptStatus.Succeeded, $"Moved {direction}.", data);
         return new ToolResult(receipt, Observation(invocation, receipt, $"Moved {direction} to ({State.Position.X}, {State.Position.Y}).", data));
+    }
+
+    private ToolResult MoveTo(ToolInvocation invocation)
+    {
+        var x = ReadInt(invocation, "x");
+        var y = ReadInt(invocation, "y");
+        if (x is null || y is null)
+        {
+            return Refused(invocation, "missing_destination", "MoveTo requires integer x and y destination coordinates.");
+        }
+
+        var destination = new MazePoint(x.Value, y.Value);
+        var option = MazeQuestAnalyzer.EvaluateKnownTravelOption(Stage, CurrentRunState, destination);
+        if (!option.Legal)
+        {
+            return Refused(
+                invocation,
+                option.Reason,
+                $"Cannot move_to ({destination.X},{destination.Y}): {option.Reason}.",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["destination"] = Point(destination),
+                    ["knownTravelOption"] = option,
+                    ["knownTravelOptions"] = MazeQuestAnalyzer.KnownTravelOptions(Stage, CurrentRunState)
+                });
+        }
+
+        var start = State.Position;
+        var energyBefore = State.Energy;
+        var healthBefore = State.Health;
+        var hops = new List<MazeKnownTravelHop>();
+        var totalFrontierGain = 0;
+        var maxVisibleRisk = 0d;
+
+        for (var index = 1; index < option.Path.Count; index++)
+        {
+            var next = option.Path[index];
+            var direction = DirectionBetween(State.Position, next);
+            var move = MazeQuestAnalyzer.EvaluateMoves(Stage, CurrentRunState)
+                .FirstOrDefault(item => item.Legal && item.To == next);
+            if (move is null)
+            {
+                return Refused(
+                    invocation,
+                    "path_became_invalid",
+                    $"Known route to ({destination.X},{destination.Y}) became invalid at hop {index}.",
+                    new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["destination"] = Point(destination),
+                        ["failedHop"] = index,
+                        ["currentPosition"] = Point(State.Position),
+                        ["next"] = Point(next)
+                    });
+            }
+
+            var hopEnergyBefore = State.Energy;
+            var hopHealthBefore = State.Health;
+            var applied = ApplyMoveEvaluation(move);
+            totalFrontierGain += applied.FrontierGain;
+            maxVisibleRisk = Math.Max(maxVisibleRisk, move.VisibleRisk);
+            hops.Add(new MazeKnownTravelHop(
+                Index: index,
+                Direction: direction,
+                From: applied.From,
+                To: applied.To,
+                TerrainCost: move.TerrainCost,
+                VisibleRisk: move.VisibleRisk,
+                FrontierGain: applied.FrontierGain,
+                ObjectiveDelta: move.ObjectiveDelta,
+                EnergyBefore: hopEnergyBefore,
+                EnergyAfter: State.Energy,
+                HealthBefore: hopHealthBefore,
+                HealthAfter: State.Health,
+                ActiveObjectiveIdAfter: ActiveObjectiveId));
+        }
+
+        var data = Snapshot("move_to");
+        data["from"] = Point(start);
+        data["to"] = Point(State.Position);
+        data["destination"] = Point(destination);
+        data["hopCount"] = hops.Count;
+        data["directions"] = hops.Select(hop => hop.Direction).ToArray();
+        data["path"] = option.Path.Select(Point).ToArray();
+        data["hops"] = hops.ToArray();
+        data["totalTerrainCost"] = hops.Sum(hop => hop.TerrainCost);
+        data["energyBefore"] = energyBefore;
+        data["energyAfter"] = State.Energy;
+        data["healthBefore"] = healthBefore;
+        data["healthAfter"] = State.Health;
+        data["frontierGain"] = totalFrontierGain;
+        data["maxVisibleRisk"] = Math.Round(maxVisibleRisk, 2);
+        data["knownTravelOption"] = option;
+        data["moveSummary"] = option.Summary;
+
+        var receipt = Receipt(invocation, ReceiptStatus.Succeeded, $"Moved to ({destination.X},{destination.Y}) across {hops.Count} exposed hops.", data);
+        return new ToolResult(receipt, Observation(invocation, receipt, $"Moved to ({State.Position.X}, {State.Position.Y}) across {hops.Count} exposed hops.", data));
     }
 
     private ToolResult Take(ToolInvocation invocation)
@@ -370,6 +505,26 @@ public sealed class MazeQuestSession
         }
     }
 
+    private AppliedMove ApplyMoveEvaluation(MazeMoveEvaluation move)
+    {
+        var from = State.Position;
+        var visiblePoints = MazeVisibility.VisiblePoints(Stage.Grid, move.To, Stage.VisibilityRadius).ToArray();
+        var frontierGain = visiblePoints.Count(point => !State.Discovered.Contains(point));
+
+        State.Position = move.To;
+        State.StepCount++;
+        State.Energy = Math.Max(0, State.Energy - move.TerrainCost);
+        State.Discovered.UnionWith(visiblePoints);
+
+        ApplyHazard();
+        UpdateProgressFromLocation();
+
+        return new AppliedMove(
+            From: from,
+            To: State.Position,
+            FrontierGain: frontierGain);
+    }
+
     private void UpdateProgressFromLocation()
     {
         var questObject = CurrentObject;
@@ -490,7 +645,14 @@ public sealed class MazeQuestSession
             ["visibleCells"] = MazeQuestAnalyzer.VisibleCells(Stage, runState),
             ["objectiveSignal"] = MazeQuestAnalyzer.SenseObjective(Stage, runState),
             ["moveEvaluations"] = MazeQuestAnalyzer.EvaluateMoves(Stage, runState),
+            ["knownTravelOptions"] = MazeQuestAnalyzer.KnownTravelOptions(Stage, runState),
             ["legalActions"] = LegalActions(),
+            ["agenticHarness"] = MazeQuestCapabilitySurfaceCompiler.BuildHarnessContext(
+                Stage,
+                runState,
+                Stage.Quest.Objective,
+                Turns),
+            ["cockpitFrame"] = MazeQuestCockpitFrameCompiler.BuildFrame(Stage, runState, Turns),
             ["objectiveCompleted"] = State.ObjectiveCompleted
         };
     }
@@ -503,7 +665,9 @@ public sealed class MazeQuestSession
             Action(MazeQuestToolIds.RenderMap),
             Action(MazeQuestToolIds.Scan),
             Action(MazeQuestToolIds.SenseObjective),
-            Action(MazeQuestToolIds.EvaluateMoves)
+            Action(MazeQuestToolIds.EvaluateMoves),
+            Action(MazeQuestToolIds.AnalyzeProgress),
+            Action(MazeQuestToolIds.EvaluateEscapeMoves)
         };
 
         if (CanRest())
@@ -514,6 +678,20 @@ public sealed class MazeQuestSession
         foreach (var move in MazeQuestAnalyzer.EvaluateMoves(Stage, CurrentRunState).Where(move => move.Legal))
         {
             actions.Add(Action(MazeQuestToolIds.Move, ("direction", move.Direction)));
+        }
+
+        foreach (var option in MazeQuestAnalyzer.KnownTravelOptions(Stage, CurrentRunState).Take(8))
+        {
+            var action = Action(
+                MazeQuestToolIds.MoveTo,
+                ("x", option.Destination.X),
+                ("y", option.Destination.Y));
+            action["summary"] = option.Summary;
+            action["hopCount"] = option.HopCount;
+            action["totalTerrainCost"] = option.TotalTerrainCost;
+            action["frontierGain"] = option.FrontierGain;
+            action["maxVisibleRisk"] = option.MaxVisibleRisk;
+            actions.Add(action);
         }
 
         if (CurrentObject is { } currentObject)
@@ -599,6 +777,23 @@ public sealed class MazeQuestSession
     private static string? ReadString(ToolInvocation invocation, string key) =>
         invocation.Input.TryGetValue(key, out var value) ? value?.ToString() : null;
 
+    private static int? ReadInt(ToolInvocation invocation, string key)
+    {
+        if (!invocation.Input.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            int intValue => intValue,
+            long longValue => (int)longValue,
+            double doubleValue => (int)doubleValue,
+            decimal decimalValue => (int)decimalValue,
+            _ => int.TryParse(value.ToString(), out var parsed) ? parsed : null
+        };
+    }
+
     private static Dictionary<string, object?> Action(string toolId, params (string Key, object? Value)[] input)
     {
         var action = new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -651,6 +846,21 @@ public sealed class MazeQuestSession
             ["energyPadding"] = Stage.EnergyPolicy.Padding
         };
 
+    private static string DirectionBetween(MazePoint from, MazePoint to)
+    {
+        if (to.X > from.X)
+        {
+            return "east";
+        }
+
+        if (to.X < from.X)
+        {
+            return "west";
+        }
+
+        return to.Y > from.Y ? "south" : "north";
+    }
+
     private static Receipt Receipt(
         ToolInvocation invocation,
         ReceiptStatus status,
@@ -680,4 +890,9 @@ public sealed class MazeQuestSession
             [
                 new EvidenceRef("receipt", receipt.ReceiptId)
             ]);
+
+    private sealed record AppliedMove(
+        MazePoint From,
+        MazePoint To,
+        int FrontierGain);
 }

@@ -1,3 +1,4 @@
+using Agentica.Events;
 using Agentica.Tools;
 
 namespace Agentica.Planning;
@@ -10,6 +11,8 @@ public sealed record PlanStep(
     IReadOnlyDictionary<string, object?> Input)
 {
     public string? Reason { get; init; }
+
+    public ExecutionIntent? Intent { get; init; }
 
     public IReadOnlyList<string> DependsOn { get; init; } = [];
 

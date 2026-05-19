@@ -145,6 +145,51 @@ Context + Scope + Actor + Goal + State + Policy + Recipes + Receipts
 
 This should begin as a documented pattern and deterministic compiler inside harnesses, not as a new package or large abstraction.
 
+## Relationship To Agentica ToolSurfaceSnapshot
+
+`ActiveCapabilitySurface` and `ContextSurfaceReceipt` are host-owned records.
+
+They are richer than Agentica's core tool surface because they describe how the host compiled domain reality into the public planner surface:
+
+```text
+ActiveCapabilitySurface
+  host-owned
+  domain-aware
+  may include available, preferred, blocked, denied, demoted, hidden, and unavailable bindings
+  may include public-safe reasons and source receipt refs
+  may include hashes or counts for hidden/private host data
+
+ToolSurfaceSnapshot
+  Agentica-owned
+  domain-neutral
+  records only the ToolDescriptor list and bounded planning context actually exposed to the planner
+  does not model hidden, demoted, blocked, denied, or unavailable host capabilities
+```
+
+The handoff is:
+
+```text
+Host ActiveCapabilitySurface
+  -> public-safe projection
+  -> ToolCatalog / ToolDescriptor set + RunRequest.Context
+  -> Agentica PlanningRequest
+  -> Agentica ToolSurfaceSnapshot
+```
+
+Agentica must not try to reconstruct or own host-hidden capability state. If a capability was filtered out, demoted, blocked, denied, or hidden before Agentica saw the tool catalog, the host surface record is the authority for why.
+
+If a benchmark later asks whether the planner had a better tool available, answer with both records:
+
+```text
+ToolSurfaceSnapshot
+  What Agentica actually showed the planner.
+
+ActiveCapabilitySurface / ContextSurfaceReceipt
+  What the host knew, filtered, hid, demoted, blocked, or preferred before projection.
+```
+
+If hidden capability names are themselves answer keys, the host record should store public-safe hashes, counts, categories, or redacted ids instead of leaking names.
+
 ## DomainHarnessManifest
 
 A `DomainHarnessManifest` is the cold, static domain contract.
@@ -416,6 +461,55 @@ The orchestrator should not pass its own task graph as a tool plan. The runner g
 
 Prompt builders should render the active surface, or a projection of it, as planner context. Raw tool descriptors remain the callable contract, but they should be augmented or narrowed by current availability, blockers, preferred behaviors, expected proof, and output abstraction level.
 
+## Planner Frames And Cockpit Projection
+
+Some host context is too dynamic to live only in the initial `RunRequest.Context` and too semantic to express as static tool descriptors.
+
+The host may compile a per-planning-turn frame:
+
+```text
+host state + receipt trail + active surface + public policy
+  -> PlanningFrame
+  -> planner prompt context
+  -> cockpit/HUD projection
+```
+
+This is the cockpit compiler/projector boundary. It is still host-owned. Agentica only carries the resulting `PlanningFrame` as public planner context and records which core `ToolSurfaceSnapshot` was exposed at the same turn.
+
+For MazeQuest, the first concrete frame is:
+
+```text
+MazeQuestCockpitFrame
+  currentState
+  recentTrajectory
+  progressSignals
+  loopSignals
+  resourceRisk
+  escapeCandidateMoves
+  recommendedPlannerPosture
+  plannerGuidance
+```
+
+The frame is intentionally non-oracle:
+
+- It may expose recent public moves, repeated public cells, objective signal trend, frontier gain trend, visible local risks, and bounded-risk posture.
+- It may classify a visible move as productive, neutral, looping, blocked, or risk_branch.
+- It must not expose hidden routes, hidden object locations, future receipts, or answer-key task ordering.
+
+This gives the LLM trajectory awareness without requiring it to mine raw receipts and without turning Agentica core into a domain model.
+
+Prompt shape:
+
+```text
+If projected context frames are present, treat them as current host-compiled public context.
+Prefer the newest frame over stale request context for the same state.
+When loopSignals.stagnationSuspected is true, avoid moves classified as looping unless all other legal actions are blocked.
+When resourceRisk.boundedRiskAllowed is true and all safe options are stagnant, a bounded risk_branch move may be justified.
+ExecutionIntent.Rationale must name the public loop/progress/risk tradeoff for an escape move.
+```
+
+The future cockpit/HUD should render the same frame instead of inventing a parallel diagnosis.
+
 ## Anti-Leak Rule
 
 Harnesses with hidden state must maintain a strict oracle boundary.
@@ -506,6 +600,20 @@ rendered context hash
 ```
 
 This receipt is not required for the first implementation of every harness, but it is the right long-term grounding record. It makes prompt/context engineering inspectable instead of invisible.
+
+This is the host-side counterpart to Agentica's `ToolSurfaceSnapshot`.
+
+```text
+ContextSurfaceReceipt
+  Explains the host compilation process.
+  May mention blocked, denied, demoted, hidden, or unavailable capability bindings when public-safe.
+
+ToolSurfaceSnapshot
+  Records the final Agentica-visible tool surface.
+  Does not explain private host filtering decisions.
+```
+
+The two records should be linkable by public-safe ids or hashes when useful, but Agentica core should not depend on `ContextSurfaceReceipt` semantics.
 
 For benchmark harnesses, require this much earlier. If the point is to prove whether the planner solved the problem without hidden help, the rendered surface needs a receipt or snapshot from the start.
 
@@ -702,6 +810,8 @@ CapabilityBinding
 PlannerOutputLevel
 ContextSurfaceReceipt
 ```
+
+Do not promote host-hidden capability state into Agentica core. Agentica may record what it exposed to the planner; the host records what it withheld, blocked, demoted, denied, or hid.
 
 Do not promote TurtleQuest, MazeQuest, HexQuest, Minecraft, or other domain vocabulary.
 

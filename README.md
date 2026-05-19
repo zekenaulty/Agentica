@@ -34,7 +34,7 @@ Implemented reality:
 - CLI run logging writes structured artifacts under `.agentica/runs`.
 - MazeQuest exists as a host-owned reasoning harness, not Agentica runtime vocabulary.
 - The runtime now supports small validated multi-step plan slices, read-only query batches, and dependency fields on plan steps.
-- Host-side campaign orchestration exists as a CLI harness only; long-horizon orchestration is not part of the core runtime package.
+- Host-side campaign orchestration remains a CLI harness. Generic orchestration contracts are currently incubating under `Agentica/Orchestration` inside the core project after the migration; a future package split remains a boundary decision before public API/durable replay hardening.
 
 Runtime contract reference:
 
@@ -162,6 +162,7 @@ The solution intentionally stays small:
 ```text
 Agentica.slnx
   Agentica/          planner/executor runtime package
+    Orchestration/   incubating generic task-level orchestration contracts
   Agentica.Clients/  LLM provider SDK isolation
   Agentica.CLI/      console proof host and host-owned harnesses
   Agentica.Tests/    boundary and behavior tests

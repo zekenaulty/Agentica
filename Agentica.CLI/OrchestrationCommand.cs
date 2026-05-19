@@ -2,6 +2,7 @@ using System.Text.Json;
 using Agentica.Clients.Gemini;
 using Agentica.Clients.Llm;
 using Agentica.Clients.Orchestration;
+using Agentica.Clients.Planning;
 using Agentica.Events;
 using Agentica.Execution;
 using Agentica.Orchestration;
@@ -78,7 +79,7 @@ internal static class OrchestrationCommand
                 modelId,
                 new LlmGenerationOptions(
                     Temperature: 0,
-                    MaxOutputTokens: 4096,
+                    MaxOutputTokens: LlmPlannerOptions.DefaultMaxOutputTokens,
                     Thinking: LlmThinkingOptions.Off())));
     }
 

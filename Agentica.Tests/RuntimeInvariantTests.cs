@@ -144,8 +144,8 @@ public sealed class RuntimeInvariantTests
 
         Assert.True(policy.MaxSteps > 0);
         Assert.True(policy.MaxRefinements >= 0);
-        Assert.True(policy.MaxBatchSize <= 4);
-        Assert.True(policy.MaxParallelism <= 4);
+        Assert.True(policy.MaxBatchSize <= 8);
+        Assert.True(policy.MaxParallelism <= 8);
         Assert.True(policy.AllowReadOnlyParallelBatches);
         Assert.True(policy.EffectiveEffectPolicy.Allows(ToolEffect.ReadOnly));
         Assert.True(policy.EffectiveEffectPolicy.Allows(ToolEffect.WritesLocalState));

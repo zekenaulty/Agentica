@@ -38,8 +38,14 @@ public static class MazePathfinder
         return distances;
     }
 
-    public static IReadOnlyList<MazePoint> ShortestPath(MazeGrid grid, MazePoint start, MazePoint target)
+    public static IReadOnlyList<MazePoint> ShortestPath(
+        MazeGrid grid,
+        MazePoint start,
+        MazePoint target,
+        Func<MazeCell, bool>? canEnter = null)
     {
+        canEnter ??= cell => cell.Terrain != MazeTerrain.Wall;
+
         var previous = new Dictionary<MazePoint, MazePoint>();
         var seen = new HashSet<MazePoint> { start };
         var queue = new Queue<MazePoint>();
@@ -57,7 +63,7 @@ public static class MazePathfinder
             {
                 if (!grid.Contains(neighbor) ||
                     seen.Contains(neighbor) ||
-                    grid[neighbor].Terrain == MazeTerrain.Wall)
+                    !canEnter(grid[neighbor]))
                 {
                     continue;
                 }

@@ -74,6 +74,136 @@ public static class MazeQuestAnalyzer
         }).ToArray();
     }
 
+    public static IReadOnlyList<MazeKnownTravelOption> KnownTravelOptions(
+        MazeQuestStage stage,
+        MazeQuestRunState state,
+        int maxOptions = 12) =>
+        state.Discovered
+            .Where(point => point != state.Position)
+            .Select(point => EvaluateKnownTravelOption(stage, state, point))
+            .Where(option => option.Legal && option.HopCount > 1)
+            .OrderByDescending(KnownTravelScore)
+            .ThenBy(option => option.HopCount)
+            .Take(maxOptions)
+            .ToArray();
+
+    public static MazeKnownTravelOption EvaluateKnownTravelOption(
+        MazeQuestStage stage,
+        MazeQuestRunState state,
+        MazePoint destination)
+    {
+        if (!stage.Grid.Contains(destination))
+        {
+            return BlockedKnownTravel(destination, "outside_maze", "Destination is outside the maze.");
+        }
+
+        if (!state.Discovered.Contains(destination))
+        {
+            return BlockedKnownTravel(destination, "target_not_discovered", "Destination is not currently exposed by fog-of-war.");
+        }
+
+        if (destination == state.Position)
+        {
+            return BlockedKnownTravel(destination, "already_at_destination", "Already at the requested destination.");
+        }
+
+        var path = MazePathfinder.ShortestPath(
+            stage.Grid,
+            state.Position,
+            destination,
+            cell => CanEnterKnownTravelCell(stage, state, cell));
+        if (path.Count == 0)
+        {
+            return BlockedKnownTravel(destination, "no_public_path", "No fully exposed traversable path reaches the destination.");
+        }
+
+        var triggeredHazards = state.TriggeredHazards.ToHashSet(StringComparer.Ordinal);
+        var simulatedDiscovered = state.Discovered.ToHashSet();
+        var remainingEnergy = state.Energy;
+        var totalTerrainCost = 0;
+        var totalFrontierGain = 0;
+        var maxVisibleRisk = 0d;
+        var guaranteedHazardDamage = 0;
+        var directions = new List<string>();
+
+        for (var index = 1; index < path.Count; index++)
+        {
+            var previous = path[index - 1];
+            var point = path[index];
+            var cell = stage.Grid[point];
+            var simulatedState = state with
+            {
+                Energy = remainingEnergy,
+                TriggeredHazards = triggeredHazards.ToHashSet(StringComparer.Ordinal)
+            };
+            var cost = RequiredEnergyFor(cell, simulatedState);
+            if (stage.EnergyPolicy.EnforceMoveEnergy && remainingEnergy < cost)
+            {
+                return new MazeKnownTravelOption(
+                    Destination: destination,
+                    Path: path,
+                    Directions: directions,
+                    HopCount: path.Count - 1,
+                    TotalTerrainCost: totalTerrainCost + cost,
+                    FrontierGain: totalFrontierGain,
+                    MaxVisibleRisk: Math.Round(maxVisibleRisk, 2),
+                    GuaranteedHazardDamage: guaranteedHazardDamage,
+                    ObjectiveDelta: "blocked",
+                    Legal: false,
+                    Reason: "insufficient_energy",
+                    Summary: $"Known route needs at least {cost} energy for a later hop; current remaining energy would be {remainingEnergy}.");
+            }
+
+            directions.Add(DirectionBetween(previous, point));
+            remainingEnergy -= cost;
+            totalTerrainCost += cost;
+            maxVisibleRisk = Math.Max(maxVisibleRisk, cell.HazardRisk);
+
+            var hazardKey = HazardKey(point, cell.Hazard);
+            if (cell.Hazard != MazeHazard.None && triggeredHazards.Add(hazardKey) &&
+                cell.Hazard is MazeHazard.Spike or MazeHazard.Trap)
+            {
+                guaranteedHazardDamage++;
+            }
+
+            var visibleFromPoint = MazeVisibility.VisiblePoints(stage.Grid, point, stage.VisibilityRadius).ToArray();
+            totalFrontierGain += visibleFromPoint.Count(visiblePoint => !simulatedDiscovered.Contains(visiblePoint));
+            simulatedDiscovered.UnionWith(visibleFromPoint);
+        }
+
+        if (guaranteedHazardDamage >= state.Health)
+        {
+            return new MazeKnownTravelOption(
+                Destination: destination,
+                Path: path,
+                Directions: directions,
+                HopCount: path.Count - 1,
+                TotalTerrainCost: totalTerrainCost,
+                FrontierGain: totalFrontierGain,
+                MaxVisibleRisk: Math.Round(maxVisibleRisk, 2),
+                GuaranteedHazardDamage: guaranteedHazardDamage,
+                ObjectiveDelta: "blocked",
+                Legal: false,
+                Reason: "path_not_survivable",
+                Summary: $"Known route crosses {guaranteedHazardDamage} untriggered damaging hazards with current health {state.Health}.");
+        }
+
+        var objectiveDelta = KnownTravelObjectiveDelta(stage, state, path, totalFrontierGain);
+        return new MazeKnownTravelOption(
+            Destination: destination,
+            Path: path,
+            Directions: directions,
+            HopCount: path.Count - 1,
+            TotalTerrainCost: totalTerrainCost,
+            FrontierGain: totalFrontierGain,
+            MaxVisibleRisk: Math.Round(maxVisibleRisk, 2),
+            GuaranteedHazardDamage: guaranteedHazardDamage,
+            ObjectiveDelta: objectiveDelta,
+            Legal: true,
+            Reason: "legal_public_path",
+            Summary: $"Known public route to ({destination.X},{destination.Y}); {path.Count - 1} hops; cost {totalTerrainCost}; reveals {totalFrontierGain} cells; {objectiveDelta}.");
+    }
+
     public static int RequiredEnergyFor(MazeCell cell, MazeQuestRunState state)
     {
         var requiredEnergy = Math.Max(1, cell.TraversalCost);
@@ -199,6 +329,7 @@ public static class MazeQuestAnalyzer
             ["visibleCells"] = VisibleCells(stage, state),
             ["objectiveSignal"] = signal,
             ["moveEvaluations"] = EvaluateMoves(stage, state),
+            ["knownTravelOptions"] = KnownTravelOptions(stage, state),
             ["knownBlockers"] = EvaluateMoves(stage, state).Where(move => !move.Legal).ToArray()
         };
     }
@@ -223,6 +354,83 @@ public static class MazeQuestAnalyzer
             ObjectiveDelta: "blocked",
             FrontierGain: 0,
             Summary: $"Blocked by {reason}.");
+
+    private static MazeKnownTravelOption BlockedKnownTravel(
+        MazePoint destination,
+        string reason,
+        string summary) =>
+        new(
+            Destination: destination,
+            Path: [],
+            Directions: [],
+            HopCount: 0,
+            TotalTerrainCost: 0,
+            FrontierGain: 0,
+            MaxVisibleRisk: 0,
+            GuaranteedHazardDamage: 0,
+            ObjectiveDelta: "blocked",
+            Legal: false,
+            Reason: reason,
+            Summary: summary);
+
+    private static bool CanEnterKnownTravelCell(
+        MazeQuestStage stage,
+        MazeQuestRunState state,
+        MazeCell cell)
+    {
+        if (!state.Discovered.Contains(cell.Point) || cell.Terrain == MazeTerrain.Wall)
+        {
+            return false;
+        }
+
+        var questObject = ObjectAt(stage, cell.Point);
+        return questObject?.Kind != MazeQuestObjectKind.Gate ||
+            questObject.RequiredItem is not { } requiredItem ||
+            state.Inventory.Contains(requiredItem, StringComparer.Ordinal);
+    }
+
+    private static int KnownTravelScore(MazeKnownTravelOption option)
+    {
+        var score = option.FrontierGain * 10;
+        if (option.ObjectiveDelta.Contains("active_objective", StringComparison.Ordinal))
+        {
+            score += 1000;
+        }
+        else if (option.ObjectiveDelta.Contains("known_objective", StringComparison.Ordinal))
+        {
+            score += 500;
+        }
+
+        score -= option.HopCount;
+        score -= option.GuaranteedHazardDamage * 50;
+        score -= (int)Math.Round(option.MaxVisibleRisk * 25);
+        return score;
+    }
+
+    private static string KnownTravelObjectiveDelta(
+        MazeQuestStage stage,
+        MazeQuestRunState state,
+        IReadOnlyList<MazePoint> path,
+        int frontierGain)
+    {
+        var objectiveObject = path
+            .Skip(1)
+            .Select(point => ObjectAt(stage, point))
+            .FirstOrDefault(questObject =>
+                questObject is not null &&
+                stage.Quest.Objectives.Any(objective =>
+                    !string.Equals(objective.ObjectiveId, "complete", StringComparison.Ordinal) &&
+                    string.Equals(objective.TargetId, questObject.ObjectId, StringComparison.Ordinal)));
+
+        if (objectiveObject is not null)
+        {
+            return string.Equals(objectiveObject.ObjectId, ActiveTargetId(stage, state), StringComparison.Ordinal)
+                ? "reaches_active_objective_object"
+                : "reaches_known_objective_object";
+        }
+
+        return frontierGain > 0 ? "expands_frontier" : "known_reposition";
+    }
 
     private static string ObjectiveAffordance(
         MazeQuestStage stage,
@@ -303,6 +511,21 @@ public static class MazeQuestAnalyzer
 
     private static string? ActiveTargetId(MazeQuestStage stage, MazeQuestRunState state) =>
         stage.Quest.Objectives.FirstOrDefault(objective => objective.ObjectiveId == state.ActiveObjectiveId)?.TargetId;
+
+    private static string DirectionBetween(MazePoint from, MazePoint to)
+    {
+        if (to.X > from.X)
+        {
+            return "east";
+        }
+
+        if (to.X < from.X)
+        {
+            return "west";
+        }
+
+        return to.Y > from.Y ? "south" : "north";
+    }
 
     private static string CostBand(int distance) =>
         distance switch

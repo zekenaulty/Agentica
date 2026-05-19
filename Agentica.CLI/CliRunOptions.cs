@@ -6,6 +6,7 @@ internal sealed record CliRunOptions(
     string? ModelId,
     string? ThinkingBudget,
     bool IncludeThoughts,
+    int? MaxOutputTokens,
     PlanningMode PlanningMode,
     int MaxBlockedRetries,
     bool LogRun,
@@ -20,6 +21,7 @@ internal sealed record CliRunOptions(
         string? modelId = null;
         string? thinkingBudget = null;
         var includeThoughts = false;
+        int? maxOutputTokens = null;
         var planningMode = PlanningMode.Stepwise;
         var maxBlockedRetries = 2;
         var logRun = false;
@@ -70,6 +72,17 @@ internal sealed record CliRunOptions(
                         return Invalid($"Invalid thinking budget '{thinkingBudget}'.");
                     }
 
+                    break;
+
+                case "--max-output-tokens":
+                    if (!TryReadValue(args, ref index, out var maxOutputTokensValue) ||
+                        !int.TryParse(maxOutputTokensValue, out var parsedMaxOutputTokens) ||
+                        parsedMaxOutputTokens <= 0)
+                    {
+                        return Invalid("Missing or invalid value for --max-output-tokens.");
+                    }
+
+                    maxOutputTokens = parsedMaxOutputTokens;
                     break;
 
                 case "--planning-mode":
@@ -128,6 +141,7 @@ internal sealed record CliRunOptions(
             modelId,
             thinkingBudget,
             includeThoughts,
+            maxOutputTokens,
             planningMode,
             maxBlockedRetries,
             logRun,
@@ -150,5 +164,5 @@ internal sealed record CliRunOptions(
     }
 
     private static CliRunOptions Invalid(string error) =>
-        new(string.Empty, PlannerKind.Deterministic, null, null, false, PlanningMode.Stepwise, 2, false, null, false, error);
+        new(string.Empty, PlannerKind.Deterministic, null, null, false, null, PlanningMode.Stepwise, 2, false, null, false, error);
 }

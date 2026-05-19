@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Agentica.Clients.Llm;
 using Google.GenAI;
 using Google.GenAI.Types;
@@ -93,7 +94,7 @@ public sealed class GeminiLlmClient : ILlmClient
         return new Client(apiKey: apiKey);
     }
 
-    private static GenerateContentConfig CreateConfig(LlmRequest request)
+    internal static GenerateContentConfig CreateConfig(LlmRequest request)
     {
         var systemInstruction = BuildSystemInstruction(request.Messages);
         var config = new GenerateContentConfig
@@ -110,10 +111,33 @@ public sealed class GeminiLlmClient : ILlmClient
             Temperature = request.GenerationOptions?.Temperature,
             MaxOutputTokens = request.GenerationOptions?.MaxOutputTokens,
             ResponseMimeType = request.StructuredOutput?.ResponseMimeType,
+            ResponseJsonSchema = ParseJsonSchema(request.StructuredOutput?.JsonSchema),
             ThinkingConfig = GeminiThinkingOptionsMapper.ToSdk(request.GenerationOptions?.Thinking)
         };
 
         return config;
+    }
+
+    private static object? ParseJsonSchema(string? jsonSchema)
+    {
+        if (string.IsNullOrWhiteSpace(jsonSchema))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<JsonElement>(jsonSchema);
+        }
+        catch (JsonException exception)
+        {
+            throw new LlmClientException(
+                ProviderName,
+                "Gemini structured output schema must be valid JSON.",
+                exception,
+                LlmClientErrorKind.BadRequest,
+                errorClass: "invalid_json_schema");
+        }
     }
 
     private static string BuildSystemInstruction(IReadOnlyList<LlmMessage> messages)

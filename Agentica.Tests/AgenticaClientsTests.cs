@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using Agentica.Artifacts;
 using Agentica.Clients.Gemini;
 using Agentica.Clients.Llm;
@@ -76,6 +77,24 @@ public sealed class AgenticaClientsTests
         Assert.Equal(ToolKind.Query, step.Kind);
         Assert.Equal(ToolEffect.ReadOnly, step.Effect);
         Assert.Equal("current_state", step.Input["query"]);
+        Assert.NotNull(step.Intent);
+        Assert.Equal("Invoke query_state.", step.Intent!.Action);
+        Assert.Equal("Use the supplied tool.", step.Intent.Rationale);
+        Assert.Null(step.Intent.ExpectedOutcome);
+    }
+
+    [Fact]
+    public async Task Llm_workflow_planner_maps_explicit_intent()
+    {
+        var planner = new LlmWorkflowPlanner(new FakeLlmClient(PlanJsonWithIntent()));
+
+        var plan = await planner.CreatePlanAsync(CreatePlanningRequest());
+
+        var step = Assert.Single(plan.Steps);
+        Assert.NotNull(step.Intent);
+        Assert.Equal("Inspect the current state.", step.Intent!.Action);
+        Assert.Equal("The public objective requires state before choosing an action.", step.Intent.Rationale);
+        Assert.Equal("A read-only observation describing current state.", step.Intent.ExpectedOutcome);
     }
 
     [Fact]
@@ -126,6 +145,94 @@ public sealed class AgenticaClientsTests
         Assert.Contains("completedStepIds", prompt);
         Assert.Contains("step_004", prompt);
         Assert.Contains("same submitted plan slice", prompt);
+        Assert.Contains("public execution intent", prompt);
+        Assert.Contains("\"intent\"", prompt);
+    }
+
+    [Fact]
+    public async Task Llm_workflow_planner_prompt_guides_context_expansion_batches_and_serializes_tool_context_hints()
+    {
+        var client = new FakeLlmClient(PlanJson("query_a", "Query", "ReadOnly"));
+        var planner = new LlmWorkflowPlanner(client);
+        var request = new PlanningRequest(
+            new RunRequest("Gather context before action."),
+            [
+                new ToolDescriptor(
+                    "query_a",
+                    "Query A",
+                    ToolKind.Query,
+                    ToolEffect.ReadOnly,
+                    Description: "Reads public state.",
+                    ContextHint: new ToolContextHint(
+                        Produces: "public state",
+                        Complements: ["query_b"],
+                        CanBatchWith: ["query_b"],
+                        ShouldPrecede: ["write_action"])
+                    {
+                        UseWhen = "State is uncertain.",
+                        NotEnoughWhen = "Risk is unknown."
+                    },
+                    Cooldown: new ToolCooldownPolicy(
+                        PlanStepCount: 3,
+                        ScopeInputKeys: ["topic"],
+                        Reason: "State is stale until host state changes.",
+                        ResetOnMutation: true)),
+                new ToolDescriptor(
+                    "query_b",
+                    "Query B",
+                    ToolKind.Query,
+                    ToolEffect.ReadOnly,
+                    Description: "Reads public risk."),
+                new ToolDescriptor(
+                    "write_action",
+                    "Write Action",
+                    ToolKind.Action,
+                    ToolEffect.WritesLocalState)
+            ],
+            [],
+            [])
+        {
+            ToolSurface = new ToolSurfaceSnapshot(
+                "surface_pressure_test",
+                DateTimeOffset.UtcNow,
+                [],
+                PlanningExecutionContext.Empty,
+                [],
+                [],
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["remainingStepBudget"] = 1,
+                    ["remainingTimeoutMs"] = 4500,
+                    ["timePressure"] = "critical",
+                    ["runPressure"] = "critical",
+                    ["recommendedPlanningPosture"] = "Use existing public context and choose one bounded action."
+                })
+        };
+
+        await planner.CreatePlanAsync(request);
+
+        var prompt = string.Join(
+            Environment.NewLine,
+            client.Requests[0].Messages.Select(message => message.Content));
+        Assert.Contains("context-expansion batch", prompt);
+        Assert.Contains("maxBatchSize/maxParallelism", prompt);
+        Assert.Contains("missing public preconditions, not reassurance", prompt);
+        Assert.Contains("prefer the action", prompt);
+        Assert.Contains("bounded action", prompt);
+        Assert.Contains("contextHint", prompt);
+        Assert.Contains("canBatchWith", prompt);
+        Assert.Contains("query_b", prompt);
+        Assert.Contains("public state", prompt);
+        Assert.Contains("cooldown", prompt);
+        Assert.Contains("treat that cooldown as part of the execution surface", prompt);
+        Assert.Contains("planStepCount", prompt);
+        Assert.Contains("scopeInputKeys", prompt);
+        Assert.Contains("State is stale until host state changes.", prompt);
+        Assert.Contains("Current planning constraints", prompt);
+        Assert.Contains("remainingStepBudget", prompt);
+        Assert.Contains("timePressure", prompt);
+        Assert.Contains("critical", prompt);
+        Assert.Contains("Use existing public context and choose one bounded action.", prompt);
     }
 
     [Fact]
@@ -155,6 +262,49 @@ public sealed class AgenticaClientsTests
         Assert.Equal(ToolKind.Action, step.Kind);
         Assert.Equal(ToolEffect.WritesLocalState, step.Effect);
         Assert.Equal("Use the observation.", step.Reason);
+        Assert.NotNull(step.Intent);
+        Assert.Equal("Invoke perform_action.", step.Intent!.Action);
+        Assert.Equal("Use the observation.", step.Intent.Rationale);
+    }
+
+    [Fact]
+    public async Task Llm_workflow_planner_repairs_invalid_refinement_json_with_last_reply_context()
+    {
+        const string invalidJson = "{\"fromPlanId\":\"plan_model\",";
+        var repairedJson = RefinementJson(
+            "perform_action",
+            "Action",
+            "WritesLocalState",
+            PlanRefinementReasons.RetryUnblock);
+        var client = new FakeLlmClient(
+            new LlmResponse("fake", "fake-model", invalidJson, invalidJson),
+            new LlmResponse("fake", "fake-model", repairedJson, repairedJson));
+        var planner = new LlmWorkflowPlanner(
+            client,
+            new LlmPlannerOptions(
+                ModelId: "fake-model",
+                InvalidJsonRepairAttempts: 1));
+
+        var refinedPlan = await planner.RefinePlanAsync(
+            CreatePlanningRequest(),
+            new Observation(
+                "observation_001",
+                "step_001",
+                ObservationKind.StateQuery,
+                "State is ready.",
+                new Dictionary<string, object?>(),
+                []));
+
+        Assert.Equal("plan_refined", refinedPlan.PlanId);
+        Assert.Equal(PlanRefinementReasons.RetryUnblock, refinedPlan.PlanningReason);
+        Assert.Equal(2, client.Requests.Count);
+        Assert.Equal(LlmMessageRole.Assistant, client.Requests[1].Messages[^2].Role);
+        Assert.Contains(invalidJson, client.Requests[1].Messages[^2].Content, StringComparison.Ordinal);
+        Assert.Contains("previous Agentica planning response could not be parsed", client.Requests[1].Messages[^1].Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Planner returned invalid refinement JSON", client.Requests[1].Messages[^1].Content, StringComparison.Ordinal);
+        Assert.Contains("fromPlanId, reason, evidence, refinedPlan", client.Requests[1].Messages[^1].Content, StringComparison.Ordinal);
+        Assert.Equal("refinement", client.Requests[1].Metadata?["agentica.planner.repairKind"]);
+        Assert.Equal("1", client.Requests[1].Metadata?["agentica.planner.repairAttempt"]);
     }
 
     [Fact]
@@ -236,6 +386,44 @@ public sealed class AgenticaClientsTests
     }
 
     [Fact]
+    public void Gemini_config_maps_structured_output_json_schema()
+    {
+        var config = GeminiLlmClient.CreateConfig(new LlmRequest(
+            GeminiModelId.Flash25,
+            [new LlmMessage(LlmMessageRole.User, "Return JSON.")],
+            StructuredOutput: new LlmStructuredOutputOptions(
+                JsonSchema: """
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["status"]
+                }
+                """)));
+
+        Assert.Equal("application/json", config.ResponseMimeType);
+        var schema = Assert.IsType<JsonElement>(config.ResponseJsonSchema);
+        Assert.Equal("object", schema.GetProperty("type").GetString());
+        Assert.True(schema.GetProperty("properties").TryGetProperty("status", out _));
+    }
+
+    [Fact]
+    public void Gemini_config_rejects_invalid_structured_output_json_schema()
+    {
+        var exception = Assert.Throws<LlmClientException>(() =>
+            GeminiLlmClient.CreateConfig(new LlmRequest(
+                GeminiModelId.Flash25,
+                [new LlmMessage(LlmMessageRole.User, "Return JSON.")],
+                StructuredOutput: new LlmStructuredOutputOptions(JsonSchema: "{not-json"))));
+
+        Assert.Equal(LlmClientErrorKind.BadRequest, exception.ErrorKind);
+        Assert.Equal("invalid_json_schema", exception.ErrorClass);
+    }
+
+    [Fact]
     public async Task Thought_summaries_are_diagnostics_not_planning_proof()
     {
         var fakeClient = new FakeLlmClient(
@@ -254,6 +442,7 @@ public sealed class AgenticaClientsTests
 
         Assert.Single(plan.Steps);
         Assert.DoesNotContain("diagnostic thinking summary", plan.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("diagnostic thinking summary", plan.Steps[0].Intent?.Rationale ?? string.Empty, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -499,6 +688,32 @@ public sealed class AgenticaClientsTests
                 "action": "write_marker"
               },
               "reason": "Use the supplied tool."
+            }
+          ],
+          "completionCondition": "The selected tool completes."
+        }
+        """;
+
+    private static string PlanJsonWithIntent() =>
+        """
+        {
+          "planId": "plan_model",
+          "description": "Model produced plan.",
+          "steps": [
+            {
+              "stepId": "step_model",
+              "toolId": "query_state",
+              "kind": "Query",
+              "effect": "ReadOnly",
+              "input": {
+                "query": "current_state"
+              },
+              "reason": "Use the supplied tool.",
+              "intent": {
+                "action": "Inspect the current state.",
+                "rationale": "The public objective requires state before choosing an action.",
+                "expectedOutcome": "A read-only observation describing current state."
+              }
             }
           ],
           "completionCondition": "The selected tool completes."

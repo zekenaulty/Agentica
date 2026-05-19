@@ -2,6 +2,7 @@ using System.Text.Json;
 using Agentica.CLI.Configuration;
 using Agentica.CLI.Logging;
 using Agentica.CLI.Scenarios.Campaign;
+using Agentica.CLI.Scenarios.ChessQuest;
 using Agentica.CLI.Scenarios.HexQuest;
 using Agentica.CLI.Scenarios.MazeQuest;
 using Agentica.CLI.Scenarios.Quest;
@@ -48,6 +49,11 @@ if (string.Equals(args[0], "workbench", StringComparison.OrdinalIgnoreCase))
 if (string.Equals(args[0], "hexquest", StringComparison.OrdinalIgnoreCase))
 {
     return await HexQuestCommand.RunAsync(args.Skip(1).ToArray(), CreateCommandServices());
+}
+
+if (string.Equals(args[0], "chessquest", StringComparison.OrdinalIgnoreCase))
+{
+    return await ChessQuestCommand.RunAsync(args.Skip(1).ToArray(), CreateCommandServices());
 }
 
 if (string.Equals(args[0], "campaign", StringComparison.OrdinalIgnoreCase))
@@ -187,7 +193,7 @@ static IWorkflowPlanner CreatePlanner(CliRunOptions options)
             ModelId: modelId,
             GenerationOptions: new LlmGenerationOptions(
                 Temperature: 0,
-                MaxOutputTokens: 4096,
+                MaxOutputTokens: options.MaxOutputTokens ?? LlmPlannerOptions.DefaultMaxOutputTokens,
                 Thinking: thinkingOptions)));
 }
 
@@ -208,7 +214,7 @@ static bool GeminiCredentialsAvailable()
 static void PrintUsage()
 {
     Console.Error.WriteLine("Usage:");
-    Console.Error.WriteLine("  Agentica.CLI run \"<objective>\" [--planner deterministic|gemini] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--include-thoughts] [--log-run] [--log-dir <path>]");
+    Console.Error.WriteLine("  Agentica.CLI run \"<objective>\" [--planner deterministic|gemini] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--include-thoughts] [--log-run] [--log-dir <path>]");
     Console.Error.WriteLine("  Agentica.CLI quest list");
     Console.Error.WriteLine("  Agentica.CLI quest run <quest-id> [--planner deterministic|gemini] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--route observe|blocked] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--include-thoughts] [--log-run] [--log-dir <path>]");
     Console.Error.WriteLine("  Agentica.CLI mazequest list");
@@ -219,8 +225,11 @@ static void PrintUsage()
     Console.Error.WriteLine("  Agentica.CLI workbench run [scenario-id] [--planner deterministic|gemini] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--timeout-seconds <seconds>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--include-thoughts] [--log-run] [--log-dir <path>]");
     Console.Error.WriteLine("  Agentica.CLI hexquest list");
     Console.Error.WriteLine("  Agentica.CLI hexquest preview [scenario-id]");
-    Console.Error.WriteLine("  Agentica.CLI hexquest run [scenario-id] [--planner deterministic|gemini] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--timeout-seconds <seconds>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--include-thoughts] [--log-run] [--log-dir <path>]");
+    Console.Error.WriteLine("  Agentica.CLI hexquest run [scenario-id] [--planner deterministic|gemini] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--timeout-seconds <seconds>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--include-thoughts] [--log-run] [--log-dir <path>]");
+    Console.Error.WriteLine("  Agentica.CLI chessquest list");
+    Console.Error.WriteLine("  Agentica.CLI chessquest preview [scenario-id]");
+    Console.Error.WriteLine("  Agentica.CLI chessquest run [scenario-id] [--planner deterministic|gemini] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-steps <count>] [--max-refinements <count>] [--max-plan-continuations <count>] [--max-blocked-retries <count>] [--timeout-seconds <seconds>] [--opponent random|heuristic|agent] [--opponent-difficulty beginner|club|strong|max] [--opponent-planner deterministic|gemini] [--opponent-model <model-id>] [--opponent-thinking-budget dynamic|off|<tokens>] [--opponent-max-output-tokens <count>] [--opponent-max-steps <count>] [--opponent-max-refinements <count>] [--opponent-timeout-seconds <seconds>] [--opponent-seed <number>] [--quiet] [--verbose-events] [--turn-json] [--verbose-envelope] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--include-thoughts] [--log-run] [--log-dir <path>]");
     Console.Error.WriteLine("  Agentica.CLI campaign list");
-    Console.Error.WriteLine("  Agentica.CLI campaign run [campaign-id] [--planner deterministic|gemini] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--include-thoughts] [--log-run] [--log-dir <path>]");
+    Console.Error.WriteLine("  Agentica.CLI campaign run [campaign-id] [--planner deterministic|gemini] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--include-thoughts] [--log-run] [--log-dir <path>]");
     Console.Error.WriteLine("  Agentica.CLI orchestrate \"<objective>\" [--task-planner deterministic|gemini] [--model <model-id>]");
 }

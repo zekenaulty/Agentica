@@ -5,7 +5,10 @@ namespace Agentica.CLI.Scenarios.MazeQuest;
 public sealed record MazeQuestToolTurn(
     ToolInvocation Invocation,
     ToolResult Result,
-    MazeQuestRunState RunState);
+    MazeQuestRunState RunState)
+{
+    public MazeQuestRunState? BeforeRunState { get; init; }
+}
 
 public enum MazeQuestNarratorKind
 {
@@ -33,4 +36,5 @@ public sealed record MazeQuestTurnEnvelope(
     string? VisibleMapAscii,
     MazeObjectiveSignal? ObjectiveSignal,
     IReadOnlyList<MazeMoveEvaluation> MoveEvaluations,
+    IReadOnlyList<MazeKnownTravelOption> KnownTravelOptions,
     string Narration);

@@ -107,6 +107,7 @@ public sealed class MazeQuestWatchEventSink : IEventSink
         var tool = Data(executionEvent, "tool") ?? "unknown";
         Console.WriteLine();
         Console.WriteLine($"[step] {step} -> {tool}");
+        PrintReason(executionEvent.UserFacingReason, executionEvent.Intent);
     }
 
     private void PrintReceiptTurn()
@@ -150,6 +151,16 @@ public sealed class MazeQuestWatchEventSink : IEventSink
             }
         }
 
+        var knownRoutes = envelope.KnownTravelOptions.Take(5).ToArray();
+        if (knownRoutes.Length > 0)
+        {
+            Console.WriteLine("Known Routes:");
+            foreach (var route in knownRoutes)
+            {
+                Console.WriteLine($"  to=({route.Destination.X},{route.Destination.Y}) hops={route.HopCount} cost={route.TotalTerrainCost} risk={route.MaxVisibleRisk:0.00} frontier={route.FrontierGain} {route.ObjectiveDelta}");
+            }
+        }
+
         if (_turnJson)
         {
             Console.WriteLine();
@@ -181,6 +192,7 @@ public sealed class MazeQuestWatchEventSink : IEventSink
             VisibleMapAscii: MazeQuestRenderer.RenderFog(_session.Stage, runState),
             ObjectiveSignal: MazeQuestAnalyzer.SenseObjective(_session.Stage, runState),
             MoveEvaluations: MazeQuestAnalyzer.EvaluateMoves(_session.Stage, runState),
+            KnownTravelOptions: MazeQuestAnalyzer.KnownTravelOptions(_session.Stage, runState),
             Narration: string.Empty);
     }
 
@@ -191,6 +203,43 @@ public sealed class MazeQuestWatchEventSink : IEventSink
             : " " + string.Join(" ", executionEvent.Data.Select(pair => $"{pair.Key}={pair.Value}"));
 
         Console.WriteLine($"[{label.ToLowerInvariant()}] {executionEvent.Type}{data}");
+        PrintReason(executionEvent.UserFacingReason, executionEvent.Intent);
+    }
+
+    private static void PrintReason(UserFacingReason? reason, ExecutionIntent? fallbackIntent)
+    {
+        if (reason is null)
+        {
+            PrintIntent(fallbackIntent);
+            return;
+        }
+
+        Console.WriteLine($"  reason: {Compact(reason.Summary)}");
+        if (!string.IsNullOrWhiteSpace(reason.Detail))
+        {
+            Console.WriteLine($"  detail: {Compact(reason.Detail)}");
+        }
+    }
+
+    private static void PrintIntent(ExecutionIntent? intent)
+    {
+        if (intent is null)
+        {
+            return;
+        }
+
+        Console.WriteLine($"  action: {Compact(intent.Action)}");
+        Console.WriteLine($"  why:    {Compact(intent.Rationale)}");
+        if (!string.IsNullOrWhiteSpace(intent.ExpectedOutcome))
+        {
+            Console.WriteLine($"  expect: {Compact(intent.ExpectedOutcome)}");
+        }
+    }
+
+    private static string Compact(string value)
+    {
+        var compact = string.Join(" ", value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return compact.Length <= 220 ? compact : compact[..217] + "...";
     }
 
     private void Delay()

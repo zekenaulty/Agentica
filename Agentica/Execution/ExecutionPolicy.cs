@@ -11,8 +11,8 @@ public sealed record ExecutionPolicy(
     ToolEffectPolicy? EffectPolicy = null,
     PlanningContextOptions? PlanningContext = null,
     int MaxBlockedRetries = 2,
-    int MaxBatchSize = 4,
-    int MaxParallelism = 4,
+    int MaxBatchSize = 8,
+    int MaxParallelism = 8,
     bool AllowReadOnlyParallelBatches = true)
 {
     public static ExecutionPolicy Default { get; } = new();

@@ -120,9 +120,20 @@ internal static class MazeQuestCommand
         var session = new MazeQuestSession(stage);
         var initialState = session.CurrentRunState;
         var runObjective = BuildObjective(stage);
+        var plannerContext = MazeQuestCapabilitySurfaceCompiler.BuildPlannerContext(
+            stage,
+            initialState,
+            runObjective);
         var runLog = services.CreateRunLog(options.LogRun, options.LogDir, "mazequest", args);
         runLog?.WriteJson("mazequest-stage.json", stage);
         runLog?.WriteJson("mazequest-initial-public-snapshot.json", MazeQuestAnalyzer.BuildPublicSnapshot(stage, initialState));
+        runLog?.WriteJson("mazequest-initial-cockpit-frame.json", MazeQuestCockpitFrameCompiler.BuildFrame(stage, initialState, session.Turns));
+        if (runLog is not null &&
+            plannerContext.TryGetValue(MazeQuestCapabilitySurfaceCompiler.ContextKey, out var harnessContext) &&
+            harnessContext is not null)
+        {
+            runLog.WriteJson("mazequest-initial-agentic-harness-context.json", harnessContext);
+        }
 
         using var runCancellation = new CancellationTokenSource();
         ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
@@ -163,6 +174,7 @@ internal static class MazeQuestCommand
                 options.ModelId,
                 options.ThinkingBudget,
                 options.IncludeThoughts,
+                null,
                 options.PlanningMode,
                 options.MaxBlockedRetries,
                 LogRun: false,
@@ -176,14 +188,16 @@ internal static class MazeQuestCommand
             eventSink: eventSink,
             outcomeReporter: new MazeQuestOutcomeReporter(),
             policy: new ExecutionPolicy(
-                MaxSteps: 120,
-                MaxRefinements: 120,
+                MaxSteps: 240,
+                MaxRefinements: 240,
                 Timeout: TimeSpan.FromSeconds(options.TimeoutSeconds),
                 PlanningMode: options.PlanningMode,
                 MaxPlanContinuations: 16,
                 PlanningContext: new PlanningContextOptions(MaxRecentObservations: 8, MaxRecentReceipts: 8),
                 MaxBlockedRetries: options.MaxBlockedRetries),
-            completionEvaluator: EvidenceCompletionEvaluator.ForArtifactKind("mazequest.objective_completed"));
+            completionEvaluator: EvidenceCompletionEvaluator.ForArtifactKind("mazequest.objective_completed"),
+            planningFrameProjector: new MazeQuestCockpitFrameProjector(session),
+            userFacingReasonProjector: MazeQuestUserFacingReasonProjector.Instance);
 
         Console.CancelKeyPress += cancelHandler;
         OutcomeEnvelope envelope;
@@ -193,7 +207,7 @@ internal static class MazeQuestCommand
                 new RunRequest(
                     runObjective,
                     RequestOrigin.User,
-                    MazeQuestAnalyzer.BuildPublicSnapshot(stage, initialState)),
+                    plannerContext),
                 runCancellation.Token).ConfigureAwait(false);
         }
         finally
@@ -220,7 +234,14 @@ internal static class MazeQuestCommand
         - Before mutation, use public observations from maze.get_state, maze.render_map, maze.sense_objective, and maze.evaluate_moves.
         - Use objectiveBoard to weigh required objectives, optional objectives, priority, resource rewards, and current resource risk.
         - moveEvaluations provide local legality, cost, risk, and frontier facts; they do not identify the best route.
-        - Rest only when health, energy, cost, or visible risk makes the next action unsafe; do not rest as filler.
+        - Treat repeated A/B movement, repeated frontierGain = 0, unchanged objective signal, and revisiting the same public cells as stagnation evidence.
+        - Do not prefer a safe move if it returns to a known cul-de-sac or repeated cell pair that has already failed to improve objective progress.
+        - If all safe moves are no-progress and the host-projected resourceRisk allows it, choose a bounded-risk move when it is the only non-repeating legal branch.
+        - When trapped between a safe dead-end and a risky branch, name the tradeoff in ExecutionIntent.Rationale.
+        - If recent steps alternate directions, first call maze.analyze_progress or maze.evaluate_escape_moves, then choose a move that changes the loop state.
+        - Rest only when health, energy, cost, or visible risk makes the next action unsafe and rest enables a specific next move; do not rest as filler or as a substitute for route change.
+        - Treat cockpitFrame and agenticHarness.activeCapabilitySurface as host-compiled public planner context for the current turn.
+        - Request context keys such as agentica.* are not tools unless their exact id appears in the tool catalog.
         - For action inputs, copy exact values from legalActions or the tool input schema. Use lowercase cardinal directions only: north, east, south, west.
         - To move, call maze.move with input key direction set to north, east, south, or west.
         - To take an object, call maze.take with input key objectId set to the visible current-cell object id.

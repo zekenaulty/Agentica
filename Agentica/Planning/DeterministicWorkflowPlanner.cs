@@ -23,6 +23,9 @@ public sealed class DeterministicWorkflowPlanner : IWorkflowPlanner
                     {
                         ["query"] = "current_state"
                 })
+                {
+                    Reason = "Query current state before selecting an action."
+                }
             ],
             Description: "Initial deterministic plan: query state before action."));
     }
@@ -47,6 +50,9 @@ public sealed class DeterministicWorkflowPlanner : IWorkflowPlanner
                         ["action"] = "write_marker",
                         ["basedOnObservation"] = observation.ObservationId
                 })
+                {
+                    Reason = "Act only after the state query produced receipt-backed evidence."
+                }
             ],
             Description: "Refined deterministic plan: act after state query observation."));
     }

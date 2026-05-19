@@ -66,6 +66,7 @@ internal static class CampaignCommand
                     options.ModelId,
                     options.ThinkingBudget,
                     options.IncludeThoughts,
+                    null,
                     options.PlanningMode,
                     options.MaxBlockedRetries,
                     LogRun: false,

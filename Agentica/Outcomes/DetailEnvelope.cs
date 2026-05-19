@@ -19,4 +19,8 @@ public sealed record DetailEnvelope(
     IReadOnlyList<ValidationIssue> ValidationIssues)
 {
     public IReadOnlyList<RunAttemptSummary> RunAttempts { get; init; } = [];
+
+    public IReadOnlyList<ToolSurfaceSnapshot> ToolSurfaces { get; init; } = [];
+
+    public IReadOnlyList<PlanningFrame> PlanningFrames { get; init; } = [];
 }

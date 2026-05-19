@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Agentica.Events;
 using Agentica.Planning;
 using Agentica.Tools;
 
@@ -37,6 +38,7 @@ public sealed record WorkflowPlanStepJsonContract(
     string? Effect,
     IReadOnlyDictionary<string, JsonElement>? Input,
     string? Reason,
+    ExecutionIntentJsonContract? Intent,
     IReadOnlyList<string>? DependsOn,
     string? BatchId)
 {
@@ -72,6 +74,10 @@ public sealed record WorkflowPlanStepJsonContract(
             Reason = string.IsNullOrWhiteSpace(Reason)
                 ? null
                 : Reason,
+            Intent = Intent?.ToExecutionIntent()
+                ?? (string.IsNullOrWhiteSpace(Reason)
+                    ? null
+                    : new ExecutionIntent($"Invoke {ToolId}.", Reason)),
             DependsOn = DependsOn?
                 .Where(dependency => !string.IsNullOrWhiteSpace(dependency))
                 .Select(dependency => dependency.Trim())
@@ -80,5 +86,24 @@ public sealed record WorkflowPlanStepJsonContract(
                 ? null
                 : BatchId
         };
+    }
+}
+
+public sealed record ExecutionIntentJsonContract(
+    string? Action,
+    string? Rationale,
+    string? ExpectedOutcome)
+{
+    public ExecutionIntent? ToExecutionIntent()
+    {
+        if (string.IsNullOrWhiteSpace(Action) && string.IsNullOrWhiteSpace(Rationale))
+        {
+            return null;
+        }
+
+        return new ExecutionIntent(
+            string.IsNullOrWhiteSpace(Action) ? "Execute the planned step." : Action.Trim(),
+            string.IsNullOrWhiteSpace(Rationale) ? "No public rationale supplied." : Rationale.Trim(),
+            string.IsNullOrWhiteSpace(ExpectedOutcome) ? null : ExpectedOutcome.Trim());
     }
 }

@@ -10,13 +10,19 @@ namespace Agentica.Runs;
 
 public sealed class AgenticaRun
 {
-    public AgenticaRun(string runId, RunRequest request)
+    public AgenticaRun(string runId, RunRequest request, int attemptNumber = 1)
     {
         RunId = runId;
         Request = request;
+        AttemptNumber = attemptNumber;
+        CreatedAt = DateTimeOffset.UtcNow;
     }
 
     public string RunId { get; }
+
+    public DateTimeOffset CreatedAt { get; }
+
+    public int AttemptNumber { get; }
 
     public RunRequest Request { get; }
 
@@ -37,4 +43,14 @@ public sealed class AgenticaRun
     public List<ExecutionBatch> Batches { get; } = [];
 
     public List<ExecutionEvent> Events { get; } = [];
+
+    public List<ToolSurfaceSnapshot> ToolSurfaces { get; } = [];
+
+    public List<PlanningFrame> PlanningFrames { get; } = [];
+
+    public Dictionary<string, string> PlanToolSurfaceIds { get; } = new(StringComparer.Ordinal);
+
+    private long EventSequence { get; set; }
+
+    public long NextEventSequence() => ++EventSequence;
 }

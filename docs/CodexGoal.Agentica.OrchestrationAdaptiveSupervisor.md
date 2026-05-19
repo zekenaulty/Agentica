@@ -4,6 +4,21 @@
 
 Define and build `Agentica.Orchestration` as the adaptive supervisory layer above bounded Agentica runs.
 
+## Current Implementation Status
+
+Status: incubating in core.
+
+The first reusable orchestration contracts now live under `Agentica/Orchestration` inside the core `Agentica` project. That placement is deliberate incubation after the migration from the separate repo, not a final commitment that orchestration must remain in the runtime assembly forever.
+
+The intended boundary is still:
+
+```text
+Agentica.Orchestration -> Agentica
+Agentica -> no orchestration dependency
+```
+
+Current source placement temporarily violates the package shape but not the dependency direction. Split back into a separate `Agentica.Orchestration` class library when the contracts are stable enough to version separately, or when durable orchestration state/replay/API surfaces make the package boundary valuable.
+
 This layer is the Nanda supervisory intelligence pattern applied to Agentica:
 
 ```text

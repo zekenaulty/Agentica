@@ -58,6 +58,7 @@ internal static class QuestCommand
                 options.ModelId,
                 options.ThinkingBudget,
                 options.IncludeThoughts,
+                null,
                 options.PlanningMode,
                 options.MaxBlockedRetries,
                 LogRun: false,
