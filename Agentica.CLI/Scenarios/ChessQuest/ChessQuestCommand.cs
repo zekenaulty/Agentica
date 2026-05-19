@@ -678,6 +678,12 @@ internal static class ChessQuestCommand
         if (!result.Passed)
         {
             Console.WriteLine($"  reason: {result.FailureReason}");
+            Console.WriteLine($"  provider: {result.ProviderName ?? "unknown"} finish={result.FinishReason} usage={FormatUsage(result.Usage)}");
+            if (!string.IsNullOrWhiteSpace(result.RawResponse))
+            {
+                Console.WriteLine($"  raw: {Preview(result.RawResponse, 240)}");
+            }
+
             Console.WriteLine($"  fen: {trial.Fen}");
             Console.WriteLine("  board:");
             foreach (var line in trial.BoardLines)
@@ -696,6 +702,19 @@ internal static class ChessQuestCommand
         answer is null
             ? "none"
             : answer.Occupied ? $"{answer.Color}_{answer.Piece}" : "empty";
+
+    private static string FormatUsage(Agentica.Clients.Llm.LlmUsage? usage) =>
+        usage is null
+            ? "none"
+            : $"prompt={usage.PromptTokens?.ToString() ?? "?"} output={usage.OutputTokens?.ToString() ?? "?"} thinking={usage.ThinkingTokens?.ToString() ?? "?"} total={usage.TotalTokens?.ToString() ?? "?"}";
+
+    private static string Preview(string value, int maxCharacters)
+    {
+        var compact = value.ReplaceLineEndings(" ").Trim();
+        return compact.Length <= maxCharacters
+            ? compact
+            : compact[..maxCharacters] + "...";
+    }
 
     private static void PrintReplay(ChessQuestGameRecord record, string source)
     {

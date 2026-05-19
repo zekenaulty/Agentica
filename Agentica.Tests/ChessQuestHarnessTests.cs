@@ -480,6 +480,15 @@ public sealed class ChessQuestHarnessTests
     }
 
     [Fact]
+    public void ChessQuest_board_probe_disables_thinking_by_default()
+    {
+        var options = ChessQuestBoardProbeOptions.Parse([], "test-model");
+
+        Assert.True(options.IsValid);
+        Assert.Equal("off", options.ThinkingBudget);
+    }
+
+    [Fact]
     public async Task HeuristicChessOpponent_prefers_immediate_checkmate()
     {
         var rules = new GeraChessRulesEngine(FoolsMateBlackToMoveFen);

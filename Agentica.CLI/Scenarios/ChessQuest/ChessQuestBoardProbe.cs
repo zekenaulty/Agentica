@@ -45,7 +45,7 @@ public sealed record ChessQuestBoardProbeOptions(
         var presentation = ChessQuestBoardProbePresentation.Ascii;
         var targetMode = ChessQuestBoardProbeTargetMode.Occupied;
         var modelId = defaultModelId;
-        string? thinkingBudget = null;
+        string? thinkingBudget = "off";
         var includeThoughts = false;
         var maxOutputTokens = 512;
         var timeoutSeconds = 120;
