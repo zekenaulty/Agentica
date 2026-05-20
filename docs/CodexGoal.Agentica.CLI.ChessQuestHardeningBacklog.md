@@ -632,6 +632,10 @@ Follow-up from live probes:
 2. Legal-action probes include public piece inventories and require origin/destination fields so the host can diagnose whether failures are board-binding, own-piece destination, blocked-slider, king-capture, or generic legality failures.
 3. The legal-action prompt intentionally withholds legal moves. Live runs show this is a real actor/solver probe, not a linter: Gemini Flash still misses some scrambled positions by choosing plausible but illegal attacking/development moves.
 4. Do not keep padding the legal-action prompt indefinitely. If a model cannot choose a legal move from public board state without a legal list, that is a useful probe result.
+5. `puzzle-probe` now supports `--puzzle-source generated`, which builds seed-derived synthetic puzzles and derives the accepted move from the rules engine plus the documented immediate material/promotion objective at runtime.
+6. `puzzle-probe` also supports `--puzzle-source random-generated` for harder random-game material puzzles. This is intentionally more difficult and should not be treated as the default smoke test.
+7. Generated puzzle prompts do not include accepted moves. The host validates the model move against the runtime-derived accepted move and logs source/puzzle metadata.
+8. Generated probes may carry an accepted best-move span when multiple moves tie for the top score. The prompt says this explicitly without revealing the moves, and validation accepts any move in that span.
 
 ## Recommended Next Implementation Order
 

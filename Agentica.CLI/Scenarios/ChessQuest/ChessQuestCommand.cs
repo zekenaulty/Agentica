@@ -309,6 +309,7 @@ internal static class ChessQuestCommand
             Console.WriteLine($"Model: {options.ModelId}");
             Console.WriteLine($"Trials: {options.Trials}");
             Console.WriteLine($"Presentation: {options.Presentation}");
+            Console.WriteLine($"Puzzle Source: {options.PuzzleSource}");
             Console.WriteLine();
         }
 
@@ -324,7 +325,9 @@ internal static class ChessQuestCommand
                             {
                                 trial.TrialNumber,
                                 trial.PuzzleId,
+                                trial.Source,
                                 trial.Objective,
+                                trial.GenerationNote,
                                 trial.Fen,
                                 trial.BoardLines,
                                 trial.AgentColor,
@@ -1405,7 +1408,7 @@ internal static class ChessQuestCommand
         ChessQuestPuzzleProbeTrialResult result)
     {
         var status = result.Passed ? "PASS" : "FAIL";
-        Console.WriteLine($"[{status}] trial={trial.TrialNumber} puzzle={trial.PuzzleId} role={trial.AgentColor} move={result.Move ?? "none"}");
+        Console.WriteLine($"[{status}] trial={trial.TrialNumber} source={trial.Source} puzzle={trial.PuzzleId} role={trial.AgentColor} move={result.Move ?? "none"}");
         if (!result.Passed)
         {
             Console.WriteLine($"  reason: {result.FailureReason}");

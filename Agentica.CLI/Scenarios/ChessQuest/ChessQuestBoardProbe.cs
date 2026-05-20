@@ -18,12 +18,21 @@ public enum ChessQuestBoardProbeTargetMode
     Mixed
 }
 
+public enum ChessQuestPuzzleProbeSource
+{
+    BuiltIn,
+    Generated,
+    RandomGenerated,
+    Mixed
+}
+
 public sealed record ChessQuestBoardProbeOptions(
     int Trials,
     int Seed,
     int ScramblePlies,
     ChessQuestBoardProbePresentation Presentation,
     ChessQuestBoardProbeTargetMode TargetMode,
+    ChessQuestPuzzleProbeSource PuzzleSource,
     string ModelId,
     string? ThinkingBudget,
     bool IncludeThoughts,
@@ -44,6 +53,7 @@ public sealed record ChessQuestBoardProbeOptions(
         var scramblePlies = 24;
         var presentation = ChessQuestBoardProbePresentation.Ascii;
         var targetMode = ChessQuestBoardProbeTargetMode.Occupied;
+        var puzzleSource = ChessQuestPuzzleProbeSource.BuiltIn;
         var modelId = defaultModelId;
         string? thinkingBudget = "off";
         var includeThoughts = false;
@@ -104,6 +114,19 @@ public sealed record ChessQuestBoardProbeOptions(
                     if (!TryParseTargetMode(targetValue, out targetMode))
                     {
                         return Invalid($"Unknown board-probe target '{targetValue}'.", defaultModelId);
+                    }
+
+                    break;
+
+                case "--puzzle-source":
+                    if (!TryReadValue(args, ref index, out var puzzleSourceValue))
+                    {
+                        return Invalid("Missing value for --puzzle-source.", defaultModelId);
+                    }
+
+                    if (!TryParsePuzzleSource(puzzleSourceValue, out puzzleSource))
+                    {
+                        return Invalid($"Unknown puzzle-probe source '{puzzleSourceValue}'.", defaultModelId);
                     }
 
                     break;
@@ -178,6 +201,7 @@ public sealed record ChessQuestBoardProbeOptions(
             scramblePlies,
             presentation,
             targetMode,
+            puzzleSource,
             modelId,
             thinkingBudget,
             includeThoughts,
@@ -235,6 +259,37 @@ public sealed record ChessQuestBoardProbeOptions(
         }
     }
 
+    private static bool TryParsePuzzleSource(
+        string value,
+        out ChessQuestPuzzleProbeSource source)
+    {
+        switch (value.Trim().ToLowerInvariant())
+        {
+            case "built-in":
+            case "builtin":
+            case "fixture":
+            case "fixtures":
+                source = ChessQuestPuzzleProbeSource.BuiltIn;
+                return true;
+            case "generated":
+            case "dynamic":
+                source = ChessQuestPuzzleProbeSource.Generated;
+                return true;
+            case "random-generated":
+            case "generated-random":
+            case "random-material":
+                source = ChessQuestPuzzleProbeSource.RandomGenerated;
+                return true;
+            case "mixed":
+            case "both":
+                source = ChessQuestPuzzleProbeSource.Mixed;
+                return true;
+            default:
+                source = ChessQuestPuzzleProbeSource.BuiltIn;
+                return false;
+        }
+    }
+
     private static bool TryReadPositiveInt(
         IReadOnlyList<string> args,
         ref int index,
@@ -281,6 +336,7 @@ public sealed record ChessQuestBoardProbeOptions(
             ScramblePlies: 0,
             Presentation: ChessQuestBoardProbePresentation.Ascii,
             TargetMode: ChessQuestBoardProbeTargetMode.Occupied,
+            PuzzleSource: ChessQuestPuzzleProbeSource.BuiltIn,
             ModelId: defaultModelId,
             ThinkingBudget: null,
             IncludeThoughts: false,
@@ -1262,11 +1318,13 @@ internal sealed record ChessQuestProbePiece(
 public sealed record ChessQuestPuzzleProbeTrial(
     int TrialNumber,
     string PuzzleId,
+    ChessQuestPuzzleProbeSource Source,
     string Objective,
     string Fen,
     IReadOnlyList<string> BoardLines,
     ChessQuestColor AgentColor,
-    IReadOnlyList<string> AcceptedMoves);
+    IReadOnlyList<string> AcceptedMoves,
+    string? GenerationNote = null);
 
 public sealed record ChessQuestPuzzleProbeTrialResult(
     int TrialNumber,
@@ -1302,6 +1360,7 @@ public sealed class ChessQuestPuzzleProbeRunner
         new(
             TrialNumber: 1,
             PuzzleId: "fools_mate_black_mate_in_one",
+            Source: ChessQuestPuzzleProbeSource.BuiltIn,
             Objective: "Find the single coordinate-UCI move for Black that checkmates White.",
             Fen: "rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq g3 0 2",
             BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen("rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq g3 0 2"),
@@ -1310,6 +1369,7 @@ public sealed class ChessQuestPuzzleProbeRunner
         new(
             TrialNumber: 1,
             PuzzleId: "white_king_captures_queen",
+            Source: ChessQuestPuzzleProbeSource.BuiltIn,
             Objective: "Find the only coordinate-UCI move for White that captures the undefended black queen.",
             Fen: "4k3/8/8/8/8/8/4q3/4K3 w - - 0 1",
             BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen("4k3/8/8/8/8/8/4q3/4K3 w - - 0 1"),
@@ -1318,6 +1378,7 @@ public sealed class ChessQuestPuzzleProbeRunner
         new(
             TrialNumber: 1,
             PuzzleId: "white_promotes_to_queen",
+            Source: ChessQuestPuzzleProbeSource.BuiltIn,
             Objective: "Find the coordinate-UCI move for White that promotes the pawn to a queen.",
             Fen: "4k3/P7/8/8/8/8/8/4K3 w - - 0 1",
             BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen("4k3/P7/8/8/8/8/8/4K3 w - - 0 1"),
@@ -1326,6 +1387,7 @@ public sealed class ChessQuestPuzzleProbeRunner
         new(
             TrialNumber: 1,
             PuzzleId: "black_rook_captures_queen",
+            Source: ChessQuestPuzzleProbeSource.BuiltIn,
             Objective: "Find the only coordinate-UCI move for Black that captures the undefended white queen.",
             Fen: "r3k3/8/8/8/8/8/8/Q3K3 b - - 0 1",
             BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen("r3k3/8/8/8/8/8/8/Q3K3 b - - 0 1"),
@@ -1334,6 +1396,7 @@ public sealed class ChessQuestPuzzleProbeRunner
         new(
             TrialNumber: 1,
             PuzzleId: "black_promotes_to_queen",
+            Source: ChessQuestPuzzleProbeSource.BuiltIn,
             Objective: "Find the coordinate-UCI move for Black that promotes the pawn to a queen.",
             Fen: "4k3/8/8/8/8/8/p7/4K3 b - - 0 1",
             BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen("4k3/8/8/8/8/8/p7/4K3 b - - 0 1"),
@@ -1356,10 +1419,7 @@ public sealed class ChessQuestPuzzleProbeRunner
         var results = new List<ChessQuestPuzzleProbeTrialResult>(options.Trials);
         for (var index = 0; index < options.Trials; index++)
         {
-            var puzzle = BuiltInPuzzles[index % BuiltInPuzzles.Length] with
-            {
-                TrialNumber = index + 1
-            };
+            var puzzle = CreatePuzzle(options, index);
             var result = await RunTrialAsync(puzzle, options, cancellationToken).ConfigureAwait(false);
             results.Add(result);
             onTrialCompleted?.Invoke(puzzle, result);
@@ -1374,11 +1434,40 @@ public sealed class ChessQuestPuzzleProbeRunner
             Results: results);
     }
 
+    internal static ChessQuestPuzzleProbeTrial CreatePuzzle(
+        ChessQuestBoardProbeOptions options,
+        int zeroBasedIndex)
+    {
+        var trialNumber = zeroBasedIndex + 1;
+        return options.PuzzleSource switch
+        {
+            ChessQuestPuzzleProbeSource.Generated => CreateGeneratedPuzzle(
+                trialNumber,
+                options.Seed + zeroBasedIndex * 7_919,
+                options.ScramblePlies),
+            ChessQuestPuzzleProbeSource.RandomGenerated => CreateGeneratedRandomMaterialPuzzle(
+                trialNumber,
+                options.Seed + zeroBasedIndex * 7_919,
+                options.ScramblePlies),
+            ChessQuestPuzzleProbeSource.Mixed when zeroBasedIndex % 2 == 0 => CreateGeneratedPuzzle(
+                trialNumber,
+                options.Seed + zeroBasedIndex * 7_919,
+                options.ScramblePlies),
+            _ => BuiltInPuzzles[zeroBasedIndex % BuiltInPuzzles.Length] with
+            {
+                TrialNumber = trialNumber
+            }
+        };
+    }
+
     public static string BuildPrompt(
         ChessQuestPuzzleProbeTrial trial,
         ChessQuestBoardProbePresentation presentation)
     {
         var pieceInventory = ChessQuestLegalActionProbeRunner.BuildPieceInventory(trial.Fen);
+        var answerCardinality = trial.AcceptedMoves.Count == 1
+            ? "There is exactly one accepted answer for this probe."
+            : "There is an accepted best-move span for this probe; return any one top-scoring move that satisfies the objective.";
         var boardSection = presentation is ChessQuestBoardProbePresentation.Ascii or ChessQuestBoardProbePresentation.Both
             ? $"""
 
@@ -1400,7 +1489,7 @@ public sealed class ChessQuestPuzzleProbeRunner
             Puzzle: {{trial.PuzzleId}}
             Role: {{trial.AgentColor}}
             Objective: {{trial.Objective}}
-            There is exactly one accepted answer for this probe.
+            {{answerCardinality}}
             Solve the puzzle from the board state. Identify the moving side, select an origin square currently occupied by that side, and aim at the stated objective.
             For checkmate objectives, inspect candidate checking moves and the opponent king's legal escapes, captures, and blocks.
             Current public piece inventory:
@@ -1495,7 +1584,9 @@ public sealed class ChessQuestPuzzleProbeRunner
             FailureReason: accepted
                 ? null
                 : legal
-                    ? $"wrong_move: '{move}' is legal but not the single accepted answer"
+                    ? trial.AcceptedMoves.Count == 1
+                        ? $"wrong_move: '{move}' is legal but not the single accepted answer"
+                        : $"wrong_move: '{move}' is legal but not in the accepted best-move span"
                     : $"illegal_move: '{move}' is not legal in the puzzle position");
     }
 
@@ -1506,6 +1597,308 @@ public sealed class ChessQuestPuzzleProbeRunner
         BuiltInPuzzles.Single(puzzle => string.Equals(puzzle.PuzzleId, puzzleId, StringComparison.Ordinal));
 
     internal static IReadOnlyList<ChessQuestPuzzleProbeTrial> BuiltInPuzzlesForTests() => BuiltInPuzzles;
+
+    internal static ChessQuestPuzzleProbeTrial CreateGeneratedPuzzle(
+        int trialNumber,
+        int seed,
+        int scramblePlies)
+    {
+        var random = new Random(seed);
+        for (var attempt = 0; attempt < 128; attempt++)
+        {
+            var fen = random.Next(2) == 0
+                ? CreateSyntheticCaptureFen(random)
+                : CreateSyntheticPromotionFen(random);
+            var rules = new GeraChessRulesEngine(fen);
+            var state = rules.GetState();
+            if (state.IsTerminal)
+            {
+                continue;
+            }
+
+            var candidates = ScorePuzzleCandidates(fen, state.SideToMove);
+            var top = candidates.FirstOrDefault();
+            if (top is null || top.Score <= 0)
+            {
+                continue;
+            }
+
+            var topBand = TopMoveBand(candidates);
+            if (topBand.Count == 0 || topBand.Count > 4)
+            {
+                continue;
+            }
+
+            var objective = top.Kind switch
+            {
+                GeneratedPuzzleKind.Promotion =>
+                    $"Generated rules-derived puzzle. Find the best coordinate-UCI move for {state.SideToMove} by the immediate promotion objective.",
+                _ =>
+                    $"Generated rules-derived puzzle. Find the best coordinate-UCI move for {state.SideToMove} by immediate material gain. Captures and promotions count; long-term engine evaluation is not used."
+            };
+
+            return new ChessQuestPuzzleProbeTrial(
+                TrialNumber: trialNumber,
+                PuzzleId: $"generated_{top.Kind.ToString().ToLowerInvariant()}_{seed}_{attempt}",
+                Source: ChessQuestPuzzleProbeSource.Generated,
+                Objective: objective,
+                Fen: fen,
+                BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen(fen),
+                AgentColor: state.SideToMove,
+                AcceptedMoves: topBand.Select(candidate => candidate.Move).ToArray(),
+                GenerationNote: $"seed={seed}; attempt={attempt}; score={top.Score}; acceptedBand={topBand.Count}; source=synthetic_rules_derived_{top.Kind}");
+        }
+
+        return CreateGeneratedRandomMaterialPuzzle(trialNumber, seed, scramblePlies);
+    }
+
+    internal static ChessQuestPuzzleProbeTrial CreateGeneratedRandomMaterialPuzzle(
+        int trialNumber,
+        int seed,
+        int scramblePlies)
+    {
+        var random = new Random(seed);
+        for (var attempt = 0; attempt < 1_000; attempt++)
+        {
+            var rules = new GeraChessRulesEngine(ChessQuestBoardProbeRunner.StartFen);
+            var plies = Math.Max(4, scramblePlies + random.Next(-4, 5));
+            for (var ply = 0; ply < plies; ply++)
+            {
+                var legalMoves = rules.ListLegalMoves();
+                if (legalMoves.Count == 0 || rules.GetState().IsTerminal)
+                {
+                    break;
+                }
+
+                var result = rules.TryPlayMove(legalMoves[random.Next(legalMoves.Count)].Uci);
+                if (!result.Accepted)
+                {
+                    break;
+                }
+            }
+
+            var state = rules.GetState();
+            if (state.IsTerminal)
+            {
+                continue;
+            }
+
+            var candidates = ScorePuzzleCandidates(rules.GetFen(), state.SideToMove);
+            var top = candidates.FirstOrDefault();
+            if (top is null || top.Score <= 0)
+            {
+                continue;
+            }
+
+            var topBand = TopMoveBand(candidates);
+            if (topBand.Count == 0 || topBand.Count > 4)
+            {
+                continue;
+            }
+
+            var second = candidates.Skip(topBand.Count).FirstOrDefault();
+            if (second is not null && top.Score - second.Score < 100)
+            {
+                continue;
+            }
+
+            var objective = top.Kind switch
+            {
+                GeneratedPuzzleKind.Checkmate =>
+                    $"Generated rules-derived puzzle. Find the single coordinate-UCI move for {state.SideToMove} that immediately checkmates the opponent.",
+                GeneratedPuzzleKind.Promotion =>
+                    $"Generated rules-derived puzzle. Find the best coordinate-UCI move for {state.SideToMove} by the immediate promotion/material objective.",
+                _ =>
+                    $"Generated rules-derived puzzle. Find the best coordinate-UCI move for {state.SideToMove} by immediate material gain. Captures and promotions count; long-term engine evaluation is not used."
+            };
+
+            return new ChessQuestPuzzleProbeTrial(
+                TrialNumber: trialNumber,
+                PuzzleId: $"generated_{top.Kind.ToString().ToLowerInvariant()}_{seed}_{attempt}",
+                Source: ChessQuestPuzzleProbeSource.RandomGenerated,
+                Objective: objective,
+                Fen: rules.GetFen(),
+                BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen(rules.GetFen()),
+                AgentColor: state.SideToMove,
+                AcceptedMoves: topBand.Select(candidate => candidate.Move).ToArray(),
+                GenerationNote: $"seed={seed}; attempt={attempt}; score={top.Score}; acceptedBand={topBand.Count}; source=rules_derived_{top.Kind}");
+        }
+
+        throw new InvalidOperationException($"Unable to generate a unique ChessQuest puzzle for seed {seed} after 1000 attempts.");
+    }
+
+    private static string CreateSyntheticCaptureFen(Random random)
+    {
+        var templates = new[]
+        {
+            "4k3/q7/8/8/8/8/8/R3K3 w - - 0 1",
+            "4k3/8/8/8/8/7q/8/2B1K3 w - - 0 1",
+            "4k3/8/8/8/8/5q2/8/4K1N1 w - - 0 1",
+            "r3k3/8/8/8/8/8/Q7/4K3 b - - 0 1",
+            "2b1k3/8/8/8/8/7Q/8/4K3 b - - 0 1",
+            "4k1n1/8/5Q2/8/8/8/8/4K3 b - - 0 1"
+        };
+
+        return templates[random.Next(templates.Length)];
+    }
+
+    private static string CreateSyntheticPromotionFen(Random random)
+    {
+        var file = (char)('a' + random.Next(8));
+        if (random.Next(2) == 0)
+        {
+            var blackKingSquare = file == 'h' ? "a8" : "h8";
+            return FenFromPieces(
+                sideToMove: ChessQuestColor.White,
+                (Square: "e1", Piece: 'K'),
+                (Square: blackKingSquare, Piece: 'k'),
+                (Square: $"{file}7", Piece: 'P'));
+        }
+        else
+        {
+            var whiteKingSquare = file == 'h' ? "a1" : "h1";
+            return FenFromPieces(
+                sideToMove: ChessQuestColor.Black,
+                (Square: "e8", Piece: 'k'),
+                (Square: whiteKingSquare, Piece: 'K'),
+                (Square: $"{file}2", Piece: 'p'));
+        }
+    }
+
+    private static string FenFromPieces(
+        ChessQuestColor sideToMove,
+        params (string Square, char Piece)[] pieces)
+    {
+        var board = new char[8, 8];
+        foreach (var item in pieces)
+        {
+            var file = item.Square[0] - 'a';
+            var rank = item.Square[1] - '1';
+            board[rank, file] = item.Piece;
+        }
+
+        var ranks = new List<string>(8);
+        for (var rank = 7; rank >= 0; rank--)
+        {
+            var empty = 0;
+            var text = string.Empty;
+            for (var file = 0; file < 8; file++)
+            {
+                var piece = board[rank, file];
+                if (piece == '\0')
+                {
+                    empty++;
+                    continue;
+                }
+
+                if (empty > 0)
+                {
+                    text += empty.ToString();
+                    empty = 0;
+                }
+
+                text += piece;
+            }
+
+            if (empty > 0)
+            {
+                text += empty.ToString();
+            }
+
+            ranks.Add(text);
+        }
+
+        return $"{string.Join('/', ranks)} {(sideToMove == ChessQuestColor.White ? "w" : "b")} - - 0 1";
+    }
+
+    private static IReadOnlyList<GeneratedPuzzleCandidate> ScorePuzzleCandidates(
+        string fen,
+        ChessQuestColor sideToMove)
+    {
+        var rules = new GeraChessRulesEngine(fen);
+        return rules.ListLegalMoves()
+            .Select(move => ScorePuzzleCandidate(fen, sideToMove, move.Uci))
+            .Where(candidate => candidate.Score > 0)
+            .OrderByDescending(candidate => candidate.Score)
+            .ThenBy(candidate => candidate.Move, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<GeneratedPuzzleCandidate> TopMoveBand(
+        IReadOnlyList<GeneratedPuzzleCandidate> candidates)
+    {
+        var top = candidates.FirstOrDefault();
+        return top is null
+            ? []
+            : candidates
+                .Where(candidate => candidate.Score == top.Score)
+                .ToArray();
+    }
+
+    private static GeneratedPuzzleCandidate ScorePuzzleCandidate(
+        string fen,
+        ChessQuestColor sideToMove,
+        string move)
+    {
+        var clone = new GeraChessRulesEngine(fen);
+        var result = clone.TryPlayMove(move);
+        if (!result.Accepted || result.Move is null)
+        {
+            return new GeneratedPuzzleCandidate(move, 0, GeneratedPuzzleKind.Material);
+        }
+
+        var state = clone.GetState();
+        if (state.TerminalState?.Winner == sideToMove &&
+            state.TerminalState.Reason.Contains("Checkmate", StringComparison.OrdinalIgnoreCase))
+        {
+            return new GeneratedPuzzleCandidate(result.Move, 1_000_000, GeneratedPuzzleKind.Checkmate);
+        }
+
+        var captureValue = result.Captures.Sum(capture => PieceValue(capture.Piece));
+        var promotionValue = move.Length == 5 ? PromotionValue(move[4]) : 0;
+        var score = captureValue + promotionValue;
+        var kind = promotionValue > captureValue
+            ? GeneratedPuzzleKind.Promotion
+            : GeneratedPuzzleKind.Material;
+
+        return new GeneratedPuzzleCandidate(result.Move, score, kind);
+    }
+
+    private static int PieceValue(string projectedPiece)
+    {
+        var piece = projectedPiece.Split('_').LastOrDefault() ?? string.Empty;
+        return piece switch
+        {
+            "pawn" => 100,
+            "knight" => 320,
+            "bishop" => 330,
+            "rook" => 500,
+            "queen" => 900,
+            _ => 0
+        };
+    }
+
+    private static int PromotionValue(char promotion) =>
+        char.ToLowerInvariant(promotion) switch
+        {
+            'q' => 850,
+            'r' => 450,
+            'b' => 280,
+            'n' => 270,
+            _ => 0
+        };
+
+    private enum GeneratedPuzzleKind
+    {
+        Material,
+        Promotion,
+        Checkmate
+    }
+
+    private sealed record GeneratedPuzzleCandidate(
+        string Move,
+        int Score,
+        GeneratedPuzzleKind Kind);
 
     private async Task<ChessQuestPuzzleProbeTrialResult> RunTrialAsync(
         ChessQuestPuzzleProbeTrial trial,

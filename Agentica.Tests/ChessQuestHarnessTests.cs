@@ -955,6 +955,17 @@ public sealed class ChessQuestHarnessTests
     }
 
     [Fact]
+    public void ChessQuest_board_probe_options_parse_generated_puzzle_source()
+    {
+        var options = ChessQuestBoardProbeOptions.Parse(
+            ["--puzzle-source", "generated"],
+            "test-model");
+
+        Assert.True(options.IsValid);
+        Assert.Equal(ChessQuestPuzzleProbeSource.Generated, options.PuzzleSource);
+    }
+
+    [Fact]
     public void ChessQuest_board_probe_disables_thinking_by_default()
     {
         var options = ChessQuestBoardProbeOptions.Parse([], "test-model");
@@ -1126,6 +1137,54 @@ public sealed class ChessQuestHarnessTests
     }
 
     [Fact]
+    public void ChessQuest_puzzle_probe_prompt_supports_best_move_span()
+    {
+        var trial = new ChessQuestPuzzleProbeTrial(
+            TrialNumber: 1,
+            PuzzleId: "span_test",
+            Source: ChessQuestPuzzleProbeSource.Generated,
+            Objective: "Return one top-scoring legal move.",
+            Fen: StartFen,
+            BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen(StartFen),
+            AgentColor: ChessQuestColor.White,
+            AcceptedMoves: ["e2e4", "d2d4"]);
+
+        var prompt = ChessQuestPuzzleProbeRunner.BuildPrompt(
+            trial,
+            ChessQuestBoardProbePresentation.Ascii);
+
+        Assert.Contains("accepted best-move span", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("There is exactly one accepted answer", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("e2e4", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("d2d4", prompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ChessQuest_puzzle_probe_accepts_any_move_in_best_move_span()
+    {
+        var trial = new ChessQuestPuzzleProbeTrial(
+            TrialNumber: 1,
+            PuzzleId: "span_test",
+            Source: ChessQuestPuzzleProbeSource.Generated,
+            Objective: "Return one top-scoring legal move.",
+            Fen: StartFen,
+            BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen(StartFen),
+            AgentColor: ChessQuestColor.White,
+            AcceptedMoves: ["e2e4", "d2d4"]);
+
+        var result = ChessQuestPuzzleProbeRunner.Validate(
+            trial,
+            JsonSerializer.Serialize(new ChessQuestMoveProbeAnswer(
+                "d2d4",
+                "Choose one accepted top move.",
+                OriginSquare: "d2",
+                DestinationSquare: "d4",
+                Piece: "pawn")));
+
+        Assert.True(result.Passed);
+    }
+
+    [Fact]
     public void ChessQuest_puzzle_probe_rotates_multiple_built_in_puzzles()
     {
         var puzzles = ChessQuestPuzzleProbeRunner.BuiltInPuzzlesForTests();
@@ -1148,6 +1207,40 @@ public sealed class ChessQuestHarnessTests
                 Assert.Contains(acceptedMove, legalMoves);
             }
         }
+    }
+
+    [Fact]
+    public void ChessQuest_puzzle_probe_generates_rules_derived_unique_answer()
+    {
+        var puzzle = ChessQuestPuzzleProbeRunner.CreateGeneratedPuzzle(
+            trialNumber: 1,
+            seed: 12345,
+            scramblePlies: 24);
+
+        var rules = new GeraChessRulesEngine(puzzle.Fen);
+        var legalMoves = rules.ListLegalMoves().Select(move => move.Uci).ToHashSet(StringComparer.Ordinal);
+        var prompt = ChessQuestPuzzleProbeRunner.BuildPrompt(
+            puzzle,
+            ChessQuestBoardProbePresentation.Ascii);
+
+        Assert.Equal(ChessQuestPuzzleProbeSource.Generated, puzzle.Source);
+        Assert.Single(puzzle.AcceptedMoves);
+        Assert.Contains(puzzle.AcceptedMoves[0], legalMoves);
+        Assert.DoesNotContain(puzzle.AcceptedMoves[0], prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Generated rules-derived puzzle", puzzle.Objective, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ChessQuest_puzzle_probe_create_puzzle_honors_generated_source()
+    {
+        var options = ChessQuestBoardProbeOptions.Parse(
+            ["--puzzle-source", "generated", "--seed", "2222", "--scramble-plies", "20"],
+            "test-model");
+
+        var puzzle = ChessQuestPuzzleProbeRunner.CreatePuzzle(options, zeroBasedIndex: 0);
+
+        Assert.Equal(ChessQuestPuzzleProbeSource.Generated, puzzle.Source);
+        Assert.StartsWith("generated_", puzzle.PuzzleId, StringComparison.Ordinal);
     }
 
     [Fact]
