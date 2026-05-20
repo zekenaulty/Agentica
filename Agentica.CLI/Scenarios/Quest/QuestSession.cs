@@ -4,6 +4,10 @@ using Agentica.Tools;
 
 namespace Agentica.CLI.Scenarios.Quest;
 
+public sealed record QuestToolTurn(
+    ToolInvocation Invocation,
+    ToolResult Result);
+
 public sealed class QuestSession
 {
     public QuestSession(QuestDefinition definition)
@@ -16,7 +20,21 @@ public sealed class QuestSession
 
     public QuestRunState State { get; }
 
+    private readonly List<QuestToolTurn> _turns = [];
+
+    public IReadOnlyList<QuestToolTurn> Turns => _turns;
+
+    public QuestToolTurn? LastTurn { get; private set; }
+
     public ToolResult Execute(ToolInvocation invocation)
+    {
+        var result = ExecuteCore(invocation);
+        LastTurn = new QuestToolTurn(invocation, result);
+        _turns.Add(LastTurn);
+        return result;
+    }
+
+    private ToolResult ExecuteCore(ToolInvocation invocation)
     {
         return invocation.ToolId switch
         {

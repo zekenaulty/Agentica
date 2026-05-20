@@ -163,7 +163,7 @@ internal static class MazeQuestCommand
         else
         {
             PrintOpening(stage);
-            eventSink = services.CreateEventSink(new ConsoleEventSink(), runLog);
+            eventSink = services.CreateEventSink(new MazeQuestTraceEventSink(session, runObjective), runLog);
         }
 
         var planner = options.Planner == PlannerKind.Deterministic

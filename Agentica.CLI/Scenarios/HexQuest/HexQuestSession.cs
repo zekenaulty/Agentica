@@ -4,6 +4,10 @@ using Agentica.Tools;
 
 namespace Agentica.CLI.Scenarios.HexQuest;
 
+public sealed record HexQuestToolTurn(
+    ToolInvocation Invocation,
+    ToolResult Result);
+
 public sealed class HexQuestSession
 {
     public HexQuestSession(HexQuestScenario scenario)
@@ -21,7 +25,21 @@ public sealed class HexQuestSession
 
     public HexQuestRunState State { get; }
 
-    public ToolResult Execute(ToolInvocation invocation) =>
+    private readonly List<HexQuestToolTurn> _turns = [];
+
+    public IReadOnlyList<HexQuestToolTurn> Turns => _turns;
+
+    public HexQuestToolTurn? LastTurn { get; private set; }
+
+    public ToolResult Execute(ToolInvocation invocation)
+    {
+        var result = ExecuteCore(invocation);
+        LastTurn = new HexQuestToolTurn(invocation, result);
+        _turns.Add(LastTurn);
+        return result;
+    }
+
+    private ToolResult ExecuteCore(ToolInvocation invocation) =>
         invocation.ToolId switch
         {
             HexQuestToolIds.InspectEncoded => InspectEncoded(invocation),

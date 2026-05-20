@@ -4,6 +4,10 @@ using Agentica.Tools;
 
 namespace Agentica.CLI.Scenarios.Campaign;
 
+public sealed record DungeonCampaignToolTurn(
+    ToolInvocation Invocation,
+    ToolResult Result);
+
 public sealed class DungeonCampaignSession
 {
     private readonly CampaignDefinition _definition;
@@ -15,9 +19,23 @@ public sealed class DungeonCampaignSession
 
     public DungeonCampaignState State { get; } = new();
 
+    private readonly List<DungeonCampaignToolTurn> _turns = [];
+
+    public IReadOnlyList<DungeonCampaignToolTurn> Turns => _turns;
+
+    public DungeonCampaignToolTurn? LastTurn { get; private set; }
+
     public IReadOnlyDictionary<string, object?> PublicSnapshot() => State.PublicSnapshot();
 
     public ToolResult Execute(ToolInvocation invocation)
+    {
+        var result = ExecuteCore(invocation);
+        LastTurn = new DungeonCampaignToolTurn(invocation, result);
+        _turns.Add(LastTurn);
+        return result;
+    }
+
+    private ToolResult ExecuteCore(ToolInvocation invocation)
     {
         return invocation.ToolId switch
         {

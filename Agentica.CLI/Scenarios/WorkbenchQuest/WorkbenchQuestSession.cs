@@ -5,6 +5,10 @@ using System.Text.Json;
 
 namespace Agentica.CLI.Scenarios.WorkbenchQuest;
 
+public sealed record WorkbenchQuestToolTurn(
+    ToolInvocation Invocation,
+    ToolResult Result);
+
 public sealed class WorkbenchQuestSession
 {
     public WorkbenchQuestSession(WorkbenchScenario scenario)
@@ -22,7 +26,21 @@ public sealed class WorkbenchQuestSession
 
     public WorkbenchRunState State { get; }
 
-    public ToolResult Execute(ToolInvocation invocation) =>
+    private readonly List<WorkbenchQuestToolTurn> _turns = [];
+
+    public IReadOnlyList<WorkbenchQuestToolTurn> Turns => _turns;
+
+    public WorkbenchQuestToolTurn? LastTurn { get; private set; }
+
+    public ToolResult Execute(ToolInvocation invocation)
+    {
+        var result = ExecuteCore(invocation);
+        LastTurn = new WorkbenchQuestToolTurn(invocation, result);
+        _turns.Add(LastTurn);
+        return result;
+    }
+
+    private ToolResult ExecuteCore(ToolInvocation invocation) =>
         invocation.ToolId switch
         {
             WorkbenchQuestToolIds.ListFiles => ListFiles(invocation),

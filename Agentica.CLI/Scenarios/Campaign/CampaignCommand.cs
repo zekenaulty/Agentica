@@ -75,7 +75,7 @@ internal static class CampaignCommand
                     Error: null)),
             () => DungeonCampaignTools.CreateCatalog(session),
             new DeterministicOutcomeReporter(),
-            services.CreateEventSink(new ConsoleEventSink(), runLog),
+            services.CreateEventSink(new CampaignTraceEventSink(definition, state, session), runLog),
             session.PublicSnapshot,
             new CampaignRunnerOptions(
                 MaxRuns: 16,

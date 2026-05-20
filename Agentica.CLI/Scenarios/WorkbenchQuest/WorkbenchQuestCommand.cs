@@ -107,7 +107,7 @@ internal static class WorkbenchQuestCommand
         var runner = new AgenticaRunner(
             planner: planner,
             toolCatalog: WorkbenchQuestTools.CreateCatalog(session),
-            eventSink: services.CreateEventSink(new ConsoleEventSink(), runLog),
+            eventSink: services.CreateEventSink(new WorkbenchQuestTraceEventSink(session), runLog),
             outcomeReporter: new WorkbenchQuestOutcomeReporter(),
             policy: new ExecutionPolicy(
                 MaxSteps: 24,

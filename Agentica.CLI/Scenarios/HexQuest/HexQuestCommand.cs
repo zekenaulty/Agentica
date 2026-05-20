@@ -107,7 +107,7 @@ internal static class HexQuestCommand
         var runner = new AgenticaRunner(
             planner: planner,
             toolCatalog: HexQuestTools.CreateCatalog(session),
-            eventSink: services.CreateEventSink(new ConsoleEventSink(), runLog),
+            eventSink: services.CreateEventSink(new HexQuestTraceEventSink(session), runLog),
             outcomeReporter: new HexQuestOutcomeReporter(),
             policy: new ExecutionPolicy(
                 MaxSteps: 18,

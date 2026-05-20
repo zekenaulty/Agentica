@@ -70,7 +70,7 @@ internal static class QuestCommand
 
         var runLog = services.CreateRunLog(options.LogRun, options.LogDir, "quest", args);
         runLog?.WriteJson("quest-definition.json", definition);
-        var eventSink = services.CreateEventSink(new ConsoleEventSink(), runLog);
+        var eventSink = services.CreateEventSink(new QuestTraceEventSink(session), runLog);
 
         var runner = new AgenticaRunner(
             planner: planner,
