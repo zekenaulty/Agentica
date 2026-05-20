@@ -626,6 +626,13 @@ Remaining work:
 6. Removed concrete opening move examples from ChessQuest tool input schemas.
 7. Added probe/prompt regressions for no legal-list leak, no answer leak, no concrete move anchoring, and SAN/checkmate notation rejection.
 
+Follow-up from live probes:
+
+1. `puzzle-probe --trials 5 --presentation ascii` now rotates across multiple built-in single-answer puzzles instead of repeating Fools Mate five times.
+2. Legal-action probes include public piece inventories and require origin/destination fields so the host can diagnose whether failures are board-binding, own-piece destination, blocked-slider, king-capture, or generic legality failures.
+3. The legal-action prompt intentionally withholds legal moves. Live runs show this is a real actor/solver probe, not a linter: Gemini Flash still misses some scrambled positions by choosing plausible but illegal attacking/development moves.
+4. Do not keep padding the legal-action prompt indefinitely. If a model cannot choose a legal move from public board state without a legal list, that is a useful probe result.
+
 ## Recommended Next Implementation Order
 
 Do this order:

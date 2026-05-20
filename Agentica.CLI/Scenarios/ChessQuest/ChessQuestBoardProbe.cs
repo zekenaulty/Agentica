@@ -800,7 +800,10 @@ public sealed class ChessQuestBoardProbeRunner
 
 public sealed record ChessQuestMoveProbeAnswer(
     string Move,
-    string? PublicReason = null);
+    string? PublicReason = null,
+    string? OriginSquare = null,
+    string? DestinationSquare = null,
+    string? Piece = null);
 
 public sealed record ChessQuestLegalActionProbeTrial(
     int TrialNumber,
@@ -911,6 +914,8 @@ public sealed class ChessQuestLegalActionProbeRunner
         ChessQuestLegalActionProbeTrial trial,
         ChessQuestBoardProbePresentation presentation)
     {
+        var ownPieceInventory = BuildPieceInventory(trial.Fen, trial.SideToMove);
+        var allPieceInventory = BuildPieceInventory(trial.Fen);
         var boardSection = presentation is ChessQuestBoardProbePresentation.Ascii or ChessQuestBoardProbePresentation.Both
             ? $"""
 
@@ -931,16 +936,32 @@ public sealed class ChessQuestLegalActionProbeRunner
             $$"""
             You are {{trial.SideToMove}} to move. Choose one valid legal move from the supplied current board.
             You are not given the legal move list. The host will verify legality after your answer.
-            Ground the answer in the board: identify the side to move, locate that side's pieces, consider how those pieces legally move, and account for check restrictions.
+            This is a scrambled game position, not necessarily a normal opening setup.
+            Ground the answer in the board: identify the side to move, choose an origin square currently occupied by one of that side's pieces, consider how that exact piece legally moves, and account for check restrictions.
+            Your candidate move's origin square must appear in this current-piece list:
+            {{ownPieceInventory}}
+            Current public piece inventory for both sides:
+            {{allPieceInventory}}
             Do not use a default opening move unless it is legal in this exact position.
+            Do not assume the king is on its starting square. Do not move from an empty square or from a square occupied by the opponent.
+            Do not land on a square occupied by your own piece.
+            Do not choose a move whose destination square contains the opposing king; kings are checked or checkmated, never captured.
+            For knight moves, the knight may jump over pieces, but the destination square still cannot contain your own piece.
+            For rooks, bishops, and queens, every square between origin and destination must be empty.
+            This probe grades legal move validity, not strategic quality. Any legal move passes.
+            Prefer an obvious simple legal move over an ambitious attack you cannot fully verify from the board. Avoid long queen, rook, or bishop moves unless every intervening square is visibly empty.
+            Castling is a special legal move. If FEN castling rights are not shown, do not infer castling rights from the board diagram alone; choose a normal non-castling move.
             The "move" value must be coordinate UCI only: origin square followed by destination square, plus a promotion letter only when promoting.
             Do not use SAN, piece letters, capture markers, check symbols, or checkmate symbols.
             {{boardSection}}
             {{fenSection}}
 
             Return JSON only with fields:
+            - originSquare: the occupied square of the piece you are moving
+            - piece: the piece type on originSquare
+            - destinationSquare: the destination square
             - move: one coordinate UCI move string
-            - publicReason: one short public reason grounded in the current board
+            - publicReason: one short public reason grounded in the current board; do not describe the final move as illegal
             """;
     }
 
@@ -971,6 +992,40 @@ public sealed class ChessQuestLegalActionProbeRunner
             return Failure(trial, rawResponse, $"invalid_uci_format: '{move}' is not coordinate UCI");
         }
 
+        if (!string.IsNullOrWhiteSpace(answer.OriginSquare) &&
+            !string.Equals(answer.OriginSquare.Trim(), move[..2], StringComparison.OrdinalIgnoreCase))
+        {
+            return Failure(trial, rawResponse, $"origin_mismatch: originSquare '{answer.OriginSquare}' does not match move origin '{move[..2]}'");
+        }
+
+        if (!string.IsNullOrWhiteSpace(answer.DestinationSquare) &&
+            !string.Equals(answer.DestinationSquare.Trim(), move.Substring(2, 2), StringComparison.OrdinalIgnoreCase))
+        {
+            return Failure(trial, rawResponse, $"destination_mismatch: destinationSquare '{answer.DestinationSquare}' does not match move destination '{move.Substring(2, 2)}'");
+        }
+
+        if (TryGetPieceAt(trial.Fen, move[..2]) is not { } originPiece ||
+            originPiece.Color != trial.SideToMove)
+        {
+            return Failure(trial, rawResponse, $"origin_square_not_owned: '{move[..2]}' is not occupied by a {trial.SideToMove} piece");
+        }
+
+        var destinationPiece = TryGetPieceAt(trial.Fen, move.Substring(2, 2));
+        if (destinationPiece is not null && destinationPiece.Color == trial.SideToMove)
+        {
+            return Failure(trial, rawResponse, $"destination_occupied_by_own_piece: '{move.Substring(2, 2)}' is occupied by a {trial.SideToMove} piece");
+        }
+
+        if (destinationPiece is { Name: "king" })
+        {
+            return Failure(trial, rawResponse, $"destination_is_opponent_king: '{move.Substring(2, 2)}' contains the opposing king");
+        }
+
+        if (TryGetSlidingPathBlock(trial.Fen, move) is { } blockedSquare)
+        {
+            return Failure(trial, rawResponse, $"path_blocked_by_piece: sliding move '{move}' is blocked at '{blockedSquare}'");
+        }
+
         var passed = trial.LegalMoves.Contains(move, StringComparer.Ordinal);
         return new ChessQuestLegalActionProbeTrialResult(
             TrialNumber: trial.TrialNumber,
@@ -996,7 +1051,7 @@ public sealed class ChessQuestLegalActionProbeRunner
                         """
                         You are being tested as a chess actor. Solve from the supplied public board state only.
                         Choose one legal coordinate-UCI move for the side to move. Do not ask for or assume a legal move list.
-                        Read the current board instead of using opening-pattern defaults. Return only the requested JSON object.
+                        Read the current board instead of using opening-pattern, king-safety, or castling defaults. Return only the requested JSON object.
                         """),
                     new LlmMessage(
                         LlmMessageRole.User,
@@ -1035,10 +1090,13 @@ public sealed class ChessQuestLegalActionProbeRunner
         {
           "type": "object",
           "properties": {
+            "originSquare": { "type": "string" },
+            "piece": { "type": "string" },
+            "destinationSquare": { "type": "string" },
             "move": { "type": "string" },
             "publicReason": { "type": "string" }
           },
-          "required": ["move"]
+          "required": ["originSquare", "piece", "destinationSquare", "move"]
         }
         """;
 
@@ -1061,7 +1119,145 @@ public sealed class ChessQuestLegalActionProbeRunner
         return normalized.Length == 4 ||
             normalized[4] is 'q' or 'r' or 'b' or 'n';
     }
+
+    internal static string BuildPieceInventory(string fen, ChessQuestColor? colorFilter = null)
+    {
+        var pieces = EnumeratePieces(fen)
+            .Where(piece => colorFilter is null || piece.Color == colorFilter)
+            .GroupBy(piece => piece.Color)
+            .OrderBy(group => group.Key == ChessQuestColor.White ? 0 : 1)
+            .Select(group =>
+            {
+                var items = group
+                    .GroupBy(piece => piece.Name)
+                    .OrderBy(grouped => PieceSortKey(grouped.Key))
+                    .Select(grouped => $"{Pluralize(grouped.Key)} {string.Join(",", grouped.Select(piece => piece.Square))}");
+                return $"{group.Key}: {string.Join("; ", items)}";
+            });
+
+        return string.Join(Environment.NewLine, pieces);
+    }
+
+    internal static ChessQuestProbePiece? TryGetPieceAt(string fen, string square) =>
+        EnumeratePieces(fen).FirstOrDefault(piece => string.Equals(piece.Square, square, StringComparison.OrdinalIgnoreCase));
+
+    internal static string? TryGetSlidingPathBlock(string fen, string move)
+    {
+        if (move.Length < 4 || TryGetPieceAt(fen, move[..2]) is not { } originPiece)
+        {
+            return null;
+        }
+
+        if (originPiece.Name is not ("queen" or "rook" or "bishop"))
+        {
+            return null;
+        }
+
+        var fromFile = move[0] - 'a';
+        var fromRank = move[1] - '1';
+        var toFile = move[2] - 'a';
+        var toRank = move[3] - '1';
+        var fileDelta = toFile - fromFile;
+        var rankDelta = toRank - fromRank;
+        var straight = fileDelta == 0 || rankDelta == 0;
+        var diagonal = Math.Abs(fileDelta) == Math.Abs(rankDelta);
+
+        var validSlidingGeometry = originPiece.Name switch
+        {
+            "rook" => straight,
+            "bishop" => diagonal,
+            "queen" => straight || diagonal,
+            _ => false
+        };
+
+        if (!validSlidingGeometry)
+        {
+            return null;
+        }
+
+        var fileStep = Math.Sign(fileDelta);
+        var rankStep = Math.Sign(rankDelta);
+        var file = fromFile + fileStep;
+        var rank = fromRank + rankStep;
+        while (file != toFile || rank != toRank)
+        {
+            var square = $"{(char)('a' + file)}{rank + 1}";
+            if (TryGetPieceAt(fen, square) is not null)
+            {
+                return square;
+            }
+
+            file += fileStep;
+            rank += rankStep;
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<ChessQuestProbePiece> EnumeratePieces(string fen)
+    {
+        var board = fen.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
+        var pieces = new List<ChessQuestProbePiece>();
+        var rank = 8;
+        var file = 0;
+        foreach (var symbol in board)
+        {
+            if (symbol == '/')
+            {
+                rank--;
+                file = 0;
+                continue;
+            }
+
+            if (char.IsDigit(symbol))
+            {
+                file += symbol - '0';
+                continue;
+            }
+
+            var color = char.IsUpper(symbol) ? ChessQuestColor.White : ChessQuestColor.Black;
+            var square = $"{(char)('a' + file)}{rank}";
+            pieces.Add(new ChessQuestProbePiece(color, PieceName(symbol), square));
+            file++;
+        }
+
+        return pieces;
+    }
+
+    private static string PieceName(char symbol) =>
+        char.ToLowerInvariant(symbol) switch
+        {
+            'k' => "king",
+            'q' => "queen",
+            'r' => "rook",
+            'b' => "bishop",
+            'n' => "knight",
+            'p' => "pawn",
+            _ => "piece"
+        };
+
+    private static int PieceSortKey(string piece) =>
+        piece switch
+        {
+            "king" => 0,
+            "queen" => 1,
+            "rook" => 2,
+            "bishop" => 3,
+            "knight" => 4,
+            "pawn" => 5,
+            _ => 6
+        };
+
+    private static string Pluralize(string piece) =>
+        piece == "king" ? "king" :
+        piece == "queen" ? "queen" :
+        piece + "s";
 }
+
+internal sealed record ChessQuestProbePiece(
+    ChessQuestColor Color,
+    string Name,
+    string Square);
 
 public sealed record ChessQuestPuzzleProbeTrial(
     int TrialNumber,
@@ -1106,11 +1302,43 @@ public sealed class ChessQuestPuzzleProbeRunner
         new(
             TrialNumber: 1,
             PuzzleId: "fools_mate_black_mate_in_one",
-            Objective: "Find the single UCI move for Black that checkmates White.",
+            Objective: "Find the single coordinate-UCI move for Black that checkmates White.",
             Fen: "rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq g3 0 2",
             BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen("rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq g3 0 2"),
             AgentColor: ChessQuestColor.Black,
-            AcceptedMoves: ["d8h4"])
+            AcceptedMoves: ["d8h4"]),
+        new(
+            TrialNumber: 1,
+            PuzzleId: "white_king_captures_queen",
+            Objective: "Find the only coordinate-UCI move for White that captures the undefended black queen.",
+            Fen: "4k3/8/8/8/8/8/4q3/4K3 w - - 0 1",
+            BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen("4k3/8/8/8/8/8/4q3/4K3 w - - 0 1"),
+            AgentColor: ChessQuestColor.White,
+            AcceptedMoves: ["e1e2"]),
+        new(
+            TrialNumber: 1,
+            PuzzleId: "white_promotes_to_queen",
+            Objective: "Find the coordinate-UCI move for White that promotes the pawn to a queen.",
+            Fen: "4k3/P7/8/8/8/8/8/4K3 w - - 0 1",
+            BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen("4k3/P7/8/8/8/8/8/4K3 w - - 0 1"),
+            AgentColor: ChessQuestColor.White,
+            AcceptedMoves: ["a7a8q"]),
+        new(
+            TrialNumber: 1,
+            PuzzleId: "black_rook_captures_queen",
+            Objective: "Find the only coordinate-UCI move for Black that captures the undefended white queen.",
+            Fen: "r3k3/8/8/8/8/8/8/Q3K3 b - - 0 1",
+            BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen("r3k3/8/8/8/8/8/8/Q3K3 b - - 0 1"),
+            AgentColor: ChessQuestColor.Black,
+            AcceptedMoves: ["a8a1"]),
+        new(
+            TrialNumber: 1,
+            PuzzleId: "black_promotes_to_queen",
+            Objective: "Find the coordinate-UCI move for Black that promotes the pawn to a queen.",
+            Fen: "4k3/8/8/8/8/8/p7/4K3 b - - 0 1",
+            BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen("4k3/8/8/8/8/8/p7/4K3 b - - 0 1"),
+            AgentColor: ChessQuestColor.Black,
+            AcceptedMoves: ["a2a1q"])
     ];
 
     private readonly ILlmClient _client;
@@ -1150,6 +1378,7 @@ public sealed class ChessQuestPuzzleProbeRunner
         ChessQuestPuzzleProbeTrial trial,
         ChessQuestBoardProbePresentation presentation)
     {
+        var pieceInventory = ChessQuestLegalActionProbeRunner.BuildPieceInventory(trial.Fen);
         var boardSection = presentation is ChessQuestBoardProbePresentation.Ascii or ChessQuestBoardProbePresentation.Both
             ? $"""
 
@@ -1172,8 +1401,12 @@ public sealed class ChessQuestPuzzleProbeRunner
             Role: {{trial.AgentColor}}
             Objective: {{trial.Objective}}
             There is exactly one accepted answer for this probe.
-            Solve the puzzle from the board state. Identify the moving side, candidate checking moves, the opponent king's legal escapes, captures, and blocks.
+            Solve the puzzle from the board state. Identify the moving side, select an origin square currently occupied by that side, and aim at the stated objective.
+            For checkmate objectives, inspect candidate checking moves and the opponent king's legal escapes, captures, and blocks.
+            Current public piece inventory:
+            {{pieceInventory}}
             Return the best move that satisfies the objective, not a random legal move.
+            The returned JSON must describe your final chosen answer, not a rejected candidate.
             The "move" value must be coordinate UCI only: origin square followed by destination square, plus a promotion letter only when promoting.
             Do not use SAN, piece letters, capture markers, check symbols, or checkmate symbols.
             If you intend a queen, rook, bishop, knight, king, or pawn move, encode the origin and destination squares, not the piece name.
@@ -1181,6 +1414,9 @@ public sealed class ChessQuestPuzzleProbeRunner
             {{fenSection}}
 
             Return JSON only with fields:
+            - originSquare: the occupied square of the piece you are moving
+            - piece: the piece type on originSquare
+            - destinationSquare: the destination square
             - move: the single coordinate UCI move that solves the puzzle
             - publicReason: one short public reason grounded in the current board
             """;
@@ -1213,6 +1449,40 @@ public sealed class ChessQuestPuzzleProbeRunner
             return Failure(trial, rawResponse, $"invalid_uci_format: '{move}' is not coordinate UCI");
         }
 
+        if (!string.IsNullOrWhiteSpace(answer.OriginSquare) &&
+            !string.Equals(answer.OriginSquare.Trim(), move[..2], StringComparison.OrdinalIgnoreCase))
+        {
+            return Failure(trial, rawResponse, $"origin_mismatch: originSquare '{answer.OriginSquare}' does not match move origin '{move[..2]}'");
+        }
+
+        if (!string.IsNullOrWhiteSpace(answer.DestinationSquare) &&
+            !string.Equals(answer.DestinationSquare.Trim(), move.Substring(2, 2), StringComparison.OrdinalIgnoreCase))
+        {
+            return Failure(trial, rawResponse, $"destination_mismatch: destinationSquare '{answer.DestinationSquare}' does not match move destination '{move.Substring(2, 2)}'");
+        }
+
+        if (ChessQuestLegalActionProbeRunner.TryGetPieceAt(trial.Fen, move[..2]) is not { } originPiece ||
+            originPiece.Color != trial.AgentColor)
+        {
+            return Failure(trial, rawResponse, $"origin_square_not_owned: '{move[..2]}' is not occupied by a {trial.AgentColor} piece");
+        }
+
+        var destinationPiece = ChessQuestLegalActionProbeRunner.TryGetPieceAt(trial.Fen, move.Substring(2, 2));
+        if (destinationPiece is not null && destinationPiece.Color == trial.AgentColor)
+        {
+            return Failure(trial, rawResponse, $"destination_occupied_by_own_piece: '{move.Substring(2, 2)}' is occupied by a {trial.AgentColor} piece");
+        }
+
+        if (destinationPiece is { Name: "king" })
+        {
+            return Failure(trial, rawResponse, $"destination_is_opponent_king: '{move.Substring(2, 2)}' contains the opposing king");
+        }
+
+        if (ChessQuestLegalActionProbeRunner.TryGetSlidingPathBlock(trial.Fen, move) is { } blockedSquare)
+        {
+            return Failure(trial, rawResponse, $"path_blocked_by_piece: sliding move '{move}' is blocked at '{blockedSquare}'");
+        }
+
         var rules = new GeraChessRulesEngine(trial.Fen);
         var legal = rules.ListLegalMoves().Any(legalMove => legalMove.Uci == move);
         var accepted = legal && trial.AcceptedMoves.Contains(move, StringComparer.Ordinal);
@@ -1234,6 +1504,8 @@ public sealed class ChessQuestPuzzleProbeRunner
 
     public static ChessQuestPuzzleProbeTrial BuiltInPuzzle(string puzzleId = "fools_mate_black_mate_in_one") =>
         BuiltInPuzzles.Single(puzzle => string.Equals(puzzle.PuzzleId, puzzleId, StringComparison.Ordinal));
+
+    internal static IReadOnlyList<ChessQuestPuzzleProbeTrial> BuiltInPuzzlesForTests() => BuiltInPuzzles;
 
     private async Task<ChessQuestPuzzleProbeTrialResult> RunTrialAsync(
         ChessQuestPuzzleProbeTrial trial,

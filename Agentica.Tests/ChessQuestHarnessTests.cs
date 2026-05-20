@@ -984,6 +984,13 @@ public sealed class ChessQuestHarnessTests
         Assert.True(result.Passed);
         Assert.Contains("You are not given the legal move list", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Ground the answer in the board", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("origin square must appear", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Do not assume the king is on its starting square", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("do not infer castling rights", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Do not land on a square occupied by your own piece", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("grades legal move validity, not strategic quality", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Any legal move passes", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Avoid long queen, rook, or bishop moves", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Do not use a default opening move", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("coordinate UCI", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Legal moves:", prompt, StringComparison.OrdinalIgnoreCase);
@@ -1006,6 +1013,82 @@ public sealed class ChessQuestHarnessTests
 
         Assert.False(result.Passed);
         Assert.Contains("invalid_uci_format", result.FailureReason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ChessQuest_legal_action_probe_flags_own_piece_destination()
+    {
+        var rules = new GeraChessRulesEngine(StartFen);
+        var trial = new ChessQuestLegalActionProbeTrial(
+            TrialNumber: 1,
+            Seed: 0,
+            Fen: StartFen,
+            BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen(StartFen),
+            SideToMove: ChessQuestColor.White,
+            LegalMoves: rules.ListLegalMoves().Select(move => move.Uci).ToArray());
+
+        var result = ChessQuestLegalActionProbeRunner.Validate(
+            trial,
+            JsonSerializer.Serialize(new ChessQuestMoveProbeAnswer(
+                "e1d1",
+                "Move the king onto the queen square.",
+                OriginSquare: "e1",
+                DestinationSquare: "d1",
+                Piece: "king")));
+
+        Assert.False(result.Passed);
+        Assert.Contains("destination_occupied_by_own_piece", result.FailureReason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ChessQuest_legal_action_probe_flags_blocked_sliding_path()
+    {
+        var rules = new GeraChessRulesEngine(StartFen);
+        var trial = new ChessQuestLegalActionProbeTrial(
+            TrialNumber: 1,
+            Seed: 0,
+            Fen: StartFen,
+            BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen(StartFen),
+            SideToMove: ChessQuestColor.White,
+            LegalMoves: rules.ListLegalMoves().Select(move => move.Uci).ToArray());
+
+        var result = ChessQuestLegalActionProbeRunner.Validate(
+            trial,
+            JsonSerializer.Serialize(new ChessQuestMoveProbeAnswer(
+                "d1h5",
+                "Move the queen through the blocked diagonal.",
+                OriginSquare: "d1",
+                DestinationSquare: "h5",
+                Piece: "queen")));
+
+        Assert.False(result.Passed);
+        Assert.Contains("path_blocked_by_piece", result.FailureReason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ChessQuest_legal_action_probe_flags_attempted_king_capture()
+    {
+        const string fen = "8/4k3/8/8/8/B7/8/4K3 w - - 0 1";
+        var rules = new GeraChessRulesEngine(fen);
+        var trial = new ChessQuestLegalActionProbeTrial(
+            TrialNumber: 1,
+            Seed: 0,
+            Fen: fen,
+            BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen(fen),
+            SideToMove: ChessQuestColor.White,
+            LegalMoves: rules.ListLegalMoves().Select(move => move.Uci).ToArray());
+
+        var result = ChessQuestLegalActionProbeRunner.Validate(
+            trial,
+            JsonSerializer.Serialize(new ChessQuestMoveProbeAnswer(
+                "a3e7",
+                "Capture the king.",
+                OriginSquare: "a3",
+                DestinationSquare: "e7",
+                Piece: "bishop")));
+
+        Assert.False(result.Passed);
+        Assert.Contains("destination_is_opponent_king", result.FailureReason, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1033,11 +1116,37 @@ public sealed class ChessQuestHarnessTests
 
         Assert.Contains("Solve the puzzle from the board state", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Return the best move", prompt, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("candidate checking moves", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("For checkmate objectives", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Current public piece inventory", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("coordinate UCI", prompt, StringComparison.OrdinalIgnoreCase);
         foreach (var acceptedMove in trial.AcceptedMoves)
         {
             Assert.DoesNotContain(acceptedMove, prompt, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public void ChessQuest_puzzle_probe_rotates_multiple_built_in_puzzles()
+    {
+        var puzzles = ChessQuestPuzzleProbeRunner.BuiltInPuzzlesForTests();
+
+        Assert.True(puzzles.Count >= 3);
+        Assert.Equal(puzzles.Count, puzzles.Select(puzzle => puzzle.PuzzleId).Distinct(StringComparer.Ordinal).Count());
+        Assert.Contains(puzzles, puzzle => puzzle.PuzzleId != "fools_mate_black_mate_in_one");
+    }
+
+    [Fact]
+    public void ChessQuest_puzzle_probe_built_in_answers_are_legal()
+    {
+        foreach (var puzzle in ChessQuestPuzzleProbeRunner.BuiltInPuzzlesForTests())
+        {
+            var rules = new GeraChessRulesEngine(puzzle.Fen);
+            var legalMoves = rules.ListLegalMoves().Select(move => move.Uci).ToHashSet(StringComparer.Ordinal);
+
+            foreach (var acceptedMove in puzzle.AcceptedMoves)
+            {
+                Assert.Contains(acceptedMove, legalMoves);
+            }
         }
     }
 
