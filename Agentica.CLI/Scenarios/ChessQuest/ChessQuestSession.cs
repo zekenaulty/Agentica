@@ -656,8 +656,19 @@ public sealed class ChessQuestSession
         ToolInvocation invocation,
         string move)
     {
-        if (!invocation.Input.TryGetValue("turnIntent", out var value) ||
-            value is not IReadOnlyDictionary<string, object?> intent)
+        if (!invocation.Input.TryGetValue("turnIntent", out var value))
+        {
+            return null;
+        }
+
+        var intent = value switch
+        {
+            IReadOnlyDictionary<string, object?> readOnly => readOnly,
+            IDictionary<string, object?> dictionary => dictionary
+                .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal),
+            _ => null
+        };
+        if (intent is null)
         {
             return null;
         }
@@ -665,7 +676,8 @@ public sealed class ChessQuestSession
         var selected = intent.TryGetValue("selectedMove", out var selectedValue)
             ? Convert.ToString(selectedValue)
             : null;
-        if (!string.Equals(selected?.Trim(), move.Trim(), StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(selected) &&
+            !string.Equals(selected.Trim(), move.Trim(), StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
@@ -678,6 +690,7 @@ public sealed class ChessQuestSession
                 : pair.Value;
         }
 
+        sanitized["selectedMove"] = move.Trim().ToLowerInvariant();
         return sanitized;
     }
 }

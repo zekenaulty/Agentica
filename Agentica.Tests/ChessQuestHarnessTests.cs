@@ -361,6 +361,54 @@ public sealed class ChessQuestHarnessTests
     }
 
     [Fact]
+    public async Task ChessQuest_play_move_accepts_turn_intent_without_duplicate_selected_move_when_top_level_move_is_valid()
+    {
+        var session = CreateSession(opponentMoves: ["e7e5"]);
+        var legalMoves = await InvokeAsync(session, ChessQuestToolIds.ListLegalMoves, new Dictionary<string, object?>());
+        var legalMoveObservationId = Assert.IsType<string>(legalMoves.Receipt.Data["legalMoveObservationId"]);
+        var turnIntent = TurnIntent("white", "e2e4", "Use a legal opening move and keep playing for a win.");
+        turnIntent.Remove("selectedMove");
+
+        var result = await InvokeAsync(
+            session,
+            ChessQuestToolIds.PlayMove,
+            new Dictionary<string, object?>
+            {
+                ["move"] = "e2e4",
+                ["legalMoveObservationId"] = legalMoveObservationId,
+                ["turnIntent"] = turnIntent
+            });
+
+        Assert.Equal(ReceiptStatus.Succeeded, result.Receipt.Status);
+        Assert.Equal("e2e4", result.Receipt.Data["agentMove"]);
+        var acceptedIntent = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(result.Receipt.Data["turnIntent"]);
+        Assert.Equal("e2e4", acceptedIntent["selectedMove"]);
+    }
+
+    [Fact]
+    public async Task ChessQuest_play_move_rejects_turn_intent_selected_move_that_conflicts_with_top_level_move()
+    {
+        var session = CreateSession();
+        var legalMoves = await InvokeAsync(session, ChessQuestToolIds.ListLegalMoves, new Dictionary<string, object?>());
+        var legalMoveObservationId = Assert.IsType<string>(legalMoves.Receipt.Data["legalMoveObservationId"]);
+        var turnIntent = TurnIntent("white", "d2d4", "Attempt a mismatched turn intent.");
+
+        var result = await InvokeAsync(
+            session,
+            ChessQuestToolIds.PlayMove,
+            new Dictionary<string, object?>
+            {
+                ["move"] = "e2e4",
+                ["legalMoveObservationId"] = legalMoveObservationId,
+                ["turnIntent"] = turnIntent
+            });
+
+        Assert.Equal(ReceiptStatus.Refused, result.Receipt.Status);
+        Assert.Equal("missing_turn_intent", result.Receipt.Data["reason"]);
+        Assert.Equal(StartFen, session.CurrentState.Fen);
+    }
+
+    [Fact]
     public async Task ChessQuest_play_move_rejects_move_absent_from_bound_legal_observation()
     {
         var session = CreateSession();

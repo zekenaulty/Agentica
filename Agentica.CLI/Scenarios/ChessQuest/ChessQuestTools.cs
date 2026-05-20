@@ -74,7 +74,7 @@ public static class ChessQuestTools
                     "turnIntent",
                     ToolInputValueType.Object,
                     Required: true,
-                    Description: "Short public decision declaration. Must include selectedMove matching move and should separate goal, evidence, hypothesis, riskCheck, and claimLevel. Do not include hidden chain-of-thought or unverified checkmate/completion claims."))));
+                    Description: "Short public decision declaration. The top-level move field is authoritative; selectedMove may be included only if it matches move. Should separate goal, evidence, hypothesis, riskCheck, and claimLevel. Do not include hidden chain-of-thought or unverified checkmate/completion claims."))));
         registrations.Add(Register(ChessQuestToolIds.CompleteObjective, "ChessQuest Complete Objective", ToolKind.Action, ToolEffect.WritesLocalState, dispatcher));
 
         return ToolCatalog.Create(registrations.ToArray());
