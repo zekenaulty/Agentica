@@ -966,12 +966,91 @@ public sealed class ChessQuestHarnessTests
     }
 
     [Fact]
+    public void ChessQuest_board_probe_options_parse_state_probe_kind()
+    {
+        var options = ChessQuestBoardProbeOptions.Parse(
+            ["--probe-kind", "stacked"],
+            "test-model");
+
+        Assert.True(options.IsValid);
+        Assert.Equal(ChessQuestStateProbeKind.Stacked, options.StateProbeKind);
+    }
+
+    [Fact]
     public void ChessQuest_board_probe_disables_thinking_by_default()
     {
         var options = ChessQuestBoardProbeOptions.Parse([], "test-model");
 
         Assert.True(options.IsValid);
         Assert.Equal("off", options.ThinkingBudget);
+    }
+
+    [Fact]
+    public void ChessQuest_state_probe_validates_stacked_board_facts()
+    {
+        var trial = ChessQuestStateProbeRunner.CreateTrial(
+            seed: 9091,
+            trialNumber: 1,
+            scramblePlies: 14,
+            kind: ChessQuestStateProbeKind.Stacked);
+
+        var result = ChessQuestStateProbeRunner.Validate(
+            trial,
+            JsonSerializer.Serialize(new
+            {
+                legality = new
+                {
+                    isLegal = trial.LegalityExpected,
+                    publicReason = "Classify the supplied move against the current board."
+                },
+                capture = new
+                {
+                    isCapture = trial.CaptureExpected,
+                    capturedPiece = trial.CapturedPieceExpected,
+                    publicReason = "Classify capture truth from the destination square."
+                },
+                check = new
+                {
+                    sideToMoveInCheck = trial.SideToMoveInCheckExpected,
+                    publicReason = "Read current check status."
+                },
+                material = new
+                {
+                    whiteMaterial = trial.WhiteMaterialExpected,
+                    blackMaterial = trial.BlackMaterialExpected,
+                    materialDeltaForSideToMove = trial.MaterialDeltaForSideToMoveExpected,
+                    publicReason = "Count material points."
+                },
+                phaseSelection = new
+                {
+                    phase = trial.PhaseExpected,
+                    publicReason = "Select the host-defined phase label."
+                }
+            }));
+
+        Assert.True(result.Passed);
+    }
+
+    [Fact]
+    public void ChessQuest_state_probe_prompt_stacks_multiple_questions_without_legal_move_list()
+    {
+        var trial = ChessQuestStateProbeRunner.CreateTrial(
+            seed: 9109,
+            trialNumber: 1,
+            scramblePlies: 14,
+            kind: ChessQuestStateProbeKind.Stacked);
+
+        var prompt = ChessQuestStateProbeRunner.BuildPrompt(
+            trial,
+            ChessQuestBoardProbePresentation.Ascii);
+
+        Assert.Contains("Answer all checks from this same board", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(trial.LegalityMove, prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(trial.CaptureMove, prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("material point totals", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("phase label", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Legal moves:", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(string.Join(",", trial.LegalMoves), prompt, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

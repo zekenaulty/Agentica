@@ -26,6 +26,16 @@ public enum ChessQuestPuzzleProbeSource
     Mixed
 }
 
+public enum ChessQuestStateProbeKind
+{
+    Legality,
+    Capture,
+    Check,
+    Material,
+    Phase,
+    Stacked
+}
+
 public sealed record ChessQuestBoardProbeOptions(
     int Trials,
     int Seed,
@@ -33,6 +43,7 @@ public sealed record ChessQuestBoardProbeOptions(
     ChessQuestBoardProbePresentation Presentation,
     ChessQuestBoardProbeTargetMode TargetMode,
     ChessQuestPuzzleProbeSource PuzzleSource,
+    ChessQuestStateProbeKind StateProbeKind,
     string ModelId,
     string? ThinkingBudget,
     bool IncludeThoughts,
@@ -54,6 +65,7 @@ public sealed record ChessQuestBoardProbeOptions(
         var presentation = ChessQuestBoardProbePresentation.Ascii;
         var targetMode = ChessQuestBoardProbeTargetMode.Occupied;
         var puzzleSource = ChessQuestPuzzleProbeSource.BuiltIn;
+        var stateProbeKind = ChessQuestStateProbeKind.Stacked;
         var modelId = defaultModelId;
         string? thinkingBudget = "off";
         var includeThoughts = false;
@@ -131,6 +143,20 @@ public sealed record ChessQuestBoardProbeOptions(
 
                     break;
 
+                case "--probe-kind":
+                case "--kind":
+                    if (!TryReadValue(args, ref index, out var stateProbeKindValue))
+                    {
+                        return Invalid("Missing value for --probe-kind.", defaultModelId);
+                    }
+
+                    if (!TryParseStateProbeKind(stateProbeKindValue, out stateProbeKind))
+                    {
+                        return Invalid($"Unknown state-probe kind '{stateProbeKindValue}'.", defaultModelId);
+                    }
+
+                    break;
+
                 case "--model":
                     if (!TryReadValue(args, ref index, out modelId))
                     {
@@ -202,6 +228,7 @@ public sealed record ChessQuestBoardProbeOptions(
             presentation,
             targetMode,
             puzzleSource,
+            stateProbeKind,
             modelId,
             thinkingBudget,
             includeThoughts,
@@ -290,6 +317,44 @@ public sealed record ChessQuestBoardProbeOptions(
         }
     }
 
+    private static bool TryParseStateProbeKind(
+        string value,
+        out ChessQuestStateProbeKind kind)
+    {
+        switch (value.Trim().ToLowerInvariant())
+        {
+            case "legality":
+            case "legal":
+            case "move-legality":
+                kind = ChessQuestStateProbeKind.Legality;
+                return true;
+            case "capture":
+            case "capture-truth":
+                kind = ChessQuestStateProbeKind.Capture;
+                return true;
+            case "check":
+            case "check-status":
+                kind = ChessQuestStateProbeKind.Check;
+                return true;
+            case "material":
+            case "material-count":
+                kind = ChessQuestStateProbeKind.Material;
+                return true;
+            case "phase":
+            case "phase-selection":
+                kind = ChessQuestStateProbeKind.Phase;
+                return true;
+            case "stacked":
+            case "all":
+            case "stress":
+                kind = ChessQuestStateProbeKind.Stacked;
+                return true;
+            default:
+                kind = ChessQuestStateProbeKind.Stacked;
+                return false;
+        }
+    }
+
     private static bool TryReadPositiveInt(
         IReadOnlyList<string> args,
         ref int index,
@@ -337,6 +402,7 @@ public sealed record ChessQuestBoardProbeOptions(
             Presentation: ChessQuestBoardProbePresentation.Ascii,
             TargetMode: ChessQuestBoardProbeTargetMode.Occupied,
             PuzzleSource: ChessQuestPuzzleProbeSource.BuiltIn,
+            StateProbeKind: ChessQuestStateProbeKind.Stacked,
             ModelId: defaultModelId,
             ThinkingBudget: null,
             IncludeThoughts: false,
@@ -454,13 +520,13 @@ public sealed class ChessQuestBoardProbeRunner
         var rules = new GeraChessRulesEngine(StartFen);
         for (var ply = 0; ply < scramblePlies; ply++)
         {
-            var legalMoves = rules.ListLegalMoves();
-            if (legalMoves.Count == 0 || rules.GetState().IsTerminal)
+            var scrambleLegalMoves = rules.ListLegalMoves();
+            if (scrambleLegalMoves.Count == 0 || rules.GetState().IsTerminal)
             {
                 break;
             }
 
-            var move = legalMoves[random.Next(legalMoves.Count)].Uci;
+            var move = scrambleLegalMoves[random.Next(scrambleLegalMoves.Count)].Uci;
             var result = rules.TryPlayMove(move);
             if (!result.Accepted)
             {
@@ -943,13 +1009,13 @@ public sealed class ChessQuestLegalActionProbeRunner
         var rules = new GeraChessRulesEngine(ChessQuestBoardProbeRunner.StartFen);
         for (var ply = 0; ply < scramblePlies; ply++)
         {
-            var legalMoves = rules.ListLegalMoves();
-            if (legalMoves.Count == 0 || rules.GetState().IsTerminal)
+            var scrambleLegalMoves = rules.ListLegalMoves();
+            if (scrambleLegalMoves.Count == 0 || rules.GetState().IsTerminal)
             {
                 break;
             }
 
-            var result = rules.TryPlayMove(legalMoves[random.Next(legalMoves.Count)].Uci);
+            var result = rules.TryPlayMove(scrambleLegalMoves[random.Next(scrambleLegalMoves.Count)].Uci);
             if (!result.Accepted)
             {
                 break;
@@ -1250,7 +1316,7 @@ public sealed class ChessQuestLegalActionProbeRunner
         return null;
     }
 
-    private static IReadOnlyList<ChessQuestProbePiece> EnumeratePieces(string fen)
+    internal static IReadOnlyList<ChessQuestProbePiece> EnumeratePieces(string fen)
     {
         var board = fen.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
         var pieces = new List<ChessQuestProbePiece>();
@@ -1314,6 +1380,728 @@ internal sealed record ChessQuestProbePiece(
     ChessQuestColor Color,
     string Name,
     string Square);
+
+public sealed record ChessQuestStateProbeTrial(
+    int TrialNumber,
+    int Seed,
+    ChessQuestStateProbeKind Kind,
+    string Fen,
+    IReadOnlyList<string> BoardLines,
+    ChessQuestColor SideToMove,
+    int Ply,
+    string LegalityMove,
+    bool LegalityExpected,
+    string CaptureMove,
+    bool CaptureExpected,
+    string CapturedPieceExpected,
+    bool SideToMoveInCheckExpected,
+    int WhiteMaterialExpected,
+    int BlackMaterialExpected,
+    int MaterialDeltaForSideToMoveExpected,
+    string PhaseExpected,
+    IReadOnlyList<string> LegalMoves);
+
+public sealed class ChessQuestStateProbeAnswer
+{
+    public bool? IsLegal { get; set; }
+    public bool? IsCapture { get; set; }
+    public string? CapturedPiece { get; set; }
+    public bool? SideToMoveInCheck { get; set; }
+    public int? WhiteMaterial { get; set; }
+    public int? BlackMaterial { get; set; }
+    public int? MaterialDeltaForSideToMove { get; set; }
+    public string? Phase { get; set; }
+    public string? PublicReason { get; set; }
+    public ChessQuestStateProbeAnswer? Legality { get; set; }
+    public ChessQuestStateProbeAnswer? Capture { get; set; }
+    public ChessQuestStateProbeAnswer? Check { get; set; }
+    public ChessQuestStateProbeAnswer? Material { get; set; }
+    public ChessQuestStateProbeAnswer? PhaseSelection { get; set; }
+}
+
+public sealed record ChessQuestStateProbeTrialResult(
+    int TrialNumber,
+    ChessQuestStateProbeKind Kind,
+    bool Passed,
+    string RawResponse,
+    IReadOnlyList<string> FailureReasons,
+    string? ProviderName = null,
+    string? ResponseModelId = null,
+    LlmFinishReason FinishReason = LlmFinishReason.Unknown,
+    LlmUsage? Usage = null,
+    IReadOnlyDictionary<string, string>? ResponseMetadata = null);
+
+public sealed record ChessQuestStateProbeSummary(
+    int Trials,
+    int Passed,
+    int Failed,
+    int Seed,
+    int ScramblePlies,
+    ChessQuestStateProbeKind Kind,
+    ChessQuestBoardProbePresentation Presentation,
+    string ModelId,
+    IReadOnlyList<ChessQuestStateProbeTrialResult> Results);
+
+public sealed class ChessQuestStateProbeRunner
+{
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true
+    };
+
+    private readonly ILlmClient _client;
+
+    public ChessQuestStateProbeRunner(ILlmClient client)
+    {
+        _client = client;
+    }
+
+    public async Task<ChessQuestStateProbeSummary> RunAsync(
+        ChessQuestBoardProbeOptions options,
+        Action<ChessQuestStateProbeTrial, ChessQuestStateProbeTrialResult>? onTrialCompleted = null,
+        CancellationToken cancellationToken = default)
+    {
+        var results = new List<ChessQuestStateProbeTrialResult>(options.Trials);
+        for (var index = 0; index < options.Trials; index++)
+        {
+            var trial = CreateTrial(
+                unchecked(options.Seed + index * 7_919),
+                index + 1,
+                options.ScramblePlies,
+                options.StateProbeKind);
+            var result = await RunTrialAsync(trial, options, cancellationToken).ConfigureAwait(false);
+            results.Add(result);
+            onTrialCompleted?.Invoke(trial, result);
+        }
+
+        return new ChessQuestStateProbeSummary(
+            Trials: results.Count,
+            Passed: results.Count(result => result.Passed),
+            Failed: results.Count(result => !result.Passed),
+            Seed: options.Seed,
+            ScramblePlies: options.ScramblePlies,
+            Kind: options.StateProbeKind,
+            Presentation: options.Presentation,
+            ModelId: options.ModelId,
+            Results: results);
+    }
+
+    public static ChessQuestStateProbeTrial CreateTrial(
+        int seed,
+        int trialNumber,
+        int scramblePlies,
+        ChessQuestStateProbeKind kind)
+    {
+        var random = new Random(seed);
+        var rules = new GeraChessRulesEngine(ChessQuestBoardProbeRunner.StartFen);
+        for (var ply = 0; ply < scramblePlies; ply++)
+        {
+            var scrambleLegalMoves = rules.ListLegalMoves();
+            if (scrambleLegalMoves.Count == 0 || rules.GetState().IsTerminal)
+            {
+                break;
+            }
+
+            var result = rules.TryPlayMove(scrambleLegalMoves[random.Next(scrambleLegalMoves.Count)].Uci);
+            if (!result.Accepted)
+            {
+                break;
+            }
+        }
+
+        var state = rules.GetState();
+        if (state.IsTerminal || rules.ListLegalMoves().Count == 0)
+        {
+            return CreateTrial(seed + 1, trialNumber, Math.Max(4, scramblePlies - 1), kind);
+        }
+
+        var fen = rules.GetFen();
+        var legalMoves = rules.ListLegalMoves().Select(move => move.Uci).ToArray();
+        var legalExpected = random.Next(2) == 0;
+        var legalityMove = legalExpected
+            ? legalMoves[random.Next(legalMoves.Length)]
+            : CreateIllegalCoordinateMove(fen, state.SideToMove, legalMoves, random);
+        legalExpected = legalMoves.Contains(legalityMove, StringComparer.Ordinal);
+
+        var captureMove = ChooseCaptureProbeMove(fen, legalMoves, random);
+        var capture = CaptureForMove(fen, captureMove);
+        var material = MaterialTotals(fen);
+        var delta = state.SideToMove == ChessQuestColor.White
+            ? material.White - material.Black
+            : material.Black - material.White;
+        var sideToMoveInCheck = rules.IsKingInCheck(state.SideToMove);
+        var phase = ExpectedPhase(
+            state.Ply,
+            sideToMoveInCheck,
+            delta,
+            legalMoves.Any(move => CaptureForMove(fen, move) is not null));
+
+        return new ChessQuestStateProbeTrial(
+            TrialNumber: trialNumber,
+            Seed: seed,
+            Kind: kind,
+            Fen: fen,
+            BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen(fen),
+            SideToMove: state.SideToMove,
+            Ply: state.Ply,
+            LegalityMove: legalityMove,
+            LegalityExpected: legalExpected,
+            CaptureMove: captureMove,
+            CaptureExpected: capture is not null,
+            CapturedPieceExpected: capture?.Piece ?? "none",
+            SideToMoveInCheckExpected: sideToMoveInCheck,
+            WhiteMaterialExpected: material.White,
+            BlackMaterialExpected: material.Black,
+            MaterialDeltaForSideToMoveExpected: delta,
+            PhaseExpected: phase,
+            LegalMoves: legalMoves);
+    }
+
+    public static string BuildPrompt(
+        ChessQuestStateProbeTrial trial,
+        ChessQuestBoardProbePresentation presentation)
+    {
+        var pieceInventory = ChessQuestLegalActionProbeRunner.BuildPieceInventory(trial.Fen);
+        var boardSection = presentation is ChessQuestBoardProbePresentation.Ascii or ChessQuestBoardProbePresentation.Both
+            ? $"""
+
+            ASCII board:
+            {string.Join(Environment.NewLine, trial.BoardLines)}
+            """
+            : string.Empty;
+
+        var fenSection = presentation is ChessQuestBoardProbePresentation.Fen or ChessQuestBoardProbePresentation.Both
+            ? $"""
+
+            FEN:
+            {trial.Fen}
+            """
+            : string.Empty;
+
+        var shared =
+            $$"""
+            You are being tested on public chess state reasoning from one current board.
+            Do not use opening defaults. Do not assume a legal move list unless it is explicitly supplied; it is not supplied here.
+            Coordinate UCI means origin square followed by destination square, plus a promotion letter only when promoting.
+            Material points are queen=9, rook=5, bishop=3, knight=3, pawn=1, king=0.
+            Phase choices are opening, tactical, defense, recovery, conversion, or endgame.
+            Phase selection is a context-engineering test: choose defense when the side to move is in check or materially behind, opening for early development, tactical for immediate forcing/capture opportunities, and conversion only with a real advantage.
+
+            Side to move: {{trial.SideToMove}}
+            Ply: {{trial.Ply}}
+            Current public piece inventory:
+            {{pieceInventory}}
+            {{boardSection}}
+            {{fenSection}}
+            """;
+
+        return trial.Kind switch
+        {
+            ChessQuestStateProbeKind.Legality =>
+                shared +
+                $$"""
+
+                Question: Is proposed move {{trial.LegalityMove}} legal for {{trial.SideToMove}} in this exact position?
+                Return JSON only with fields:
+                - isLegal: true or false
+                - publicReason: one short board-grounded reason
+                """,
+            ChessQuestStateProbeKind.Capture =>
+                shared +
+                $$"""
+
+                Question: Does proposed move {{trial.CaptureMove}} capture a piece in this exact position?
+                Return JSON only with fields:
+                - isCapture: true or false
+                - capturedPiece: "white_pawn", "black_queen", etc., or "none"
+                - publicReason: one short board-grounded reason
+                """,
+            ChessQuestStateProbeKind.Check =>
+                shared +
+                """
+
+                Question: Is the side to move currently in check?
+                Return JSON only with fields:
+                - sideToMoveInCheck: true or false
+                - publicReason: one short board-grounded reason
+                """,
+            ChessQuestStateProbeKind.Material =>
+                shared +
+                """
+
+                Question: Count current material points, excluding kings.
+                Return JSON only with fields:
+                - whiteMaterial: integer
+                - blackMaterial: integer
+                - materialDeltaForSideToMove: integer, side-to-move material minus opponent material
+                - publicReason: one short board-grounded reason
+                """,
+            ChessQuestStateProbeKind.Phase =>
+                shared +
+                """
+
+                Question: Choose the best current phase label for the side to move.
+                Return JSON only with fields:
+                - phase: one of "opening", "tactical", "defense", "recovery", "conversion", "endgame"
+                - publicReason: one short reason using only public state
+                """,
+            _ =>
+                shared +
+                $$"""
+
+                Answer all checks from this same board without changing the position:
+                1. Is proposed move {{trial.LegalityMove}} legal for {{trial.SideToMove}}?
+                2. Does proposed move {{trial.CaptureMove}} capture a piece, and if so what piece?
+                3. Is the side to move currently in check?
+                4. What are the material point totals, excluding kings?
+                5. Which phase label best fits the current side to move?
+
+                Return JSON only with fields:
+                - legality: object with isLegal and publicReason
+                - capture: object with isCapture, capturedPiece, and publicReason
+                - check: object with sideToMoveInCheck and publicReason
+                - material: object with whiteMaterial, blackMaterial, materialDeltaForSideToMove, and publicReason
+                - phaseSelection: object with phase and publicReason
+                """
+        };
+    }
+
+    public static ChessQuestStateProbeTrialResult Validate(
+        ChessQuestStateProbeTrial trial,
+        string rawResponse)
+    {
+        ChessQuestStateProbeAnswer? answer;
+        try
+        {
+            answer = JsonSerializer.Deserialize<ChessQuestStateProbeAnswer>(
+                ChessQuestBoardProbeRunner.ExtractJson(rawResponse),
+                JsonOptions);
+        }
+        catch (JsonException exception)
+        {
+            return Failure(trial, rawResponse, $"invalid_json: {exception.Message}");
+        }
+
+        if (answer is null)
+        {
+            return Failure(trial, rawResponse, "empty_answer");
+        }
+
+        var failures = new List<string>();
+        if (trial.Kind is ChessQuestStateProbeKind.Legality or ChessQuestStateProbeKind.Stacked)
+        {
+            var value = answer.Legality?.IsLegal ?? answer.IsLegal;
+            if (value is null)
+            {
+                failures.Add("missing_isLegal");
+            }
+            else if (value.Value != trial.LegalityExpected)
+            {
+                failures.Add($"legality expected {trial.LegalityExpected} for {trial.LegalityMove} got {value.Value}");
+            }
+        }
+
+        if (trial.Kind is ChessQuestStateProbeKind.Capture or ChessQuestStateProbeKind.Stacked)
+        {
+            var captureAnswer = answer.Capture ?? answer;
+            if (captureAnswer.IsCapture is null)
+            {
+                failures.Add("missing_isCapture");
+            }
+            else if (captureAnswer.IsCapture.Value != trial.CaptureExpected)
+            {
+                failures.Add($"capture expected {trial.CaptureExpected} for {trial.CaptureMove} got {captureAnswer.IsCapture.Value}");
+            }
+
+            var capturedPiece = NormalizeCapturedPiece(captureAnswer.CapturedPiece);
+            if (trial.CaptureExpected && !CapturedPieceMatches(capturedPiece, trial.CapturedPieceExpected))
+            {
+                failures.Add($"capturedPiece expected {trial.CapturedPieceExpected} got {capturedPiece}");
+            }
+
+            if (!trial.CaptureExpected && capturedPiece is not "none")
+            {
+                failures.Add($"capturedPiece expected none got {capturedPiece}");
+            }
+        }
+
+        if (trial.Kind is ChessQuestStateProbeKind.Check or ChessQuestStateProbeKind.Stacked)
+        {
+            var value = answer.Check?.SideToMoveInCheck ?? answer.SideToMoveInCheck;
+            if (value is null)
+            {
+                failures.Add("missing_sideToMoveInCheck");
+            }
+            else if (value.Value != trial.SideToMoveInCheckExpected)
+            {
+                failures.Add($"sideToMoveInCheck expected {trial.SideToMoveInCheckExpected} got {value.Value}");
+            }
+        }
+
+        if (trial.Kind is ChessQuestStateProbeKind.Material or ChessQuestStateProbeKind.Stacked)
+        {
+            var materialAnswer = answer.Material ?? answer;
+            if (materialAnswer.WhiteMaterial != trial.WhiteMaterialExpected)
+            {
+                failures.Add($"whiteMaterial expected {trial.WhiteMaterialExpected} got {materialAnswer.WhiteMaterial?.ToString() ?? "null"}");
+            }
+
+            if (materialAnswer.BlackMaterial != trial.BlackMaterialExpected)
+            {
+                failures.Add($"blackMaterial expected {trial.BlackMaterialExpected} got {materialAnswer.BlackMaterial?.ToString() ?? "null"}");
+            }
+
+            if (materialAnswer.MaterialDeltaForSideToMove != trial.MaterialDeltaForSideToMoveExpected)
+            {
+                failures.Add($"materialDeltaForSideToMove expected {trial.MaterialDeltaForSideToMoveExpected} got {materialAnswer.MaterialDeltaForSideToMove?.ToString() ?? "null"}");
+            }
+        }
+
+        if (trial.Kind is ChessQuestStateProbeKind.Phase or ChessQuestStateProbeKind.Stacked)
+        {
+            var phase = NormalizePhase(answer.PhaseSelection?.Phase ?? answer.Phase);
+            if (string.IsNullOrWhiteSpace(phase))
+            {
+                failures.Add("missing_phase");
+            }
+            else if (!string.Equals(phase, trial.PhaseExpected, StringComparison.OrdinalIgnoreCase))
+            {
+                failures.Add($"phase expected {trial.PhaseExpected} got {phase}");
+            }
+        }
+
+        return new ChessQuestStateProbeTrialResult(
+            TrialNumber: trial.TrialNumber,
+            Kind: trial.Kind,
+            Passed: failures.Count == 0,
+            RawResponse: rawResponse,
+            FailureReasons: failures);
+    }
+
+    public static string SerializeSummary(ChessQuestStateProbeSummary summary) =>
+        JsonSerializer.Serialize(summary, JsonOptions);
+
+    private async Task<ChessQuestStateProbeTrialResult> RunTrialAsync(
+        ChessQuestStateProbeTrial trial,
+        ChessQuestBoardProbeOptions options,
+        CancellationToken cancellationToken)
+    {
+        var response = await _client.GenerateAsync(new LlmRequest(
+                options.ModelId,
+                [
+                    new LlmMessage(
+                        LlmMessageRole.System,
+                        """
+                        You are being tested on chess state reasoning from public board data.
+                        Answer only the requested JSON object. Do not use hidden analysis, opening defaults, or unstated legal move lists.
+                        """),
+                    new LlmMessage(
+                        LlmMessageRole.User,
+                        BuildPrompt(trial, options.Presentation))
+                ],
+                GenerationOptions: new LlmGenerationOptions(
+                    Temperature: 0,
+                    MaxOutputTokens: options.MaxOutputTokens,
+                    Thinking: ChessQuestBoardProbeRunner.ToThinkingOptions(options.ThinkingBudget, options.IncludeThoughts)),
+                StructuredOutput: new LlmStructuredOutputOptions(JsonSchema: StateProbeAnswerJsonSchema(trial.Kind))),
+            cancellationToken).ConfigureAwait(false);
+
+        return Validate(trial, response.StructuredJson ?? response.Text) with
+        {
+            ProviderName = response.ProviderName,
+            ResponseModelId = response.ModelId,
+            FinishReason = response.FinishReason,
+            Usage = response.Usage,
+            ResponseMetadata = response.Metadata
+        };
+    }
+
+    private static ChessQuestStateProbeTrialResult Failure(
+        ChessQuestStateProbeTrial trial,
+        string rawResponse,
+        string reason) =>
+        new(
+            TrialNumber: trial.TrialNumber,
+            Kind: trial.Kind,
+            Passed: false,
+            RawResponse: rawResponse,
+            FailureReasons: [reason]);
+
+    private static string CreateIllegalCoordinateMove(
+        string fen,
+        ChessQuestColor sideToMove,
+        IReadOnlyList<string> legalMoves,
+        Random random)
+    {
+        var ownPieces = ChessQuestLegalActionProbeRunner.EnumeratePieces(fen)
+            .Where(piece => piece.Color == sideToMove)
+            .ToArray();
+        for (var attempt = 0; attempt < 256; attempt++)
+        {
+            var origin = ownPieces[random.Next(ownPieces.Length)].Square;
+            var destination = RandomSquare(random);
+            if (string.Equals(origin, destination, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var move = origin + destination;
+            if (!legalMoves.Contains(move, StringComparer.Ordinal))
+            {
+                return move;
+            }
+        }
+
+        return ownPieces[0].Square + ownPieces[0].Square;
+    }
+
+    private static string ChooseCaptureProbeMove(
+        string fen,
+        IReadOnlyList<string> legalMoves,
+        Random random)
+    {
+        var captures = legalMoves
+            .Where(move => CaptureForMove(fen, move) is not null)
+            .ToArray();
+        var nonCaptures = legalMoves
+            .Where(move => CaptureForMove(fen, move) is null)
+            .ToArray();
+
+        if (captures.Length > 0 && (nonCaptures.Length == 0 || random.Next(2) == 0))
+        {
+            return captures[random.Next(captures.Length)];
+        }
+
+        return nonCaptures.Length > 0
+            ? nonCaptures[random.Next(nonCaptures.Length)]
+            : legalMoves[random.Next(legalMoves.Count)];
+    }
+
+    private static ChessProjectedCapture? CaptureForMove(
+        string fen,
+        string move)
+    {
+        var clone = new GeraChessRulesEngine(fen);
+        var result = clone.TryPlayMove(move);
+        return result.Accepted
+            ? result.Captures.FirstOrDefault()
+            : null;
+    }
+
+    private static (int White, int Black) MaterialTotals(string fen)
+    {
+        var white = 0;
+        var black = 0;
+        foreach (var piece in ChessQuestLegalActionProbeRunner.EnumeratePieces(fen))
+        {
+            var value = MaterialValue(piece.Name);
+            if (piece.Color == ChessQuestColor.White)
+            {
+                white += value;
+            }
+            else
+            {
+                black += value;
+            }
+        }
+
+        return (white, black);
+    }
+
+    private static int MaterialValue(string piece) =>
+        piece switch
+        {
+            "queen" => 9,
+            "rook" => 5,
+            "bishop" => 3,
+            "knight" => 3,
+            "pawn" => 1,
+            _ => 0
+        };
+
+    private static string ExpectedPhase(
+        int ply,
+        bool sideToMoveInCheck,
+        int materialDelta,
+        bool legalCaptureAvailable)
+    {
+        if (sideToMoveInCheck)
+        {
+            return "defense";
+        }
+
+        if (materialDelta <= -3)
+        {
+            return "recovery";
+        }
+
+        if (ply <= 20)
+        {
+            return "opening";
+        }
+
+        if (materialDelta >= 5)
+        {
+            return "conversion";
+        }
+
+        return legalCaptureAvailable ? "tactical" : "defense";
+    }
+
+    private static string NormalizeCapturedPiece(string? value)
+    {
+        var normalized = (value ?? "none").Trim().ToLowerInvariant();
+        normalized = normalized.Replace(' ', '_').Replace("-", "_");
+        return normalized switch
+        {
+            "" or "no" or "none" or "empty" or "no_piece" => "none",
+            "pawn" => "pawn",
+            "knight" => "knight",
+            "bishop" => "bishop",
+            "rook" => "rook",
+            "queen" => "queen",
+            "king" => "king",
+            _ => normalized
+        };
+    }
+
+    private static bool CapturedPieceMatches(
+        string actual,
+        string expected) =>
+        string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase) ||
+        expected.EndsWith("_" + actual, StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizePhase(string? value) =>
+        (value ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "defensive" => "defense",
+            "stabilize" or "stabilization" => "defense",
+            "counterplay" => "recovery",
+            "convert" => "conversion",
+            var normalized => normalized
+        };
+
+    private static string RandomSquare(Random random) =>
+        $"{(char)('a' + random.Next(8))}{random.Next(1, 9)}";
+
+    private static string StateProbeAnswerJsonSchema(ChessQuestStateProbeKind kind) =>
+        kind switch
+        {
+            ChessQuestStateProbeKind.Legality =>
+                """
+                {
+                  "type": "object",
+                  "properties": {
+                    "isLegal": { "type": "boolean" },
+                    "publicReason": { "type": "string" }
+                  },
+                  "required": ["isLegal", "publicReason"]
+                }
+                """,
+            ChessQuestStateProbeKind.Capture =>
+                """
+                {
+                  "type": "object",
+                  "properties": {
+                    "isCapture": { "type": "boolean" },
+                    "capturedPiece": { "type": "string" },
+                    "publicReason": { "type": "string" }
+                  },
+                  "required": ["isCapture", "capturedPiece", "publicReason"]
+                }
+                """,
+            ChessQuestStateProbeKind.Check =>
+                """
+                {
+                  "type": "object",
+                  "properties": {
+                    "sideToMoveInCheck": { "type": "boolean" },
+                    "publicReason": { "type": "string" }
+                  },
+                  "required": ["sideToMoveInCheck", "publicReason"]
+                }
+                """,
+            ChessQuestStateProbeKind.Material =>
+                """
+                {
+                  "type": "object",
+                  "properties": {
+                    "whiteMaterial": { "type": "integer" },
+                    "blackMaterial": { "type": "integer" },
+                    "materialDeltaForSideToMove": { "type": "integer" },
+                    "publicReason": { "type": "string" }
+                  },
+                  "required": ["whiteMaterial", "blackMaterial", "materialDeltaForSideToMove", "publicReason"]
+                }
+                """,
+            ChessQuestStateProbeKind.Phase =>
+                """
+                {
+                  "type": "object",
+                  "properties": {
+                    "phase": { "type": "string", "enum": ["opening", "tactical", "defense", "recovery", "conversion", "endgame"] },
+                    "publicReason": { "type": "string" }
+                  },
+                  "required": ["phase", "publicReason"]
+                }
+                """,
+            _ => StackedStateProbeAnswerJsonSchema
+        };
+
+    private const string StackedStateProbeAnswerJsonSchema =
+        """
+        {
+          "type": "object",
+          "properties": {
+            "legality": {
+              "type": "object",
+              "properties": {
+                "isLegal": { "type": "boolean" },
+                "publicReason": { "type": "string" }
+              },
+              "required": ["isLegal", "publicReason"]
+            },
+            "capture": {
+              "type": "object",
+              "properties": {
+                "isCapture": { "type": "boolean" },
+                "capturedPiece": { "type": "string" },
+                "publicReason": { "type": "string" }
+              },
+              "required": ["isCapture", "capturedPiece", "publicReason"]
+            },
+            "check": {
+              "type": "object",
+              "properties": {
+                "sideToMoveInCheck": { "type": "boolean" },
+                "publicReason": { "type": "string" }
+              },
+              "required": ["sideToMoveInCheck", "publicReason"]
+            },
+            "material": {
+              "type": "object",
+              "properties": {
+                "whiteMaterial": { "type": "integer" },
+                "blackMaterial": { "type": "integer" },
+                "materialDeltaForSideToMove": { "type": "integer" },
+                "publicReason": { "type": "string" }
+              },
+              "required": ["whiteMaterial", "blackMaterial", "materialDeltaForSideToMove", "publicReason"]
+            },
+            "phaseSelection": {
+              "type": "object",
+              "properties": {
+                "phase": { "type": "string", "enum": ["opening", "tactical", "defense", "recovery", "conversion", "endgame"] },
+                "publicReason": { "type": "string" }
+              },
+              "required": ["phase", "publicReason"]
+            }
+          },
+          "required": ["legality", "capture", "check", "material", "phaseSelection"]
+        }
+        """;
+}
 
 public sealed record ChessQuestPuzzleProbeTrial(
     int TrialNumber,

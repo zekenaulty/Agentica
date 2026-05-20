@@ -649,6 +649,18 @@ Follow-up from 2026-05-20 probe log review:
    - `random-generated`: hard random-game material benchmark
 6. A live 10-trial procedural generated run passed 7/10. The failures were useful reasoning misses rather than answer leakage or fixed-template artifacts.
 
+State reasoning probes:
+
+1. `chessquest state-probe` adds low-cost one-call probes for:
+   - `--probe-kind legality`: classify whether a proposed coordinate-UCI move is legal
+   - `--probe-kind capture`: classify whether a proposed legal move captures and name the captured piece
+   - `--probe-kind check`: report whether the side to move is currently in check
+   - `--probe-kind material`: count material points for both sides and side-to-move delta
+   - `--probe-kind phase`: choose a host-policy phase label from public context
+   - `--probe-kind stacked`: answer all of the above from one board in one response
+2. `stacked` is the context-load test. It intentionally stresses whether the model can keep multiple public board facts coherent without a legal move list or tool calls.
+3. These probes are not game-strength tests. They decompose failures that affect the main loop: stale legality, false capture claims, check blindness, material-count drift, and phase-selection drift.
+
 ## Recommended Next Implementation Order
 
 Do this order:

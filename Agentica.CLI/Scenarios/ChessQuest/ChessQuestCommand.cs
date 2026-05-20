@@ -63,6 +63,11 @@ internal static class ChessQuestCommand
             return await RunPuzzleProbeAsync(args.Skip(1).ToArray(), services).ConfigureAwait(false);
         }
 
+        if (string.Equals(args[0], "state-probe", StringComparison.OrdinalIgnoreCase))
+        {
+            return await RunStateProbeAsync(args.Skip(1).ToArray(), services).ConfigureAwait(false);
+        }
+
         if (string.Equals(args[0], "resume", StringComparison.OrdinalIgnoreCase))
         {
             return await ResumeGameAsync(board, args.Skip(1).ToArray(), services).ConfigureAwait(false);
@@ -368,6 +373,113 @@ internal static class ChessQuestCommand
         catch (OperationCanceledException)
         {
             Console.Error.WriteLine("ChessQuest puzzle-probe timed out.");
+            return 124;
+        }
+    }
+
+    private static async Task<int> RunStateProbeAsync(
+        IReadOnlyList<string> args,
+        CliCommandServices services)
+    {
+        var options = ChessQuestBoardProbeOptions.Parse(args, GeminiModelId.Flash25);
+        if (!options.IsValid)
+        {
+            Console.Error.WriteLine(options.Error);
+            services.PrintUsage();
+            return 2;
+        }
+
+        if (!services.GeminiCredentialsAvailable())
+        {
+            Console.Error.WriteLine("ChessQuest state-probe requires Gemini credentials. Set GEMINI_API_KEY or GOOGLE_API_KEY.");
+            return 2;
+        }
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(options.TimeoutSeconds));
+        var client = new RetryingLlmClient(
+            new GeminiLlmClient(GeminiClientOptions.FromEnvironment(options.ModelId)),
+            new LlmRetryOptions(CallTimeout: TimeSpan.FromSeconds(options.TimeoutSeconds)));
+        var runner = new ChessQuestStateProbeRunner(client);
+        var runLog = services.CreateRunLog(options.LogRun, options.LogDir, "chessquest-state-probe", args);
+        runLog?.WriteJson("chessquest-state-probe-options.json", options);
+
+        if (!options.Json)
+        {
+            Console.WriteLine("--- ChessQuest State Probe ---");
+            Console.WriteLine($"Model: {options.ModelId}");
+            Console.WriteLine($"Trials: {options.Trials}");
+            Console.WriteLine($"Seed: {options.Seed}");
+            Console.WriteLine($"Scramble Plies: {options.ScramblePlies}");
+            Console.WriteLine($"Presentation: {options.Presentation}");
+            Console.WriteLine($"Probe Kind: {options.StateProbeKind}");
+            Console.WriteLine();
+        }
+
+        try
+        {
+            var summary = await runner.RunAsync(
+                    options,
+                    (trial, result) =>
+                    {
+                        runLog?.WriteJsonLine(
+                            "chessquest-state-probe-trials.jsonl",
+                            new
+                            {
+                                trial.TrialNumber,
+                                trial.Seed,
+                                trial.Kind,
+                                trial.Fen,
+                                trial.BoardLines,
+                                trial.SideToMove,
+                                trial.Ply,
+                                trial.LegalityMove,
+                                trial.LegalityExpected,
+                                trial.CaptureMove,
+                                trial.CaptureExpected,
+                                trial.CapturedPieceExpected,
+                                trial.SideToMoveInCheckExpected,
+                                trial.WhiteMaterialExpected,
+                                trial.BlackMaterialExpected,
+                                trial.MaterialDeltaForSideToMoveExpected,
+                                trial.PhaseExpected,
+                                trial.LegalMoves,
+                                Prompt = ChessQuestStateProbeRunner.BuildPrompt(trial, options.Presentation),
+                                Result = result,
+                                RawResponse = result.RawResponse
+                            });
+
+                        if (!options.Json)
+                        {
+                            PrintStateProbeTrial(trial, result);
+                        }
+                    },
+                    timeout.Token)
+                .ConfigureAwait(false);
+
+            runLog?.WriteJson("chessquest-state-probe-summary.json", summary);
+            if (options.Json)
+            {
+                Console.WriteLine(ChessQuestStateProbeRunner.SerializeSummary(summary));
+            }
+            else
+            {
+                Console.WriteLine();
+                Console.WriteLine("--- State Probe Summary ---");
+                Console.WriteLine($"Passed: {summary.Passed}/{summary.Trials}");
+                Console.WriteLine($"Failed: {summary.Failed}/{summary.Trials}");
+            }
+
+            if (runLog is not null)
+            {
+                Console.WriteLine();
+                Console.WriteLine($"Run log written: {runLog.DirectoryPath}");
+            }
+
+            return summary.Failed == 0 ? 0 : 1;
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine("ChessQuest state-probe timed out.");
             return 124;
         }
     }
@@ -1416,6 +1528,31 @@ internal static class ChessQuestCommand
             if (!string.IsNullOrWhiteSpace(result.RawResponse))
             {
                 Console.WriteLine($"  raw: {Preview(result.RawResponse, 240)}");
+            }
+
+            Console.WriteLine($"  fen: {trial.Fen}");
+            Console.WriteLine("  board:");
+            foreach (var line in trial.BoardLines)
+            {
+                Console.WriteLine($"  {line}");
+            }
+        }
+    }
+
+    private static void PrintStateProbeTrial(
+        ChessQuestStateProbeTrial trial,
+        ChessQuestStateProbeTrialResult result)
+    {
+        var status = result.Passed ? "PASS" : "FAIL";
+        Console.WriteLine($"[{status}] trial={trial.TrialNumber} kind={trial.Kind} side={trial.SideToMove} ply={trial.Ply}");
+        Console.WriteLine($"  legality={trial.LegalityMove}:{trial.LegalityExpected} capture={trial.CaptureMove}:{trial.CaptureExpected}/{trial.CapturedPieceExpected} check={trial.SideToMoveInCheckExpected} material={trial.WhiteMaterialExpected}-{trial.BlackMaterialExpected} delta={trial.MaterialDeltaForSideToMoveExpected} phase={trial.PhaseExpected}");
+        if (!result.Passed)
+        {
+            Console.WriteLine($"  reason: {string.Join("; ", result.FailureReasons)}");
+            Console.WriteLine($"  provider: {result.ProviderName ?? "unknown"} finish={result.FinishReason} usage={FormatUsage(result.Usage)}");
+            if (!string.IsNullOrWhiteSpace(result.RawResponse))
+            {
+                Console.WriteLine($"  raw: {Preview(result.RawResponse, 320)}");
             }
 
             Console.WriteLine($"  fen: {trial.Fen}");
