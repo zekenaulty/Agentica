@@ -373,6 +373,12 @@ public sealed class ChessQuestStrategicOrchestrationState
             ["chessquest.agentWon"] = agentWon,
             ["chessquest.phaseReports.count"] = PhaseReports.Count
         };
+        var goalSpine = ChessQuestGoalSpineCompiler.Compile(Session, latestPhaseReport: latest);
+        result["chessquest.goalSpine"] = goalSpine;
+        result["chessquest.goalSpine.currentReality"] = goalSpine.CurrentReality;
+        result["chessquest.goalSpine.activePriority"] = goalSpine.ActivePriority;
+        result["chessquest.goalSpine.knownDivergence"] = goalSpine.KnownDivergence;
+        result["chessquest.goalSpine.nextDecisionPressure"] = goalSpine.NextDecisionPressure;
 
         if (latest is not null)
         {
@@ -458,17 +464,23 @@ public sealed class ChessQuestPhaseRunExecutor : IRunExecutor
             envelope.PhaseGoal,
             envelope.ReplanTriggers);
         var runContext = new Dictionary<string, object?>(requestContext, StringComparer.Ordinal);
-        foreach (var pair in ChessQuestCapabilitySurfaceCompiler.BuildPlannerContext(_state.Session, phaseTracker))
+        var plannerContext = ChessQuestCapabilitySurfaceCompiler.BuildPlannerContext(
+            _state.Session,
+            phaseTracker,
+            _state.LatestPhaseReport);
+        foreach (var pair in plannerContext)
         {
             runContext[pair.Key] = pair.Value;
         }
 
         runContext["chessquest.phaseSanityWarnings"] = phaseSanityWarnings;
+        var goalSpine = (ChessQuestGoalSpine)plannerContext["goalSpine"]!;
 
         var phaseObjective = BuildPhaseObjective(
             request.Objective,
             envelope,
             projection,
+            goalSpine,
             _state.Session.Scenario.DisclosurePolicy.AllowAttackInspection);
         var phaseRequest = new RunRequest(phaseObjective, request.Origin, runContext);
         var runner = new AgenticaRunner(
@@ -478,7 +490,7 @@ public sealed class ChessQuestPhaseRunExecutor : IRunExecutor
             new ChessQuestPhaseOutcomeReporter(_state.Session, phaseTracker),
             _policy,
             completionEvaluator: new ChessQuestPhaseCompletionEvaluator(_state.Session, phaseTracker),
-            planningFrameProjector: new ChessQuestPlanningFrameProjector(_state.Session, phaseTracker));
+            planningFrameProjector: new ChessQuestPlanningFrameProjector(_state.Session, phaseTracker, _state.LatestPhaseReport));
 
         Console.WriteLine();
         Console.WriteLine("=== ChessQuest Active Run Tier | Phase Execution ===");
@@ -509,6 +521,7 @@ public sealed class ChessQuestPhaseRunExecutor : IRunExecutor
         string taskObjective,
         ChessQuestPhaseTaskEnvelope task,
         ChessQuestStrategyProjection projection,
+        ChessQuestGoalSpine goalSpine,
         bool attackInspectionAllowed)
     {
         var doctrine = ChessQuestGoalShapingPolicy.StaticDoctrine;
@@ -540,6 +553,13 @@ public sealed class ChessQuestPhaseRunExecutor : IRunExecutor
         {FormatBulletBlock(doctrine.GoodPlayCriteria)}
         - Evidence discipline:
         {FormatBulletBlock(doctrine.EvidenceDiscipline)}
+
+        GoalSpine continuity:
+        - Current reality: {goalSpine.CurrentReality}
+        - Active priority: {goalSpine.ActivePriority}
+        - Known divergence: {goalSpine.KnownDivergence ?? "none"}
+        - Next decision pressure: {goalSpine.NextDecisionPressure}
+        - GoalSpine is compact continuity from receipts/state; it is not proof, not a hidden solution, and not move-level guidance.
 
         Active run contract:
         - You choose legal chess moves through the ChessQuest strict referee tools.

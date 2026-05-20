@@ -543,18 +543,35 @@ Remaining work:
 
 ### P1: Add Run Continuity Spine Integration
 
-1. Implement generic GoalSpine V1 in Agentica or orchestration layer.
-2. Inject compact GoalSpine into ChessQuest planning frame.
-3. Update GoalSpine after:
-   - tool refusal
-   - phase report
+Status: ChessQuest-specific GoalSpine V1 is implemented. Generic Agentica Run Continuity Spine remains a separate platform slice.
+
+Implemented:
+
+1. Added `ChessQuestGoalSpine` and deterministic compiler.
+2. Injected compact GoalSpine into:
+   - `ChessQuestPlanningFrame`
+   - planner context as `goalSpine`
+   - planning frame projector payload
+   - strategic orchestration host state
+   - active phase objective text
+3. GoalSpine currently updates from:
+   - current board/terminal state
+   - active phase progress
+   - latest phase report
    - material loss
-   - unsupported safety/checkmate claim warning
-   - terminal state
-4. Print GoalSpine at orchestration phase boundaries.
-5. Add ChessQuest regression:
-   - after tactical material loss, GoalSpine says stabilization is priority
-   - after unsupported one-ply safety claim, GoalSpine carries that lesson forward
+   - recent refused receipt
+4. Added regressions:
+   - planning context includes the same GoalSpine exposed through `chessFrame`
+   - prompt shape states GoalSpine is not proof
+   - tactical material loss turns into stabilization priority and opponent-reply pressure
+   - orchestration host state exposes GoalSpine fields to the task planner
+
+Remaining:
+
+1. Generic Agentica `GoalSpine` / ledger model.
+2. Explicit `goalspine.updated` event emission.
+3. Direct integration with cockpit warning aggregation for unsupported safety/checkmate claims.
+4. Console phase-boundary summary of GoalSpine, if the logs still feel too quiet.
 
 ### P2: Improve Phase Sanity
 

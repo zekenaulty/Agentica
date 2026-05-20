@@ -67,6 +67,7 @@ public sealed record ChessQuestPlanningFrame(
     ChessQuestSessionContext Session,
     IReadOnlyDictionary<string, object?> Board,
     IReadOnlyDictionary<string, object?> TurnContract,
+    ChessQuestGoalSpine GoalSpine,
     ChessQuestPlayingDoctrine PlayingDoctrine,
     ChessQuestDecisionProtocol DecisionProtocol);
 
@@ -74,18 +75,21 @@ public sealed class ChessQuestPlanningFrameProjector : IPlanningFrameProjector
 {
     private readonly ChessQuestSession _session;
     private readonly ChessQuestPhaseTracker? _phaseTracker;
+    private readonly ChessQuestPhaseReport? _latestPhaseReport;
 
     public ChessQuestPlanningFrameProjector(
         ChessQuestSession session,
-        ChessQuestPhaseTracker? phaseTracker = null)
+        ChessQuestPhaseTracker? phaseTracker = null,
+        ChessQuestPhaseReport? latestPhaseReport = null)
     {
         _session = session;
         _phaseTracker = phaseTracker;
+        _latestPhaseReport = latestPhaseReport;
     }
 
     public IReadOnlyList<PlanningFrame> Project(PlanningFrameProjectionRequest request)
     {
-        var frame = ChessQuestCapabilitySurfaceCompiler.BuildPlanningFrame(_session, _phaseTracker);
+        var frame = ChessQuestCapabilitySurfaceCompiler.BuildPlanningFrame(_session, _phaseTracker, _latestPhaseReport);
         var harnessContext = ChessQuestCapabilitySurfaceCompiler.BuildHarnessContext(_session);
 
         return
@@ -102,6 +106,7 @@ public sealed class ChessQuestPlanningFrameProjector : IPlanningFrameProjector
                     ["strategyFrame"] = _phaseTracker?.Snapshot(_session).StrategyFrame,
                     ["phaseObjective"] = _phaseTracker?.Snapshot(_session).PhaseObjective,
                     ["phaseProgress"] = _phaseTracker?.Snapshot(_session).Progress,
+                    ["goalSpine"] = frame.GoalSpine,
                     ["playingDoctrine"] = frame.PlayingDoctrine,
                     ["decisionProtocol"] = frame.DecisionProtocol,
                     ["agenticHarness"] = harnessContext,
@@ -139,6 +144,7 @@ public static class ChessQuestCapabilitySurfaceCompiler
         - Strict gameplay requires chess.play_move to include the current chess.list_legal_moves legalMoveObservationId. Actor probes are the only bypass surface.
         - Do not claim completion unless chess.complete_objective emits chessquest.objective_completed.
         - Use chessFrame.decisionProtocol as the current operating grammar for goals, claim discipline, evidence, and risk checks.
+        - Use chessFrame.goalSpine as compact evidence-backed continuity. It preserves current reality, active priority, known divergences, and next decision pressure; it is not proof and not a move hint.
         - A legal move is not necessarily good or safe. A one-ply project_line result does not prove tactical safety or move quality.
         - Prefer turnIntent fields goal, evidence, hypothesis, riskCheck, and claimLevel when making a move.
         - If strategyProjection, strategyFrame, and phaseObjective are present, treat them as public strategic guidance, not board truth.
@@ -158,18 +164,23 @@ public static class ChessQuestCapabilitySurfaceCompiler
 
     public static IReadOnlyDictionary<string, object?> BuildPlannerContext(
         ChessQuestSession session,
-        ChessQuestPhaseTracker? phaseTracker = null) =>
-        new Dictionary<string, object?>(StringComparer.Ordinal)
+        ChessQuestPhaseTracker? phaseTracker = null,
+        ChessQuestPhaseReport? latestPhaseReport = null)
+    {
+        var frame = BuildPlanningFrame(session, phaseTracker, latestPhaseReport);
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             [ContextKey] = BuildHarnessContext(session),
-            ["chessFrame"] = BuildPlanningFrame(session, phaseTracker),
-            ["playingDoctrine"] = ChessQuestGoalShapingPolicy.StaticDoctrine,
-            ["decisionProtocol"] = ChessQuestGoalShapingPolicy.BuildDecisionProtocol(session, phaseTracker),
+            ["chessFrame"] = frame,
+            ["playingDoctrine"] = frame.PlayingDoctrine,
+            ["decisionProtocol"] = frame.DecisionProtocol,
+            ["goalSpine"] = frame.GoalSpine,
             ["strategyProjection"] = phaseTracker?.Snapshot(session).StrategyProjection,
             ["strategyFrame"] = phaseTracker?.Snapshot(session).StrategyFrame,
             ["phaseObjective"] = phaseTracker?.Snapshot(session).PhaseObjective,
             ["phaseProgress"] = phaseTracker?.Snapshot(session).Progress
         };
+    }
 
     public static ChessQuestHarnessContext BuildHarnessContext(ChessQuestSession session)
     {
@@ -249,10 +260,12 @@ public static class ChessQuestCapabilitySurfaceCompiler
 
     public static ChessQuestPlanningFrame BuildPlanningFrame(
         ChessQuestSession session,
-        ChessQuestPhaseTracker? phaseTracker = null)
+        ChessQuestPhaseTracker? phaseTracker = null,
+        ChessQuestPhaseReport? latestPhaseReport = null)
     {
         var state = session.CurrentState;
         var decisionProtocol = ChessQuestGoalShapingPolicy.BuildDecisionProtocol(session, phaseTracker);
+        var goalSpine = ChessQuestGoalSpineCompiler.Compile(session, phaseTracker, latestPhaseReport);
         return new ChessQuestPlanningFrame(
             Kind: "ChessQuestPlanningFrame",
             Version: "1.0",
@@ -266,6 +279,7 @@ public static class ChessQuestCapabilitySurfaceCompiler
                 ["recentMovesUci"] = state.RecentMovesUci
             },
             TurnContract: TurnContract(session),
+            GoalSpine: goalSpine,
             PlayingDoctrine: decisionProtocol.PlayingDoctrine,
             DecisionProtocol: decisionProtocol);
     }

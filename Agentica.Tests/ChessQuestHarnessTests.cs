@@ -555,6 +555,8 @@ public sealed class ChessQuestHarnessTests
         var progress = Assert.IsType<ChessQuestPhaseProgress>(context["phaseProgress"]);
         var doctrine = Assert.IsType<ChessQuestPlayingDoctrine>(context["playingDoctrine"]);
         var protocol = Assert.IsType<ChessQuestDecisionProtocol>(context["decisionProtocol"]);
+        var goalSpine = Assert.IsType<ChessQuestGoalSpine>(context["goalSpine"]);
+        var chessFrame = Assert.IsType<ChessQuestPlanningFrame>(context["chessFrame"]);
         Assert.Equal("opening", strategyFrame.Phase);
         Assert.Equal("opening", objective.Phase);
         Assert.Equal(3, objective.MaxAgentTurns);
@@ -564,6 +566,9 @@ public sealed class ChessQuestHarnessTests
         Assert.Equal("opening", protocol.Phase);
         Assert.Contains("not mean good or safe", protocol.ToolSemantics[ChessQuestToolIds.ListLegalMoves], StringComparison.OrdinalIgnoreCase);
         Assert.Contains(protocol.ClaimDiscipline, item => item.Contains("legal", StringComparison.OrdinalIgnoreCase) && item.Contains("safe", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(chessFrame.GoalSpine, goalSpine);
+        Assert.Contains("legal", goalSpine.ActiveConstraints[2], StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("proof", goalSpine.ActiveConstraints[0], StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -573,7 +578,41 @@ public sealed class ChessQuestHarnessTests
 
         Assert.Contains("legal move is not necessarily good or safe", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("one-ply project_line result does not prove tactical safety or move quality", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("goalSpine", prompt, StringComparison.Ordinal);
+        Assert.Contains("not proof", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("legalMoveObservationId", prompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ChessQuest_goal_spine_records_material_loss_as_continuity_pressure_without_move_hinting()
+    {
+        var session = CreateSession();
+        var latest = PhaseReport(materialAfter: -3, materialDelta: -3);
+
+        var spine = ChessQuestGoalSpineCompiler.Compile(session, latestPhaseReport: latest);
+
+        Assert.Contains("lost material", spine.KnownDivergence, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Stabilize", spine.ActivePriority, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("opponent replies", spine.NextDecisionPressure, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(spine.RecentLessons, lesson =>
+            lesson.Contains("material loss", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain("play ", spine.ActivePriority, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("e2e4", spine.ActivePriority, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ChessQuest_goal_spine_is_projected_to_orchestration_host_state()
+    {
+        var session = CreateSession();
+        var state = new ChessQuestStrategicOrchestrationState(session);
+        state.PhaseReports.Add(PhaseReport(materialAfter: -3, materialDelta: -3));
+
+        var hostState = state.BuildHostState();
+
+        var spine = Assert.IsType<ChessQuestGoalSpine>(hostState["chessquest.goalSpine"]);
+        Assert.Equal(spine.ActivePriority, hostState["chessquest.goalSpine.activePriority"]);
+        Assert.Equal(spine.KnownDivergence, hostState["chessquest.goalSpine.knownDivergence"]);
+        Assert.Contains("Stabilize", spine.ActivePriority, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
