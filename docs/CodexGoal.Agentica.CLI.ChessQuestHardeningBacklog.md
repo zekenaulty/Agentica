@@ -637,6 +637,18 @@ Follow-up from live probes:
 7. Generated puzzle prompts do not include accepted moves. The host validates the model move against the runtime-derived accepted move and logs source/puzzle metadata.
 8. Generated probes may carry an accepted best-move span when multiple moves tie for the top score. The prompt says this explicitly without revealing the moves, and validation accepts any move in that span.
 
+Follow-up from 2026-05-20 probe log review:
+
+1. The fixed synthetic `--puzzle-source generated` path was too template-shaped. Recent runs passed 25/25 and 5/5, which mostly proved that the model could solve a narrow capture/promotion shape.
+2. The `--puzzle-source random-generated` path was much harder and exposed real actor/solver failures: the reviewed 25-trial run passed 6/25, mostly failing on illegal geometry, blocked paths, and wrong top-band choices.
+3. Do not hardcode prompt fixes around individual failed moves. The corrective action is to improve puzzle distribution and diagnostic logging, not to teach the model the observed answers.
+4. `--puzzle-source generated` now builds procedural rules-derived capture/promotion positions with randomized piece placement and distractors, then derives the accepted move span from the rules engine and documented immediate objective.
+5. The intended probe ladder is:
+   - `built-in`: stable smoke/regression puzzles
+   - `generated`: medium procedural tactical actor benchmark
+   - `random-generated`: hard random-game material benchmark
+6. A live 10-trial procedural generated run passed 7/10. The failures were useful reasoning misses rather than answer leakage or fixed-template artifacts.
+
 ## Recommended Next Implementation Order
 
 Do this order:

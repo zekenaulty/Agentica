@@ -1609,7 +1609,16 @@ public sealed class ChessQuestPuzzleProbeRunner
             var fen = random.Next(2) == 0
                 ? CreateSyntheticCaptureFen(random)
                 : CreateSyntheticPromotionFen(random);
-            var rules = new GeraChessRulesEngine(fen);
+            GeraChessRulesEngine rules;
+            try
+            {
+                rules = new GeraChessRulesEngine(fen);
+            }
+            catch
+            {
+                continue;
+            }
+
             var state = rules.GetState();
             if (state.IsTerminal)
             {
@@ -1646,7 +1655,7 @@ public sealed class ChessQuestPuzzleProbeRunner
                 BoardLines: ChessQuestRenderer.RenderBoardLinesFromFen(fen),
                 AgentColor: state.SideToMove,
                 AcceptedMoves: topBand.Select(candidate => candidate.Move).ToArray(),
-                GenerationNote: $"seed={seed}; attempt={attempt}; score={top.Score}; acceptedBand={topBand.Count}; source=synthetic_rules_derived_{top.Kind}");
+                GenerationNote: $"seed={seed}; attempt={attempt}; score={top.Score}; acceptedBand={topBand.Count}; source=procedural_rules_derived_{top.Kind}");
         }
 
         return CreateGeneratedRandomMaterialPuzzle(trialNumber, seed, scramblePlies);
@@ -1729,17 +1738,49 @@ public sealed class ChessQuestPuzzleProbeRunner
 
     private static string CreateSyntheticCaptureFen(Random random)
     {
-        var templates = new[]
+        for (var attempt = 0; attempt < 256; attempt++)
         {
-            "4k3/q7/8/8/8/8/8/R3K3 w - - 0 1",
-            "4k3/8/8/8/8/7q/8/2B1K3 w - - 0 1",
-            "4k3/8/8/8/8/5q2/8/4K1N1 w - - 0 1",
-            "r3k3/8/8/8/8/8/Q7/4K3 b - - 0 1",
-            "2b1k3/8/8/8/8/7Q/8/4K3 b - - 0 1",
-            "4k1n1/8/5Q2/8/8/8/8/4K3 b - - 0 1"
-        };
+            var sideToMove = random.Next(2) == 0 ? ChessQuestColor.White : ChessQuestColor.Black;
+            var mover = Pick(random, ['q', 'r', 'b', 'n']);
+            var target = Pick(random, ['q', 'r', 'b', 'n', 'p']);
+            var origin = RandomSquare(random);
+            if (!TryReachableDestination(random, origin, mover, out var destination))
+            {
+                continue;
+            }
 
-        return templates[random.Next(templates.Length)];
+            if (target == 'p' && IsBackRank(destination))
+            {
+                continue;
+            }
+
+            var occupied = new HashSet<string>(StringComparer.Ordinal)
+            {
+                origin,
+                destination
+            };
+            if (!TryPlaceKings(random, occupied, out var whiteKing, out var blackKing))
+            {
+                continue;
+            }
+
+            var pieces = new List<(string Square, char Piece)>
+            {
+                (whiteKing, 'K'),
+                (blackKing, 'k'),
+                (origin, PieceChar(sideToMove, mover)),
+                (destination, PieceChar(Opposite(sideToMove), target))
+            };
+
+            AddDistractorPieces(random, sideToMove, occupied, pieces);
+            var fen = FenFromPieces(sideToMove, pieces.ToArray());
+            if (ScorePuzzleCandidates(fen, sideToMove).FirstOrDefault() is { Score: > 0 })
+            {
+                return fen;
+            }
+        }
+
+        return CreateSyntheticPromotionFen(random);
     }
 
     private static string CreateSyntheticPromotionFen(Random random)
@@ -1747,23 +1788,192 @@ public sealed class ChessQuestPuzzleProbeRunner
         var file = (char)('a' + random.Next(8));
         if (random.Next(2) == 0)
         {
-            var blackKingSquare = file == 'h' ? "a8" : "h8";
+            var blackKingSquare = RandomBackRankKingSquare(random, ChessQuestColor.Black, avoidFile: file);
+            var whiteKingSquare = RandomBackRankKingSquare(random, ChessQuestColor.White, avoidFile: file);
             return FenFromPieces(
                 sideToMove: ChessQuestColor.White,
-                (Square: "e1", Piece: 'K'),
+                (Square: whiteKingSquare, Piece: 'K'),
                 (Square: blackKingSquare, Piece: 'k'),
                 (Square: $"{file}7", Piece: 'P'));
         }
         else
         {
-            var whiteKingSquare = file == 'h' ? "a1" : "h1";
+            var whiteKingSquare = RandomBackRankKingSquare(random, ChessQuestColor.White, avoidFile: file);
+            var blackKingSquare = RandomBackRankKingSquare(random, ChessQuestColor.Black, avoidFile: file);
             return FenFromPieces(
                 sideToMove: ChessQuestColor.Black,
-                (Square: "e8", Piece: 'k'),
+                (Square: blackKingSquare, Piece: 'k'),
                 (Square: whiteKingSquare, Piece: 'K'),
                 (Square: $"{file}2", Piece: 'p'));
         }
     }
+
+    private static bool TryReachableDestination(
+        Random random,
+        string origin,
+        char mover,
+        out string destination)
+    {
+        var originFile = origin[0] - 'a';
+        var originRank = origin[1] - '1';
+        var candidates = mover switch
+        {
+            'n' => KnightDestinations(originFile, originRank),
+            'b' => SlidingDestinations(originFile, originRank, [(1, 1), (1, -1), (-1, 1), (-1, -1)]),
+            'r' => SlidingDestinations(originFile, originRank, [(1, 0), (-1, 0), (0, 1), (0, -1)]),
+            'q' => SlidingDestinations(originFile, originRank, [(1, 1), (1, -1), (-1, 1), (-1, -1), (1, 0), (-1, 0), (0, 1), (0, -1)]),
+            _ => []
+        };
+
+        if (candidates.Count == 0)
+        {
+            destination = string.Empty;
+            return false;
+        }
+
+        destination = candidates[random.Next(candidates.Count)];
+        return true;
+    }
+
+    private static IReadOnlyList<string> KnightDestinations(int file, int rank)
+    {
+        (int File, int Rank)[] offsets =
+        [
+            (1, 2), (2, 1), (2, -1), (1, -2),
+            (-1, -2), (-2, -1), (-2, 1), (-1, 2)
+        ];
+        return offsets
+            .Select(offset => (File: file + offset.File, Rank: rank + offset.Rank))
+            .Where(square => IsBoardSquare(square.File, square.Rank))
+            .Select(square => ToSquare(square.File, square.Rank))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> SlidingDestinations(
+        int file,
+        int rank,
+        IReadOnlyList<(int File, int Rank)> directions)
+    {
+        var result = new List<string>();
+        foreach (var direction in directions)
+        {
+            var nextFile = file + direction.File;
+            var nextRank = rank + direction.Rank;
+            while (IsBoardSquare(nextFile, nextRank))
+            {
+                result.Add(ToSquare(nextFile, nextRank));
+                nextFile += direction.File;
+                nextRank += direction.Rank;
+            }
+        }
+
+        return result;
+    }
+
+    private static bool TryPlaceKings(
+        Random random,
+        HashSet<string> occupied,
+        out string whiteKing,
+        out string blackKing)
+    {
+        for (var attempt = 0; attempt < 128; attempt++)
+        {
+            whiteKing = RandomSquare(random);
+            blackKing = RandomSquare(random);
+            if (occupied.Contains(whiteKing) ||
+                occupied.Contains(blackKing) ||
+                string.Equals(whiteKing, blackKing, StringComparison.Ordinal) ||
+                KingsAdjacent(whiteKing, blackKing))
+            {
+                continue;
+            }
+
+            occupied.Add(whiteKing);
+            occupied.Add(blackKing);
+            return true;
+        }
+
+        whiteKing = string.Empty;
+        blackKing = string.Empty;
+        return false;
+    }
+
+    private static void AddDistractorPieces(
+        Random random,
+        ChessQuestColor sideToMove,
+        HashSet<string> occupied,
+        List<(string Square, char Piece)> pieces)
+    {
+        var count = random.Next(0, 4);
+        for (var index = 0; index < count; index++)
+        {
+            for (var attempt = 0; attempt < 64; attempt++)
+            {
+                var square = RandomSquare(random);
+                if (!occupied.Add(square))
+                {
+                    continue;
+                }
+
+                var color = random.Next(2) == 0 ? sideToMove : Opposite(sideToMove);
+                var piece = Pick(random, ['p', 'n', 'b', 'r']);
+                if (piece == 'p' && IsBackRank(square))
+                {
+                    occupied.Remove(square);
+                    continue;
+                }
+
+                pieces.Add((square, PieceChar(color, piece)));
+                break;
+            }
+        }
+    }
+
+    private static string RandomBackRankKingSquare(
+        Random random,
+        ChessQuestColor color,
+        char avoidFile)
+    {
+        for (var attempt = 0; attempt < 64; attempt++)
+        {
+            var file = (char)('a' + random.Next(8));
+            if (file == avoidFile)
+            {
+                continue;
+            }
+
+            return $"{file}{(color == ChessQuestColor.White ? '1' : '8')}";
+        }
+
+        return color == ChessQuestColor.White ? "e1" : "e8";
+    }
+
+    private static string RandomSquare(Random random) =>
+        ToSquare(random.Next(8), random.Next(8));
+
+    private static string ToSquare(int file, int rank) =>
+        $"{(char)('a' + file)}{rank + 1}";
+
+    private static bool IsBoardSquare(int file, int rank) =>
+        file is >= 0 and < 8 && rank is >= 0 and < 8;
+
+    private static bool KingsAdjacent(string first, string second) =>
+        Math.Abs(first[0] - second[0]) <= 1 &&
+        Math.Abs(first[1] - second[1]) <= 1;
+
+    private static bool IsBackRank(string square) =>
+        square[1] is '1' or '8';
+
+    private static char PieceChar(ChessQuestColor color, char lowerPiece) =>
+        color == ChessQuestColor.White
+            ? char.ToUpperInvariant(lowerPiece)
+            : char.ToLowerInvariant(lowerPiece);
+
+    private static ChessQuestColor Opposite(ChessQuestColor color) =>
+        color == ChessQuestColor.White ? ChessQuestColor.Black : ChessQuestColor.White;
+
+    private static char Pick(Random random, IReadOnlyList<char> values) =>
+        values[random.Next(values.Count)];
 
     private static string FenFromPieces(
         ChessQuestColor sideToMove,

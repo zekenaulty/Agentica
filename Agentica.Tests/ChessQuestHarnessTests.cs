@@ -1244,6 +1244,24 @@ public sealed class ChessQuestHarnessTests
     }
 
     [Fact]
+    public void ChessQuest_puzzle_probe_generated_puzzles_vary_by_seed()
+    {
+        var puzzles = Enumerable.Range(0, 8)
+            .Select(index => ChessQuestPuzzleProbeRunner.CreateGeneratedPuzzle(
+                trialNumber: index + 1,
+                seed: 10_000 + index * 137,
+                scramblePlies: 24))
+            .ToArray();
+
+        Assert.True(puzzles.Select(puzzle => puzzle.Fen).Distinct(StringComparer.Ordinal).Count() > 3);
+        Assert.All(puzzles, puzzle =>
+        {
+            Assert.Equal(ChessQuestPuzzleProbeSource.Generated, puzzle.Source);
+            Assert.NotEmpty(puzzle.AcceptedMoves);
+        });
+    }
+
+    [Fact]
     public void ChessQuest_puzzle_probe_flags_san_notation_as_invalid_uci()
     {
         var trial = ChessQuestPuzzleProbeRunner.BuiltInPuzzle();
