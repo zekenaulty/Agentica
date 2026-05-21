@@ -68,6 +68,7 @@ public sealed record ChessQuestPlanningFrame(
     IReadOnlyDictionary<string, object?> Board,
     IReadOnlyDictionary<string, object?> TurnContract,
     ChessQuestGoalSpine GoalSpine,
+    ChessQuestContinuityCapsule ContinuityCapsule,
     ChessQuestPlayingDoctrine PlayingDoctrine,
     ChessQuestDecisionProtocol DecisionProtocol);
 
@@ -107,6 +108,7 @@ public sealed class ChessQuestPlanningFrameProjector : IPlanningFrameProjector
                     ["phaseObjective"] = _phaseTracker?.Snapshot(_session).PhaseObjective,
                     ["phaseProgress"] = _phaseTracker?.Snapshot(_session).Progress,
                     ["goalSpine"] = frame.GoalSpine,
+                    ["continuityCapsule"] = frame.ContinuityCapsule,
                     ["playingDoctrine"] = frame.PlayingDoctrine,
                     ["decisionProtocol"] = frame.DecisionProtocol,
                     ["agenticHarness"] = harnessContext,
@@ -145,7 +147,9 @@ public static class ChessQuestCapabilitySurfaceCompiler
         - Do not claim completion unless chess.complete_objective emits chessquest.objective_completed.
         - Use chessFrame.decisionProtocol as the current operating grammar for goals, claim discipline, evidence, and risk checks.
         - Use chessFrame.goalSpine as compact evidence-backed continuity. It preserves current reality, active priority, known divergences, and next decision pressure; it is not proof and not a move hint.
+        - Use chessFrame.continuityCapsule as bounded chess-native handoff context. It may preserve strategic intent, pressures, uncertainties, confidence, and next bias; it is not proof, not raw reasoning, and not a solution line.
         - A legal move is not necessarily good or safe. A one-ply project_line result does not prove tactical safety or move quality.
+        - Evidence sources have limits: legal lists prove legality, project_line proves submitted rule projection, and modeled opponent replies cover only the replies you supplied.
         - Prefer turnIntent fields goal, evidence, hypothesis, riskCheck, and claimLevel when making a move.
         - If strategyProjection, strategyFrame, and phaseObjective are present, treat them as public strategic guidance, not board truth.
         - If strategyProjection, strategyFrame, or phaseObjective conflicts with chessFrame, prefer chessFrame and legal tool receipts.
@@ -175,6 +179,7 @@ public static class ChessQuestCapabilitySurfaceCompiler
             ["playingDoctrine"] = frame.PlayingDoctrine,
             ["decisionProtocol"] = frame.DecisionProtocol,
             ["goalSpine"] = frame.GoalSpine,
+            ["continuityCapsule"] = frame.ContinuityCapsule,
             ["strategyProjection"] = phaseTracker?.Snapshot(session).StrategyProjection,
             ["strategyFrame"] = phaseTracker?.Snapshot(session).StrategyFrame,
             ["phaseObjective"] = phaseTracker?.Snapshot(session).PhaseObjective,
@@ -249,7 +254,7 @@ public static class ChessQuestCapabilitySurfaceCompiler
             [
                 "non_public_oracle_data"
             ],
-            AntiLeakRules: AntiLeakRules);
+            AntiLeakRules: AntiLeakRulesFor(session));
 
         return new ChessQuestHarnessContext(
             Kind: "ChessQuestHarnessContext",
@@ -266,6 +271,10 @@ public static class ChessQuestCapabilitySurfaceCompiler
         var state = session.CurrentState;
         var decisionProtocol = ChessQuestGoalShapingPolicy.BuildDecisionProtocol(session, phaseTracker);
         var goalSpine = ChessQuestGoalSpineCompiler.Compile(session, phaseTracker, latestPhaseReport);
+        var continuityCapsule = ChessQuestContinuityCapsuleCompiler.Compile(
+            session,
+            latestPhaseReport,
+            phaseTracker?.Snapshot(session).StrategyProjection);
         return new ChessQuestPlanningFrame(
             Kind: "ChessQuestPlanningFrame",
             Version: "1.0",
@@ -280,6 +289,7 @@ public static class ChessQuestCapabilitySurfaceCompiler
             },
             TurnContract: TurnContract(session),
             GoalSpine: goalSpine,
+            ContinuityCapsule: continuityCapsule,
             PlayingDoctrine: decisionProtocol.PlayingDoctrine,
             DecisionProtocol: decisionProtocol);
     }
@@ -345,6 +355,17 @@ public static class ChessQuestCapabilitySurfaceCompiler
                 "Attack inspection is not exposed for this surface mode.");
         }
 
+        if (session.Scenario.DisclosurePolicy.EffectiveAllowCandidateInspection)
+        {
+            yield return new ChessQuestCapabilityBinding(
+                "inspect_agent_candidate",
+                "Inspect candidate after-state attack facts",
+                ChessQuestCapabilityBindingState.Available,
+                "The agent may inspect neutral public opponent capture facts after its own candidate move without scoring or ranking.",
+                ChessQuestToolIds.InspectCandidate,
+                Priority: 68);
+        }
+
         yield return new ChessQuestCapabilityBinding(
             "play_agent_move",
             "Play one legal agent move",
@@ -377,6 +398,11 @@ public static class ChessQuestCapabilitySurfaceCompiler
             allowed.Add("inspect public attack facts");
         }
 
+        if (session.Scenario.DisclosurePolicy.EffectiveAllowCandidateInspection)
+        {
+            allowed.Add("inspect neutral consequences after an agent-authored candidate move");
+        }
+
         if (session.Scenario.DisclosurePolicy.AllowLineProjection)
         {
             allowed.Add("project self-authored hypothetical lines");
@@ -385,7 +411,7 @@ public static class ChessQuestCapabilitySurfaceCompiler
         allowed.Add("play one legal move");
         allowed.Add("check completion");
 
-        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        var contract = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["mustUseUci"] = true,
             ["allowedNextActions"] = allowed.ToArray(),
@@ -401,16 +427,37 @@ public static class ChessQuestCapabilitySurfaceCompiler
             ["maxProjectedLinesPerTurn"] = session.Scenario.DisclosurePolicy.MaxProjectedLinesPerTurn,
             ["maxProjectedPliesPerLine"] = session.Scenario.DisclosurePolicy.MaxProjectedPliesPerLine
         };
+
+        if (session.Scenario.DisclosurePolicy.EffectiveAllowCandidateInspection)
+        {
+            contract["agentAuthoredCandidateInspectionAllowed"] = true;
+            contract["agentAuthoredCandidateConsequencesAllowed"] = true;
+            contract["maxCandidateInspectionsPerTurn"] = session.Scenario.DisclosurePolicy.EffectiveMaxCandidateInspectionsPerTurn;
+            contract["candidateInspectionDoesNotScoreOrChooseMoves"] = true;
+            contract["candidateInspectionDoesNotProveSafety"] = true;
+        }
+
+        return contract;
     }
 
-    private static IReadOnlyList<string> AntiLeakRules =>
-    [
-        "Do not expose host-selected candidate moves.",
-        "Do not expose non-public strategy, scoring, or host-selected candidates.",
-        "Do not expose the opponent selection process.",
-        "Do not expose hidden objective solution lines.",
-        "Only project consequences for UCI lines explicitly supplied by the agent."
-    ];
+    private static IReadOnlyList<string> AntiLeakRulesFor(ChessQuestSession session)
+    {
+        var rules = new List<string>
+        {
+            "Do not expose host-selected candidate moves.",
+            "Do not expose non-public strategy, scoring, or host-selected candidates.",
+            "Do not expose the opponent selection process.",
+            "Do not expose hidden objective solution lines.",
+            "Only project consequences for UCI lines explicitly supplied by the agent."
+        };
+
+        if (session.Scenario.DisclosurePolicy.EffectiveAllowCandidateInspection)
+        {
+            rules.Add("Only inspect consequences for UCI moves explicitly supplied by the agent.");
+        }
+
+        return rules;
+    }
 
     private static string HashObject(object value)
     {

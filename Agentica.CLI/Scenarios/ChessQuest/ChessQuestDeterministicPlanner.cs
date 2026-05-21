@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Agentica.Events;
 using Agentica.Observations;
 using Agentica.Planning;
@@ -8,8 +9,12 @@ namespace Agentica.CLI.Scenarios.ChessQuest;
 public sealed class ChessQuestDeterministicPlanner : IWorkflowPlanner
 {
     private readonly ChessQuestSession _session;
+    private readonly HashSet<string> _projectedLegalMoveObservationIds = new(StringComparer.Ordinal);
     private string? _latestLegalMoveObservationId;
     private string? _latestLegalMoveObservationFen;
+    private int? _latestLegalMoveObservationPly;
+    private string? _latestLegalMoveObservationSideToMove;
+    private string[] _latestLegalMoves = [];
     private int _nextStepNumber = 1;
 
     public ChessQuestDeterministicPlanner(ChessQuestSession session)
@@ -38,18 +43,21 @@ public sealed class ChessQuestDeterministicPlanner : IWorkflowPlanner
     private WorkflowPlan NextPlan()
     {
         var stepNumber = _nextStepNumber++;
+        var step = NextStep(stepNumber);
         return new WorkflowPlan(
             PlanId: $"chessquest_plan_{stepNumber:000}",
             Version: stepNumber,
-            Steps: [NextStep(stepNumber)],
+            Steps: [step],
             Description: "Deterministic ChessQuest plan slice.")
         {
-            PlanningReason = stepNumber switch
+            PlanningReason = step.ToolId switch
             {
-                <= 3 => "establish_public_chess_state",
-                4 => "project_agent_authored_line",
-                _ when _session.CurrentState.IsTerminal => "verify_terminal_win",
-                _ => "commit_public_chess_move"
+                ChessQuestToolIds.GetState or ChessQuestToolIds.RenderBoard or ChessQuestToolIds.ListLegalMoves =>
+                    "establish_public_chess_state",
+                ChessQuestToolIds.ProjectLine => "project_agent_authored_line",
+                ChessQuestToolIds.CompleteObjective => "verify_terminal_win",
+                ChessQuestToolIds.PlayMove => "commit_public_chess_move",
+                _ => "continue_deterministic_chessquest_slice"
             }
         };
     }
@@ -65,8 +73,9 @@ public sealed class ChessQuestDeterministicPlanner : IWorkflowPlanner
         {
             1 => Step(stepNumber, ChessQuestToolIds.GetState, ToolKind.Query, ToolEffect.ReadOnly),
             2 => Step(stepNumber, ChessQuestToolIds.RenderBoard, ToolKind.Query, ToolEffect.ReadOnly),
-            3 => Step(stepNumber, ChessQuestToolIds.ListLegalMoves, ToolKind.Query, ToolEffect.ReadOnly),
-            4 when _session.Scenario.DisclosurePolicy.AllowLineProjection =>
+            _ when !HasFreshLegalMoveObservation() =>
+                Step(stepNumber, ChessQuestToolIds.ListLegalMoves, ToolKind.Query, ToolEffect.ReadOnly),
+            _ when ShouldProjectCurrentLegalMoveObservation() =>
                 Step(
                     stepNumber,
                     ChessQuestToolIds.ProjectLine,
@@ -138,23 +147,125 @@ public sealed class ChessQuestDeterministicPlanner : IWorkflowPlanner
 
             _latestLegalMoveObservationId = observation.ObservationId;
             _latestLegalMoveObservationFen = fen;
+            _latestLegalMoveObservationPly = ReadInt(observation.Data, "ply");
+            _latestLegalMoveObservationSideToMove = ReadString(observation.Data, "sideToMove");
+            _latestLegalMoves = ReadStringArray(observation.Data, "legalMoves");
         }
     }
 
     private string[] CandidateLine()
     {
-        if (_session.Scenario.HiddenSolutionLine is { Count: > 0 } line)
+        if (_session.Scenario.HiddenSolutionLine is { Count: > 0 } line &&
+            line.FirstOrDefault() is { } hiddenMove &&
+            _latestLegalMoves.Contains(hiddenMove, StringComparer.Ordinal))
         {
-            return line.ToArray();
+            return [hiddenMove];
         }
 
-        return [PickFallbackLegalMove()];
+        return [PickBoundLegalMove()];
     }
+
+    private bool HasFreshLegalMoveObservation()
+    {
+        if (string.IsNullOrWhiteSpace(_latestLegalMoveObservationId) ||
+            string.IsNullOrWhiteSpace(_latestLegalMoveObservationFen))
+        {
+            return false;
+        }
+
+        var state = _session.CurrentState;
+        return string.Equals(_latestLegalMoveObservationFen, state.Fen, StringComparison.Ordinal) &&
+            _latestLegalMoveObservationPly == state.Ply &&
+            string.Equals(_latestLegalMoveObservationSideToMove, state.SideToMove.ToString().ToLowerInvariant(), StringComparison.Ordinal) &&
+            _latestLegalMoves.Length > 0;
+    }
+
+    private bool ShouldProjectCurrentLegalMoveObservation()
+    {
+        if (!_session.Scenario.DisclosurePolicy.AllowLineProjection ||
+            string.IsNullOrWhiteSpace(_latestLegalMoveObservationId) ||
+            _projectedLegalMoveObservationIds.Contains(_latestLegalMoveObservationId))
+        {
+            return false;
+        }
+
+        _projectedLegalMoveObservationIds.Add(_latestLegalMoveObservationId);
+        return true;
+    }
+
+    private string PickBoundLegalMove() =>
+        _latestLegalMoves.FirstOrDefault() ?? PickFallbackLegalMove();
 
     private string PickFallbackLegalMove()
     {
         var legalMoves = new GeraChessRulesEngine(_session.CurrentState.Fen).ListLegalMoves();
         return legalMoves.FirstOrDefault()?.Uci ?? "a2a3";
+    }
+
+    private static int? ReadInt(IReadOnlyDictionary<string, object?> source, string key)
+    {
+        if (!source.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            int intValue => intValue,
+            long longValue when longValue is >= int.MinValue and <= int.MaxValue => (int)longValue,
+            JsonElement { ValueKind: JsonValueKind.Number } json when json.TryGetInt32(out var intValue) => intValue,
+            _ when int.TryParse(Convert.ToString(value), out var parsed) => parsed,
+            _ => null
+        };
+    }
+
+    private static string? ReadString(IReadOnlyDictionary<string, object?> source, string key) =>
+        source.TryGetValue(key, out var value) && value is not null
+            ? Convert.ToString(value)
+            : null;
+
+    private static string[] ReadStringArray(IReadOnlyDictionary<string, object?> source, string key)
+    {
+        if (!source.TryGetValue(key, out var value) || value is null)
+        {
+            return [];
+        }
+
+        if (value is string text)
+        {
+            return string.IsNullOrWhiteSpace(text) ? [] : [text];
+        }
+
+        if (value is JsonElement json)
+        {
+            return json.ValueKind == JsonValueKind.Array
+                ? json.EnumerateArray()
+                    .Select(item => item.GetString())
+                    .Where(item => !string.IsNullOrWhiteSpace(item))
+                    .Select(item => item!.Trim().ToLowerInvariant())
+                    .ToArray()
+                : [];
+        }
+
+        if (value is IEnumerable<string> strings)
+        {
+            return strings
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Select(item => item.Trim().ToLowerInvariant())
+                .ToArray();
+        }
+
+        if (value is System.Collections.IEnumerable items)
+        {
+            return items
+                .Cast<object?>()
+                .Select(item => Convert.ToString(item))
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Select(item => item!.Trim().ToLowerInvariant())
+                .ToArray();
+        }
+
+        return [];
     }
 
     private static PlanStep Step(

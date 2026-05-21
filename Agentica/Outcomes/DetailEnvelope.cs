@@ -1,4 +1,5 @@
 using Agentica.Artifacts;
+using Agentica.Continuity;
 using Agentica.Execution;
 using Agentica.Events;
 using Agentica.Observations;
@@ -23,4 +24,11 @@ public sealed record DetailEnvelope(
     public IReadOnlyList<ToolSurfaceSnapshot> ToolSurfaces { get; init; } = [];
 
     public IReadOnlyList<PlanningFrame> PlanningFrames { get; init; } = [];
+
+    public BreadcrumbLedger Breadcrumbs { get; init; } = new([]);
+
+    public DivergenceLedger Divergences { get; init; } = new([]);
+
+    public ContinuitySummary Continuity { get; init; } =
+        new(0, 0, 0, 0, 0, 1, false, []);
 }

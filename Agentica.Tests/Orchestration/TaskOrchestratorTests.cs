@@ -139,6 +139,90 @@ public sealed class TaskOrchestratorTests
     }
 
     [Fact]
+    public async Task Orchestrator_preserves_child_plan_invalid_when_refinement_budget_is_exhausted()
+    {
+        var task = Task("phase", "Run a child phase.");
+        var planner = new ScriptedTaskPlanner(Plan([task]));
+        var executor = new ScriptedRunExecutor(
+        [
+            Envelope("run_phase_invalid", RunOutcomeStatus.PlanInvalid, StopReason.PlanInvalid)
+        ]);
+        var evaluator = new ScriptedAcceptanceEvaluator(_ =>
+            new TaskAcceptanceResult(
+                TaskAcceptanceStatus.PartiallyAccepted,
+                ["Child run produced an invalid plan and would need repair."],
+                [],
+                RequiresGraphRefinement: true));
+        var orchestrator = new TaskOrchestrator(
+            planner,
+            executor,
+            evaluator,
+            new DeterministicWorkContextCompiler(),
+            () => new Dictionary<string, object?>(),
+            new OrchestrationPolicy(MaxRuns: 1, MaxRefinements: 0));
+
+        var outcome = await orchestrator.RunAsync(Request("Preserve child plan-invalid failure."));
+
+        Assert.Equal(OrchestrationStatus.PlanInvalid, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.PlanInvalid, outcome.StopReason);
+        Assert.NotEqual(OrchestrationStopReason.MaxRefinementsReached, outcome.StopReason);
+        Assert.Single(outcome.RunOutcomes);
+        Assert.Equal(RunOutcomeStatus.PlanInvalid, outcome.RunOutcomes[0].Outcome.Status);
+    }
+
+    [Fact]
+    public async Task Orchestrator_preserves_terminal_loss_child_stop_reason()
+    {
+        var task = Task("phase", "Run a terminal child phase.");
+        var planner = new ScriptedTaskPlanner(Plan([task]));
+        var executor = new ScriptedRunExecutor(
+        [
+            Envelope("run_terminal_loss", RunOutcomeStatus.Failed, StopReason.TerminalLoss)
+        ]);
+        var evaluator = new ScriptedAcceptanceEvaluator(_ =>
+            new TaskAcceptanceResult(
+                TaskAcceptanceStatus.Rejected,
+                ["Child run reached terminal loss."],
+                []));
+        var orchestrator = CreateOrchestrator(planner, executor, evaluator);
+
+        var outcome = await orchestrator.RunAsync(Request("Preserve terminal loss."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.TerminalLoss, outcome.StopReason);
+    }
+
+    [Fact]
+    public async Task Orchestrator_preserves_child_planner_unavailable_when_refinement_budget_is_exhausted()
+    {
+        var task = Task("phase", "Run a child phase.");
+        var planner = new ScriptedTaskPlanner(Plan([task]));
+        var executor = new ScriptedRunExecutor(
+        [
+            Envelope("run_planner_unavailable", RunOutcomeStatus.Blocked, StopReason.PlannerUnavailable)
+        ]);
+        var evaluator = new ScriptedAcceptanceEvaluator(_ =>
+            new TaskAcceptanceResult(
+                TaskAcceptanceStatus.PartiallyAccepted,
+                ["Child planner was unavailable and would need retry."],
+                [],
+                RequiresGraphRefinement: true));
+        var orchestrator = new TaskOrchestrator(
+            planner,
+            executor,
+            evaluator,
+            new DeterministicWorkContextCompiler(),
+            () => new Dictionary<string, object?>(),
+            new OrchestrationPolicy(MaxRuns: 1, MaxRefinements: 0));
+
+        var outcome = await orchestrator.RunAsync(Request("Preserve child planner-unavailable failure."));
+
+        Assert.Equal(OrchestrationStatus.Blocked, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.PlannerUnavailable, outcome.StopReason);
+        Assert.NotEqual(OrchestrationStopReason.MaxRefinementsReached, outcome.StopReason);
+    }
+
+    [Fact]
     public void Graph_validator_rejects_rewriting_completed_tasks()
     {
         var original = Plan([Task("done"), Task("next", dependsOn: ["done"])]);
@@ -286,12 +370,15 @@ public sealed class TaskOrchestratorTests
             new Dictionary<string, object?>(),
             [new TaskAcceptanceRequirement(TaskAcceptanceRequirementKind.OutcomeStatus, RunOutcomeStatus.Succeeded)]);
 
-    private static OutcomeEnvelope Envelope(string runId, RunOutcomeStatus status) =>
+    private static OutcomeEnvelope Envelope(
+        string runId,
+        RunOutcomeStatus status,
+        StopReason? stopReason = null) =>
         new(
             new RunOutcome(
                 runId,
                 status,
-                status == RunOutcomeStatus.Succeeded ? StopReason.Complete : StopReason.ToolFailure,
+                stopReason ?? (status == RunOutcomeStatus.Succeeded ? StopReason.Complete : StopReason.ToolFailure),
                 [],
                 [],
                 [new EvidenceRef("artifact", $"artifact_{runId}")]),

@@ -231,11 +231,15 @@ public sealed class ChessQuestHarnessTests
         var protocol = Assert.IsType<ChessQuestDecisionProtocol>(context["decisionProtocol"]);
 
         Assert.Contains(catalog.Descriptors, descriptor => descriptor.ToolId == ChessQuestToolIds.InspectAttacks);
+        Assert.Contains(catalog.Descriptors, descriptor => descriptor.ToolId == ChessQuestToolIds.InspectCandidate);
         Assert.Contains(protocol.ToolSemantics, pair => pair.Key == ChessQuestToolIds.InspectAttacks);
+        Assert.Contains(protocol.ToolSemantics, pair => pair.Key == ChessQuestToolIds.InspectCandidate);
 
         var harness = ChessQuestCapabilitySurfaceCompiler.BuildHarnessContext(session);
         Assert.Contains(ChessQuestToolIds.InspectAttacks, harness.ContextSurfaceReceipt.ExposedToolIds);
+        Assert.Contains(ChessQuestToolIds.InspectCandidate, harness.ContextSurfaceReceipt.ExposedToolIds);
         Assert.Equal(true, harness.ActiveCapabilitySurface.TurnContract["attackInspectionAllowed"]);
+        Assert.Equal(true, harness.ActiveCapabilitySurface.TurnContract["agentAuthoredCandidateInspectionAllowed"]);
     }
 
     [Fact]
@@ -263,6 +267,123 @@ public sealed class ChessQuestHarnessTests
         Assert.Equal("f4", attacked.Square);
         Assert.Equal("white_bishop", attacked.Piece);
         Assert.Contains("c7f4", attacked.CaptureMoves);
+    }
+
+    [Fact]
+    public async Task ChessQuest_inspect_candidate_returns_after_candidate_opponent_captures_without_guidance()
+    {
+        const string candidateFen = "4k3/ppb5/8/8/8/4B3/PP6/4K3 w - - 0 1";
+        var session = CreateSession(
+            fen: candidateFen,
+            policy: ChessQuestDisclosurePolicy.StrictRefereeThreatAware);
+        var legalMoves = await InvokeAsync(session, ChessQuestToolIds.ListLegalMoves, new Dictionary<string, object?>());
+        var legalMoveObservationId = Assert.IsType<string>(legalMoves.Receipt.Data["legalMoveObservationId"]);
+
+        var result = await InvokeAsync(
+            session,
+            ChessQuestToolIds.InspectCandidate,
+            new Dictionary<string, object?>
+            {
+                ["move"] = "e3f4",
+                ["legalMoveObservationId"] = legalMoveObservationId
+            });
+
+        Assert.Equal(ReceiptStatus.Succeeded, result.Receipt.Status);
+        Assert.Equal(candidateFen, session.CurrentState.Fen);
+        var inspection = Assert.IsType<ChessCandidateInspection>(result.Receipt.Data["candidateInspection"]);
+        Assert.True(inspection.CandidateLegal);
+        Assert.Equal("e3f4", inspection.AcceptedMove);
+        Assert.True(inspection.ReadOnly);
+        Assert.True(inspection.SessionFenUnchanged);
+        Assert.True(inspection.LegalProjectionOnly);
+        Assert.True(inspection.CandidateScanOnly);
+        Assert.False(inspection.MoveQualityKnown);
+        Assert.False(inspection.SafetyKnown);
+        Assert.False(inspection.OpponentReplyModeled);
+        Assert.False(inspection.EvaluationIncluded);
+        Assert.False(inspection.GuidanceIncluded);
+        Assert.NotNull(inspection.AttackInspectionAfterCandidate);
+        var attackInspection = inspection.AttackInspectionAfterCandidate!;
+        Assert.Contains(attackInspection.OpponentLegalCaptures, capture =>
+            capture.Move == "c7f4" &&
+            capture.From == "c7" &&
+            capture.To == "f4" &&
+            capture.CapturedPiece == "white_bishop");
+    }
+
+    [Fact]
+    public async Task ChessQuest_inspect_candidate_requires_current_legal_observation_binding()
+    {
+        var session = CreateSession(policy: ChessQuestDisclosurePolicy.StrictRefereeThreatAware);
+
+        var result = await InvokeAsync(
+            session,
+            ChessQuestToolIds.InspectCandidate,
+            new Dictionary<string, object?>
+            {
+                ["move"] = "e2e4"
+            });
+
+        Assert.Equal(ReceiptStatus.Refused, result.Receipt.Status);
+        Assert.Equal("missing_legal_move_observation_id", result.Receipt.Data["reason"]);
+        Assert.Contains(ChessQuestToolIds.InspectCandidate, result.Receipt.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(StartFen, session.CurrentState.Fen);
+    }
+
+    [Fact]
+    public async Task ChessQuest_inspect_candidate_enforces_per_turn_budget()
+    {
+        var session = CreateSession(policy: ChessQuestDisclosurePolicy.StrictRefereeThreatAware);
+        var legalMoves = await InvokeAsync(session, ChessQuestToolIds.ListLegalMoves, new Dictionary<string, object?>());
+        var legalMoveObservationId = Assert.IsType<string>(legalMoves.Receipt.Data["legalMoveObservationId"]);
+
+        foreach (var move in new[] { "e2e4", "d2d4", "g1f3" })
+        {
+            var accepted = await InvokeAsync(
+                session,
+                ChessQuestToolIds.InspectCandidate,
+                new Dictionary<string, object?>
+                {
+                    ["move"] = move,
+                    ["legalMoveObservationId"] = legalMoveObservationId
+                });
+            Assert.Equal(ReceiptStatus.Succeeded, accepted.Receipt.Status);
+        }
+
+        var refused = await InvokeAsync(
+            session,
+            ChessQuestToolIds.InspectCandidate,
+            new Dictionary<string, object?>
+            {
+                ["move"] = "c2c4",
+                ["legalMoveObservationId"] = legalMoveObservationId
+            });
+
+        Assert.Equal(ReceiptStatus.Refused, refused.Receipt.Status);
+        Assert.Equal("candidate_inspection_budget_exhausted", refused.Receipt.Data["reason"]);
+        Assert.Equal(3, refused.Receipt.Data["maxCandidateInspectionsPerTurn"]);
+    }
+
+    [Fact]
+    public async Task ChessQuest_inspect_candidate_requires_agent_turn()
+    {
+        var session = CreateSession(
+            agentColor: ChessQuestColor.Black,
+            policy: ChessQuestDisclosurePolicy.StrictRefereeThreatAware);
+        var legalMoves = await InvokeAsync(session, ChessQuestToolIds.ListLegalMoves, new Dictionary<string, object?>());
+        var legalMoveObservationId = Assert.IsType<string>(legalMoves.Receipt.Data["legalMoveObservationId"]);
+
+        var result = await InvokeAsync(
+            session,
+            ChessQuestToolIds.InspectCandidate,
+            new Dictionary<string, object?>
+            {
+                ["move"] = "e2e4",
+                ["legalMoveObservationId"] = legalMoveObservationId
+            });
+
+        Assert.Equal(ReceiptStatus.Refused, result.Receipt.Status);
+        Assert.Equal("agent_not_to_move", result.Receipt.Data["reason"]);
     }
 
     [Fact]
@@ -604,6 +725,7 @@ public sealed class ChessQuestHarnessTests
         var doctrine = Assert.IsType<ChessQuestPlayingDoctrine>(context["playingDoctrine"]);
         var protocol = Assert.IsType<ChessQuestDecisionProtocol>(context["decisionProtocol"]);
         var goalSpine = Assert.IsType<ChessQuestGoalSpine>(context["goalSpine"]);
+        var continuityCapsule = Assert.IsType<ChessQuestContinuityCapsule>(context["continuityCapsule"]);
         var chessFrame = Assert.IsType<ChessQuestPlanningFrame>(context["chessFrame"]);
         Assert.Equal("opening", strategyFrame.Phase);
         Assert.Equal("opening", objective.Phase);
@@ -615,8 +737,10 @@ public sealed class ChessQuestHarnessTests
         Assert.Contains("not mean good or safe", protocol.ToolSemantics[ChessQuestToolIds.ListLegalMoves], StringComparison.OrdinalIgnoreCase);
         Assert.Contains(protocol.ClaimDiscipline, item => item.Contains("legal", StringComparison.OrdinalIgnoreCase) && item.Contains("safe", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(chessFrame.GoalSpine, goalSpine);
+        Assert.Equal(chessFrame.ContinuityCapsule, continuityCapsule);
         Assert.Contains("legal", goalSpine.ActiveConstraints[2], StringComparison.OrdinalIgnoreCase);
         Assert.Contains("proof", goalSpine.ActiveConstraints[0], StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("not proof", ChessQuestCapabilitySurfaceCompiler.PromptTemplateShape, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -626,9 +750,52 @@ public sealed class ChessQuestHarnessTests
 
         Assert.Contains("legal move is not necessarily good or safe", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("one-ply project_line result does not prove tactical safety or move quality", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Evidence sources have limits", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate scan", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("inspect_candidate", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("goalSpine", prompt, StringComparison.Ordinal);
+        Assert.Contains("continuityCapsule", prompt, StringComparison.Ordinal);
         Assert.Contains("not proof", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("legalMoveObservationId", prompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ChessQuest_projected_surface_does_not_leak_unavailable_candidate_tool()
+    {
+        var session = CreateSession(policy: ChessQuestDisclosurePolicy.StrictRefereeProjected);
+        var catalog = ChessQuestTools.CreateCatalog(session);
+        var harness = ChessQuestCapabilitySurfaceCompiler.BuildHarnessContext(session);
+        var context = ChessQuestCapabilitySurfaceCompiler.BuildPlannerContext(session);
+        var json = JsonSerializer.Serialize(new { harness, context }, JsonOptions());
+
+        Assert.DoesNotContain(catalog.Descriptors, descriptor => descriptor.ToolId == ChessQuestToolIds.InspectCandidate);
+        Assert.DoesNotContain(ChessQuestToolIds.InspectCandidate, harness.ContextSurfaceReceipt.ExposedToolIds);
+        Assert.False(harness.ActiveCapabilitySurface.TurnContract.ContainsKey("agentAuthoredCandidateInspectionAllowed"));
+        Assert.DoesNotContain("chess.inspect_candidate", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("inspect_agent_candidate", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ChessQuest_threat_aware_legacy_policy_enables_effective_candidate_inspection()
+    {
+        var policy = new ChessQuestDisclosurePolicy(
+            Mode: ChessQuestMode.StrictRefereeThreatAware,
+            IncludeSan: false,
+            IncludeCurrentCheckStatus: true,
+            IncludeHostCandidateConsequences: false,
+            IncludeMaterialCounts: false,
+            IncludeTacticalLabels: false,
+            IncludeEngineEvaluation: false,
+            IncludeHiddenObjectiveHints: false,
+            AllowLineProjection: true,
+            MaxProjectedLinesPerTurn: 4,
+            MaxProjectedPliesPerLine: 6,
+            IncludeProjectionCaptures: true,
+            AllowAttackInspection: true);
+
+        Assert.False(policy.AllowCandidateInspection);
+        Assert.True(policy.EffectiveAllowCandidateInspection);
+        Assert.Equal(3, policy.EffectiveMaxCandidateInspectionsPerTurn);
     }
 
     [Fact]
@@ -646,6 +813,154 @@ public sealed class ChessQuestHarnessTests
             lesson.Contains("material loss", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain("play ", spine.ActivePriority, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("e2e4", spine.ActivePriority, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ChessQuest_goal_spine_records_unsupported_safety_claim_as_continuity_pressure()
+    {
+        var session = CreateSession(opponentMoves: []);
+        var legalMoves = await InvokeAsync(session, ChessQuestToolIds.ListLegalMoves, new Dictionary<string, object?>());
+        var legalMoveObservationId = Assert.IsType<string>(legalMoves.Receipt.Data["legalMoveObservationId"]);
+
+        var result = await InvokeAsync(
+            session,
+            ChessQuestToolIds.PlayMove,
+            new Dictionary<string, object?>
+            {
+                ["move"] = "e2e4",
+                ["legalMoveObservationId"] = legalMoveObservationId,
+                ["turnIntent"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["agentColor"] = "white",
+                    ["selectedMove"] = "e2e4",
+                    ["legalBasis"] = "selected_from_current_legal_move_list",
+                    ["goal"] = "Play a safe move.",
+                    ["evidence"] = new[] { "e2e4 appeared in the legal move list" },
+                    ["hypothesis"] = "This move is safe and secure.",
+                    ["riskCheck"] = "No risk remains.",
+                    ["claimLevel"] = "verified",
+                    ["publicReason"] = "The move is safe.",
+                    ["completionClaim"] = false
+                }
+            });
+
+        Assert.Equal(ReceiptStatus.Succeeded, result.Receipt.Status);
+
+        var spine = ChessQuestGoalSpineCompiler.Compile(session);
+
+        Assert.Contains("safety claim", spine.KnownDivergence, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("opponent", spine.NextDecisionPressure, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(spine.RecentLessons, lesson =>
+            lesson.Contains("do not prove full tactical safety", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(spine.EvidenceRefs, evidence =>
+            evidence == $"receipt:{result.Receipt.ReceiptId}");
+    }
+
+    [Fact]
+    public async Task ChessQuest_goal_spine_records_unsupported_checkmate_claim_as_continuity_pressure()
+    {
+        var session = CreateSession(opponentMoves: []);
+        var legalMoves = await InvokeAsync(session, ChessQuestToolIds.ListLegalMoves, new Dictionary<string, object?>());
+        var legalMoveObservationId = Assert.IsType<string>(legalMoves.Receipt.Data["legalMoveObservationId"]);
+
+        var result = await InvokeAsync(
+            session,
+            ChessQuestToolIds.PlayMove,
+            new Dictionary<string, object?>
+            {
+                ["move"] = "e2e4",
+                ["legalMoveObservationId"] = legalMoveObservationId,
+                ["turnIntent"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["agentColor"] = "white",
+                    ["selectedMove"] = "e2e4",
+                    ["legalBasis"] = "selected_from_current_legal_move_list",
+                    ["goal"] = "Deliver checkmate.",
+                    ["evidence"] = new[] { "e2e4 appeared in the legal move list" },
+                    ["hypothesis"] = "This move checkmates Black.",
+                    ["riskCheck"] = "Verifier will confirm the terminal state.",
+                    ["claimLevel"] = "verified",
+                    ["publicReason"] = "This is checkmate.",
+                    ["completionClaim"] = false
+                }
+            });
+
+        Assert.Equal(ReceiptStatus.Succeeded, result.Receipt.Status);
+
+        var spine = ChessQuestGoalSpineCompiler.Compile(session);
+
+        Assert.Contains("checkmate", spine.KnownDivergence, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("terminal", spine.NextDecisionPressure, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(spine.RecentLessons, lesson =>
+            lesson.Contains("Checkmate claims require", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ChessQuest_continuity_capsule_records_chess_native_handoff_without_move_hinting()
+    {
+        var session = CreateSession();
+        var latest = PhaseReport(materialAfter: -3, materialDelta: -3);
+
+        var capsule = ChessQuestContinuityCapsuleCompiler.Compile(session, latest);
+
+        Assert.Equal("chessquest.continuity_capsule", capsule.Kind);
+        Assert.Equal(session.CurrentState.Fen, capsule.CurrentFen);
+        Assert.Equal("low", capsule.Confidence);
+        Assert.Contains(capsule.PressurePoints, point =>
+            point.Contains("lost material", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(capsule.Uncertainties, uncertainty =>
+            uncertainty.Contains("Legal and projection evidence", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("stabilization", capsule.RecommendedNextBias, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("e2e4", capsule.RecommendedNextBias, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("play ", capsule.RecommendedNextBias, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ChessQuest_continuity_capsule_can_be_imported_into_next_planning_frame()
+    {
+        var priorSession = CreateSession();
+        var prior = ChessQuestContinuityCapsuleCompiler.Compile(
+            priorSession,
+            PhaseReport(materialAfter: -3, materialDelta: -3));
+        var nextSession = CreateSession();
+
+        nextSession.ImportContinuityCapsule(prior);
+        var context = ChessQuestCapabilitySurfaceCompiler.BuildPlannerContext(nextSession);
+        var capsule = Assert.IsType<ChessQuestContinuityCapsule>(context["continuityCapsule"]);
+
+        Assert.NotNull(capsule.PriorRunCarryover);
+        Assert.Equal(prior.CurrentFen, capsule.PriorRunCarryover!.CurrentFen);
+        Assert.Null(capsule.PriorRunCarryover.PriorRunCarryover);
+        Assert.Contains(capsule.PriorRunCarryover.PressurePoints, point =>
+            point.Contains("lost material", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ChessQuest_game_record_store_persists_and_loads_continuity_capsule()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"chessquest_capsule_{Guid.NewGuid():N}");
+        try
+        {
+            var session = CreateSession();
+            var latest = PhaseReport(materialAfter: -3, materialDelta: -3);
+
+            ChessQuestGameRecordStore.WriteDirectory(directory, session);
+            ChessQuestGameRecordStore.WriteContinuityCapsule(directory, session, latest);
+
+            var loaded = ChessQuestGameRecordStore.TryLoadContinuityCapsule(directory);
+
+            Assert.NotNull(loaded);
+            Assert.Equal(session.CurrentState.Fen, loaded!.CurrentFen);
+            Assert.Contains(loaded.PressurePoints, point =>
+                point.Contains("lost material", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
     }
 
     [Fact]
@@ -678,6 +993,13 @@ public sealed class ChessQuestHarnessTests
         var legalMoves = catalog.Descriptors.Single(descriptor => descriptor.ToolId == ChessQuestToolIds.ListLegalMoves);
         Assert.Contains("legality does not imply safety", legalMoves.Description, StringComparison.OrdinalIgnoreCase);
 
+        var threatAwareCatalog = ChessQuestTools.CreateCatalog(CreateSession(policy: ChessQuestDisclosurePolicy.StrictRefereeThreatAware));
+        var inspectCandidate = threatAwareCatalog.Descriptors.Single(descriptor => descriptor.ToolId == ChessQuestToolIds.InspectCandidate);
+        Assert.Contains("agent-authored candidate move", inspectCandidate.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("does not rank", inspectCandidate.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prove safety", inspectCandidate.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("choose a reply", inspectCandidate.Description, StringComparison.OrdinalIgnoreCase);
+
         var descriptorJson = JsonSerializer.Serialize(catalog.Descriptors, JsonOptions());
         Assert.DoesNotContain("g1f3", descriptorJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("e2e4", descriptorJson, StringComparison.OrdinalIgnoreCase);
@@ -705,9 +1027,36 @@ public sealed class ChessQuestHarnessTests
         Assert.Contains(protocol.ClaimDiscipline, item =>
             item.Contains("one-ply", StringComparison.OrdinalIgnoreCase) &&
             item.Contains("safety", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(protocol.ClaimDiscipline, item =>
+            item.Contains("after-candidate", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(protocol.EvidenceDepthRules, item =>
+            item.Contains("inspect_candidate", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(protocol.ForbiddenClaimLanguageWithoutEvidence, item =>
             string.Equals(item, "safe", StringComparison.OrdinalIgnoreCase));
         Assert.Contains("does not evaluate quality", protocol.ToolSemantics[ChessQuestToolIds.ProjectLine], StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ChessQuest_threat_aware_decision_protocol_mentions_candidate_inspection_only_when_exposed()
+    {
+        var session = CreateSession(policy: ChessQuestDisclosurePolicy.StrictRefereeThreatAware);
+        var projection = ChessQuestPhaseTracker.DefaultProjection(
+            session,
+            "tactical",
+            source: "test");
+        var phase = ChessQuestPhaseTracker.Create(
+            session,
+            "tactical",
+            maxAgentTurns: 2,
+            strategyProjection: projection);
+
+        var protocol = ChessQuestGoalShapingPolicy.BuildDecisionProtocol(session, phase);
+
+        Assert.Contains(protocol.ClaimDiscipline, item =>
+            item.Contains("after-candidate", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(protocol.EvidenceDepthRules, item =>
+            item.Contains("inspect_candidate", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(ChessQuestToolIds.InspectCandidate, protocol.ToolSemantics.Keys);
     }
 
     [Fact]
@@ -1601,7 +1950,7 @@ public sealed class ChessQuestHarnessTests
         Assert.True(session.CurrentState.IsTerminal);
         Assert.Equal(ChessQuestColor.Black, session.CurrentState.TerminalState?.Winner);
         Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
-        Assert.Equal(OrchestrationStopReason.Failed, outcome.StopReason);
+        Assert.Equal(OrchestrationStopReason.TerminalLoss, outcome.StopReason);
         Assert.NotEqual(OrchestrationStatus.Blocked, outcome.Status);
         Assert.NotEqual(OrchestrationStopReason.MaxRefinementsReached, outcome.StopReason);
     }
@@ -1635,6 +1984,45 @@ public sealed class ChessQuestHarnessTests
         Assert.NotNull(stepStarted.Intent);
         Assert.Equal("Play e2e4 as White.", stepStarted.Intent!.Action);
         Assert.Contains("public legal move", stepStarted.Intent.Rationale, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ChessQuest_deterministic_planner_refreshes_legal_moves_after_committed_turn()
+    {
+        var session = CreateSession(opponentMoves: ["e7e5", "d7d5"]);
+        var runner = new AgenticaRunner(
+            new ChessQuestDeterministicPlanner(session),
+            ChessQuestTools.CreateCatalog(session),
+            new InMemoryEventSink(),
+            new ChessQuestOutcomeReporter(),
+            new ExecutionPolicy(
+                MaxSteps: 8,
+                MaxRefinements: 8,
+                MaxPlanContinuations: 2,
+                PlanningMode: PlanningMode.QueryAndBlockerDriven),
+            completionEvaluator: new ChessQuestCompletionEvaluator(session),
+            planningFrameProjector: new ChessQuestPlanningFrameProjector(session));
+
+        await runner.RunAsync(new RunRequest(
+            "Win the game as White. Draw is not success.",
+            RequestOrigin.User,
+            ChessQuestCapabilitySurfaceCompiler.BuildPlannerContext(session)));
+
+        var playTurns = session.Turns
+            .Where(turn => string.Equals(turn.Invocation.ToolId, ChessQuestToolIds.PlayMove, StringComparison.Ordinal))
+            .ToArray();
+        Assert.True(playTurns.Count(turn => turn.Result.Receipt.Status == ReceiptStatus.Succeeded) >= 2);
+        Assert.True(session.CommittedPlies.Count(ply => ply.Source == "agent") >= 2);
+        Assert.True(session.Turns.Count(turn =>
+            string.Equals(turn.Invocation.ToolId, ChessQuestToolIds.ListLegalMoves, StringComparison.Ordinal)) >= 2);
+
+        var refusalReasons = session.Turns
+            .Where(turn => turn.Result.Receipt.Status == ReceiptStatus.Refused)
+            .Select(turn => Convert.ToString(turn.Result.Receipt.Data["reason"]))
+            .ToArray();
+        Assert.DoesNotContain("missing_legal_move_observation_id", refusalReasons);
+        Assert.DoesNotContain("stale_legal_move_observation", refusalReasons);
+        Assert.DoesNotContain("move_not_in_legal_move_observation", refusalReasons);
     }
 
     [Fact]
@@ -1746,6 +2134,89 @@ public sealed class ChessQuestHarnessTests
         var output = writer.ToString();
         Assert.Contains("Trace warning: intent uses strong claim language", output);
         Assert.Contains("Trace warning: safety claim is unsupported", output);
+    }
+
+    [Fact]
+    public async Task ChessQuest_cockpit_warns_when_safety_claim_conflicts_with_candidate_scan()
+    {
+        const string candidateFen = "4k3/ppb5/8/8/8/4B3/PP6/4K3 w - - 0 1";
+        var session = CreateSession(
+            fen: candidateFen,
+            policy: ChessQuestDisclosurePolicy.StrictRefereeThreatAware);
+        var legalMoves = await InvokeAsync(session, ChessQuestToolIds.ListLegalMoves, new Dictionary<string, object?>());
+        var legalMoveObservationId = Assert.IsType<string>(legalMoves.Receipt.Data["legalMoveObservationId"]);
+        var scan = await InvokeAsync(
+            session,
+            ChessQuestToolIds.InspectCandidate,
+            new Dictionary<string, object?>
+            {
+                ["move"] = "e3f4",
+                ["legalMoveObservationId"] = legalMoveObservationId
+            });
+        var result = await InvokeAsync(
+            session,
+            ChessQuestToolIds.PlayMove,
+            new Dictionary<string, object?>
+            {
+                ["move"] = "e3f4",
+                ["legalMoveObservationId"] = legalMoveObservationId,
+                ["turnIntent"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["agentColor"] = "white",
+                    ["selectedMove"] = "e3f4",
+                    ["legalBasis"] = "selected_from_current_legal_move_list",
+                    ["goal"] = "Make a safe improving move.",
+                    ["evidence"] = new[] { "e3f4 appeared in the current legal move list" },
+                    ["hypothesis"] = "The move is safe.",
+                    ["riskCheck"] = "No risk identified.",
+                    ["claimLevel"] = "assertion",
+                    ["publicReason"] = "This move is safe.",
+                    ["completionClaim"] = false
+                }
+            });
+        Assert.Equal(ReceiptStatus.Succeeded, result.Receipt.Status);
+
+        var sink = new ChessQuestCockpitEventSink(session);
+        using var writer = new StringWriter();
+        var originalOut = Console.Out;
+        try
+        {
+            Console.SetOut(writer);
+            EmitReceipt(sink, scan.Receipt, ChessQuestToolIds.InspectCandidate, "step_scan");
+            EmitReceipt(sink, result.Receipt, ChessQuestToolIds.PlayMove, "step_play");
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+
+        var output = writer.ToString();
+        Assert.Contains("Trace warning: safety claim conflicts with candidate scan", output);
+    }
+
+    private static void EmitReceipt(
+        ChessQuestCockpitEventSink sink,
+        Receipt receipt,
+        string toolId,
+        string stepId)
+    {
+        sink.Emit(new ExecutionEvent(
+            $"event_{stepId}",
+            "receipt.emitted",
+            DateTimeOffset.UtcNow,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["receipt"] = receipt.ReceiptId,
+                ["status"] = receipt.Status.ToString()
+            })
+        {
+            Context = new ExecutionEventContext(
+                RunId: "run_test",
+                AttemptNumber: 1,
+                StepId: stepId,
+                ToolId: toolId,
+                ReceiptId: receipt.ReceiptId)
+        });
     }
 
     private static ChessQuestSession CreateSession(

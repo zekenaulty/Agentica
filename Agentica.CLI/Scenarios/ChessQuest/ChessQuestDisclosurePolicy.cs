@@ -14,8 +14,19 @@ public sealed record ChessQuestDisclosurePolicy(
     int MaxProjectedPliesPerLine,
     bool IncludeProjectionCaptures,
     bool AllowAttackInspection,
-    bool RequireLegalMoveObservationForPlay)
+    bool AllowCandidateInspection = false,
+    int MaxCandidateInspectionsPerTurn = 0,
+    bool RequireLegalMoveObservationForPlay = true)
 {
+    public bool EffectiveAllowCandidateInspection =>
+        AllowCandidateInspection ||
+        (Mode == ChessQuestMode.StrictRefereeThreatAware && AllowAttackInspection);
+
+    public int EffectiveMaxCandidateInspectionsPerTurn =>
+        EffectiveAllowCandidateInspection
+            ? Math.Max(1, MaxCandidateInspectionsPerTurn == 0 ? 3 : MaxCandidateInspectionsPerTurn)
+            : 0;
+
     public static ChessQuestDisclosurePolicy StrictRefereeHard { get; } = new(
         Mode: ChessQuestMode.StrictRefereeHard,
         IncludeSan: false,
@@ -30,6 +41,8 @@ public sealed record ChessQuestDisclosurePolicy(
         MaxProjectedPliesPerLine: 0,
         IncludeProjectionCaptures: false,
         AllowAttackInspection: false,
+        AllowCandidateInspection: false,
+        MaxCandidateInspectionsPerTurn: 0,
         RequireLegalMoveObservationForPlay: true);
 
     public static ChessQuestDisclosurePolicy StrictRefereeProjected { get; } = new(
@@ -46,6 +59,8 @@ public sealed record ChessQuestDisclosurePolicy(
         MaxProjectedPliesPerLine: 4,
         IncludeProjectionCaptures: true,
         AllowAttackInspection: false,
+        AllowCandidateInspection: false,
+        MaxCandidateInspectionsPerTurn: 0,
         RequireLegalMoveObservationForPlay: true);
 
     public static ChessQuestDisclosurePolicy StrictRefereeThreatAware { get; } = new(
@@ -62,6 +77,8 @@ public sealed record ChessQuestDisclosurePolicy(
         MaxProjectedPliesPerLine: 6,
         IncludeProjectionCaptures: true,
         AllowAttackInspection: true,
+        AllowCandidateInspection: true,
+        MaxCandidateInspectionsPerTurn: 3,
         RequireLegalMoveObservationForPlay: true);
 
     public static ChessQuestDisclosurePolicy ActorProbe { get; } = new(
@@ -78,5 +95,7 @@ public sealed record ChessQuestDisclosurePolicy(
         MaxProjectedPliesPerLine: 0,
         IncludeProjectionCaptures: false,
         AllowAttackInspection: false,
+        AllowCandidateInspection: false,
+        MaxCandidateInspectionsPerTurn: 0,
         RequireLegalMoveObservationForPlay: false);
 }

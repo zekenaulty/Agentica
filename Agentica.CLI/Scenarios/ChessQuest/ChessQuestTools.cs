@@ -54,6 +54,26 @@ public static class ChessQuestTools
                 dispatcher));
         }
 
+        if (session.Scenario.DisclosurePolicy.EffectiveAllowCandidateInspection)
+        {
+            registrations.Add(Register(
+                ChessQuestToolIds.InspectCandidate,
+                "ChessQuest Inspect Candidate",
+                ToolKind.Query,
+                ToolEffect.ReadOnly,
+                dispatcher,
+                ToolInputSchema.Create(
+                    new ToolInputField(
+                        "move",
+                        Required: true,
+                        Description: "Agent-authored coordinate-UCI candidate move to inspect from the current public position."),
+                    new ToolInputField(
+                        "legalMoveObservationId",
+                        Required: false,
+                        Description: "Observation id from the current chess.list_legal_moves result that contained the candidate move. Required in strict gameplay.",
+                        Example: "observation_abc123"))));
+        }
+
         registrations.Add(Register(
             ChessQuestToolIds.PlayMove,
             "ChessQuest Play Move",
@@ -105,6 +125,7 @@ public static class ChessQuestTools
             ChessQuestToolIds.ListLegalMoves => "Returns current legal UCI moves plus legalMoveObservationId. Legal means playable under chess rules only; the order is not a ranking and legality does not imply safety, quality, or recommendation.",
             ChessQuestToolIds.ProjectLine => "Projects an agent-authored UCI line under public chess rules. It validates legality and resulting board state only; it does not rank moves, prove safety, evaluate quality, or generate opponent replies.",
             ChessQuestToolIds.InspectAttacks => "Returns neutral public attack facts: opponent legal captures from the current placement and agent pieces currently capturable. It does not score, choose, or attach quality labels.",
+            ChessQuestToolIds.InspectCandidate => "Inspects neutral public consequences after an agent-authored candidate move, including opponent capture facts from the resulting placement. It does not rank, score, recommend, prove safety, or choose a reply.",
             ChessQuestToolIds.PlayMove => "Commits one selected legal agent UCI move with public intent, then applies one host-controlled opponent move when non-terminal. Public intent should separate evidence, hypothesis, risk, and verified facts.",
             ChessQuestToolIds.CompleteObjective => "Checks whether the current terminal board state satisfies the ChessQuest objective and emits the completion artifact only when verified.",
             _ => "ChessQuest tool."
@@ -216,6 +237,23 @@ public static class ChessQuestTools
             {
                 UseWhen = "The planner needs public attack/capture facts before making safety or material claims.",
                 NotEnoughWhen = "The planner wants scoring, ordering by quality, a chosen move, or a proof that a move is safe."
+            },
+            ChessQuestToolIds.InspectCandidate => new ToolContextHint(
+                Produces: "read-only candidate scan of the agent's submitted move: projected board plus opponent capture facts after that candidate, without scoring or reply selection",
+                Complements:
+                [
+                    ChessQuestToolIds.ListLegalMoves,
+                    ChessQuestToolIds.ProjectLine,
+                    ChessQuestToolIds.InspectAttacks
+                ],
+                CanBatchWith: [],
+                ShouldPrecede:
+                [
+                    ChessQuestToolIds.PlayMove
+                ])
+            {
+                UseWhen = "The planner has selected a candidate move and needs evidence depth about immediate opponent capture facts after that move before making safety or material claims.",
+                NotEnoughWhen = "The planner wants a best move, score, ranking, forced line, or proof of full tactical safety; this surface never provides those."
             },
             ChessQuestToolIds.PlayMove => new ToolContextHint(
                 Produces: "committed agent move, committed opponent reply when applicable, updated public board state, receipt evidence, and the agent's public decision declaration",

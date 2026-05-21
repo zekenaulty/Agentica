@@ -21,4 +21,6 @@ public interface IChessRulesEngine
     ChessLineProjection ProjectLine(ChessLineProjectionRequest request);
 
     ChessAttackInspection InspectAttacks(ChessQuestColor agentColor);
+
+    ChessCandidateInspection InspectCandidate(string uciMove, ChessQuestColor agentColor);
 }

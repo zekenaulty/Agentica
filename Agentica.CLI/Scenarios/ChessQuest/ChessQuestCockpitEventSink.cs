@@ -19,6 +19,7 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
     private readonly Action<ChessQuestCockpitTurnEnvelope>? _turnRecorder;
     private readonly Dictionary<string, ExecutionIntent> _stepIntents = new(StringComparer.Ordinal);
     private readonly List<ChessQuestProjectedLineSummary> _pendingProjections = [];
+    private readonly List<ChessQuestCandidateInspectionSummary> _pendingCandidateInspections = [];
     private int? _lastLegalMoveCount;
     private int _turnNumber;
 
@@ -112,6 +113,9 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
             case ChessQuestToolIds.InspectAttacks:
                 PrintAttackInspection(turn);
                 break;
+            case ChessQuestToolIds.InspectCandidate:
+                PrintCandidateInspection(turn);
+                break;
             case ChessQuestToolIds.PlayMove:
                 PrintMoveTurn(turn);
                 break;
@@ -132,6 +136,40 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
         Console.WriteLine(
             $"[attacks] opponent legal captures={inspection.OpponentLegalCaptures.Count}; capturable agent pieces={inspection.AttackedAgentPieces.Count}; agentKingInCheck={inspection.AgentKingInCheck}");
         foreach (var attacked in inspection.AttackedAgentPieces.Take(8))
+        {
+            Console.WriteLine($"  - {attacked.Piece} on {attacked.Square}: {string.Join(", ", attacked.CaptureMoves)}");
+        }
+    }
+
+    private void PrintCandidateInspection(ChessQuestToolTurn turn)
+    {
+        if (!turn.Result.Receipt.Data.TryGetValue("candidateInspection", out var value) ||
+            value is not ChessCandidateInspection inspection)
+        {
+            return;
+        }
+
+        var summary = new ChessQuestCandidateInspectionSummary(
+            RequestedMove: inspection.RequestedMove,
+            CandidateLegal: inspection.CandidateLegal,
+            RejectionReason: inspection.RejectionReason,
+            OpponentLegalCapturesAfterCandidate: inspection.AttackInspectionAfterCandidate?.OpponentLegalCaptures ?? [],
+            AttackedAgentPiecesAfterCandidate: inspection.AttackInspectionAfterCandidate?.AttackedAgentPieces ?? [],
+            FenAfterCandidate: inspection.FenAfterCandidate,
+            Note: inspection.Note);
+        _pendingCandidateInspections.Add(summary);
+
+        Console.WriteLine("[candidate] agent-authored move scan");
+        Console.WriteLine($"  move: {summary.RequestedMove} legal={summary.CandidateLegal}");
+        if (!summary.CandidateLegal)
+        {
+            Console.WriteLine($"  rejected: {summary.RejectionReason ?? "illegal_move"}");
+            return;
+        }
+
+        Console.WriteLine(
+            $"  after candidate: opponentCaptures={summary.OpponentLegalCapturesAfterCandidate.Count}; attackedAgentPieces={summary.AttackedAgentPiecesAfterCandidate.Count}");
+        foreach (var attacked in summary.AttackedAgentPiecesAfterCandidate.Take(8))
         {
             Console.WriteLine($"  - {attacked.Piece} on {attacked.Square}: {string.Join(", ", attacked.CaptureMoves)}");
         }
@@ -250,10 +288,13 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
             TurnHypothesis = turnHypothesis,
             TurnRiskCheck = turnRiskCheck,
             TurnClaimLevel = turnClaimLevel,
+            CandidateInspections = _pendingCandidateInspections.ToArray(),
             Warnings = BuildWarnings(
                 intent,
                 turnIntent,
                 _pendingProjections,
+                _pendingCandidateInspections,
+                selectedMove,
                 publicReason,
                 completionClaim,
                 agentMoveGivesCheck,
@@ -266,6 +307,7 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
         _turnRecorder?.Invoke(envelope);
         PrintMoveEnvelope(envelope);
         _pendingProjections.Clear();
+        _pendingCandidateInspections.Clear();
         _lastLegalMoveCount = null;
     }
 
@@ -307,6 +349,22 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
         else
         {
             Console.WriteLine("Candidate lines explored: none this turn");
+        }
+
+        if (envelope.CandidateInspections.Count > 0)
+        {
+            Console.WriteLine("Candidate scans:");
+            foreach (var inspection in envelope.CandidateInspections)
+            {
+                var suffix = inspection.CandidateLegal
+                    ? $"opponentCaptures={inspection.OpponentLegalCapturesAfterCandidate.Count} attackedPieces={inspection.AttackedAgentPiecesAfterCandidate.Count}"
+                    : $"rejected={inspection.RejectionReason ?? "illegal_move"}";
+                Console.WriteLine($"  - {inspection.RequestedMove}: {suffix}");
+            }
+        }
+        else
+        {
+            Console.WriteLine("Candidate scans: none this turn");
         }
 
         Console.WriteLine($"Selected move: {envelope.SelectedMove}");
@@ -459,6 +517,8 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
         ExecutionIntent? intent,
         IReadOnlyDictionary<string, object?>? turnIntent,
         IReadOnlyList<ChessQuestProjectedLineSummary> projections,
+        IReadOnlyList<ChessQuestCandidateInspectionSummary> candidateInspections,
+        string selectedMove,
         string? publicReason,
         bool completionClaim,
         bool agentMoveGivesCheck,
@@ -512,11 +572,21 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
             warnings.Add("intent uses strong claim language without enough public evidence/risk discipline.");
         }
 
-        if (HasSafetyClaim(declaredText) &&
-            !HasModeledOpponentReply(projections) &&
-            !AdmitsUnmodeledRisk(riskCheck))
+        if (HasSafetyClaim(declaredText) && !AdmitsUnmodeledRisk(riskCheck))
         {
-            warnings.Add("safety claim is unsupported: legal moves and one-ply projections do not prove safety.");
+            var candidateScan = FindCandidateScanForSelectedMove(candidateInspections, selectedMove);
+            if (candidateScan is not null && CandidateScanShowsOpponentCaptureRisk(candidateScan))
+            {
+                warnings.Add("safety claim conflicts with candidate scan: after-candidate opponent capture facts show capturable agent material; revise the candidate, model replies, or state uncertainty.");
+            }
+            else if (candidateScan is not null)
+            {
+                warnings.Add("safety claim is still limited: candidate scan can rule out immediate capture facts but does not prove full safety; state remaining uncertainty or model replies.");
+            }
+            else if (!HasModeledOpponentReply(projections))
+            {
+                warnings.Add("safety claim is unsupported: legal moves, current attacks, and one-ply projections do not prove safety; use available consequence evidence, model an opponent reply, or state uncertainty.");
+            }
         }
 
         return warnings;
@@ -574,6 +644,17 @@ public sealed class ChessQuestCockpitEventSink : IEventSink
 
     private static bool HasModeledOpponentReply(IReadOnlyList<ChessQuestProjectedLineSummary> projections) =>
         projections.Any(projection => projection.AcceptedPrefix.Count >= 2);
+
+    private static ChessQuestCandidateInspectionSummary? FindCandidateScanForSelectedMove(
+        IReadOnlyList<ChessQuestCandidateInspectionSummary> candidateInspections,
+        string selectedMove) =>
+        candidateInspections.LastOrDefault(inspection =>
+            inspection.CandidateLegal &&
+            string.Equals(inspection.RequestedMove, selectedMove, StringComparison.OrdinalIgnoreCase));
+
+    private static bool CandidateScanShowsOpponentCaptureRisk(ChessQuestCandidateInspectionSummary inspection) =>
+        inspection.OpponentLegalCapturesAfterCandidate.Count > 0 ||
+        inspection.AttackedAgentPiecesAfterCandidate.Count > 0;
 
     private static bool AdmitsUnmodeledRisk(string? riskCheck) =>
         !string.IsNullOrWhiteSpace(riskCheck) &&

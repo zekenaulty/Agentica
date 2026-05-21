@@ -13,6 +13,15 @@ public sealed record ChessQuestProjectedLineSummary(
     string FenAfter,
     string? Note);
 
+public sealed record ChessQuestCandidateInspectionSummary(
+    string RequestedMove,
+    bool CandidateLegal,
+    string? RejectionReason,
+    IReadOnlyList<ChessPublicCapture> OpponentLegalCapturesAfterCandidate,
+    IReadOnlyList<ChessAttackedPiece> AttackedAgentPiecesAfterCandidate,
+    string FenAfterCandidate,
+    string? Note);
+
 public sealed record ChessQuestCockpitTurnEnvelope(
     int TurnNumber,
     string StepId,
@@ -52,4 +61,6 @@ public sealed record ChessQuestCockpitTurnEnvelope(
     public string? TurnClaimLevel { get; init; }
 
     public IReadOnlyList<string> Warnings { get; init; } = [];
+
+    public IReadOnlyList<ChessQuestCandidateInspectionSummary> CandidateInspections { get; init; } = [];
 }

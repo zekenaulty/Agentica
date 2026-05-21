@@ -152,6 +152,37 @@ public sealed record ChessAttackInspection(
     bool GuidanceIncluded,
     string? Note = null);
 
+public sealed record ChessCandidateInspection(
+    string Kind,
+    string RequestedMove,
+    string? AcceptedMove,
+    bool CandidateLegal,
+    string? RejectionReason,
+    bool ReadOnly,
+    bool SessionFenUnchanged,
+    bool AgentAuthoredCandidate,
+    bool CandidateScanOnly,
+    bool LegalProjectionOnly,
+    bool MoveQualityKnown,
+    bool SafetyKnown,
+    bool EvaluationIncluded,
+    bool GuidanceIncluded,
+    bool OpponentReplyModeled,
+    bool OpponentCaptureFactsIncluded,
+    bool FullOpponentReplyModeled,
+    string FenBefore,
+    string FenAfterCandidate,
+    IReadOnlyList<string> BoardAfterCandidate,
+    ChessQuestColor SideToMoveAfterCandidate,
+    bool SideToMoveInCheckAfterCandidate,
+    bool CandidateMoveGivesCheck,
+    bool CandidateMoveGivesCheckmate,
+    bool TerminalAfterCandidate,
+    ChessTerminalState? TerminalStateAfterCandidate,
+    IReadOnlyList<ChessProjectedCapture> CandidateCaptures,
+    ChessAttackInspection? AttackInspectionAfterCandidate,
+    string? Note = null);
+
 public sealed record ChessPublicCapture(
     string Move,
     string From,

@@ -31,6 +31,11 @@ if (string.Equals(args[0], "run", StringComparison.OrdinalIgnoreCase))
     return await RunDefaultAsync(args.Skip(1).ToArray());
 }
 
+if (string.Equals(args[0], "chat", StringComparison.OrdinalIgnoreCase))
+{
+    return await ChatCommand.RunAsync(args.Skip(1).ToArray(), CreateCommandServices());
+}
+
 if (string.Equals(args[0], "quest", StringComparison.OrdinalIgnoreCase))
 {
     return await QuestCommand.RunAsync(args.Skip(1).ToArray(), CreateCommandServices());
@@ -215,6 +220,7 @@ static void PrintUsage()
 {
     Console.Error.WriteLine("Usage:");
     Console.Error.WriteLine("  Agentica.CLI run \"<objective>\" [--planner deterministic|gemini] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--include-thoughts] [--log-run] [--log-dir <path>]");
+    Console.Error.WriteLine("  Agentica.CLI chat [message] [--planner deterministic|gemini] [--persona agentica|bookforge|mara|nanda|nyx|plain|thal] [--conversation <id>] [--new] [--app-home <path>] [--workspace <path>] [--db <path>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--include-thoughts] [--verbose-events]");
     Console.Error.WriteLine("  Agentica.CLI quest list");
     Console.Error.WriteLine("  Agentica.CLI quest run <quest-id> [--planner deterministic|gemini] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--route observe|blocked] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--include-thoughts] [--log-run] [--log-dir <path>]");
     Console.Error.WriteLine("  Agentica.CLI mazequest list");

@@ -1,4 +1,5 @@
 using Agentica.Artifacts;
+using Agentica.Continuity;
 using Agentica.Observations;
 using Agentica.Planning;
 using Agentica.Requests;
@@ -12,15 +13,18 @@ internal sealed class PlanningRequestFactory
     private readonly ToolCatalog _toolCatalog;
     private readonly ExecutionPolicy _policy;
     private readonly IPlanningFrameProjector? _frameProjector;
+    private readonly IGoalSpineCompiler _goalSpineCompiler;
 
     public PlanningRequestFactory(
         ToolCatalog toolCatalog,
         ExecutionPolicy policy,
-        IPlanningFrameProjector? frameProjector = null)
+        IPlanningFrameProjector? frameProjector = null,
+        IGoalSpineCompiler? goalSpineCompiler = null)
     {
         _toolCatalog = toolCatalog;
         _policy = policy;
         _frameProjector = frameProjector;
+        _goalSpineCompiler = goalSpineCompiler ?? new DefaultGoalSpineCompiler();
     }
 
     public PlanningRequest Create(RunRequest request, AgenticaRun run)
@@ -40,7 +44,7 @@ internal sealed class PlanningRequestFactory
             ToolSurface = toolSurface
         };
 
-        var contextFrames = _frameProjector?.Project(new PlanningFrameProjectionRequest(
+        var projectedFrames = _frameProjector?.Project(new PlanningFrameProjectionRequest(
             RunId: run.RunId,
             AttemptNumber: run.AttemptNumber,
             Request: request,
@@ -49,6 +53,14 @@ internal sealed class PlanningRequestFactory
             Observations: observations,
             Receipts: receipts,
             ToolSurface: toolSurface)) ?? [];
+        var goalSpineFrame = CreateGoalSpineFrame(
+            request,
+            run,
+            executionContext,
+            toolSurface);
+        var contextFrames = projectedFrames
+            .Concat([goalSpineFrame])
+            .ToArray();
 
         return requestContext with
         {
@@ -74,6 +86,50 @@ internal sealed class PlanningRequestFactory
                 .Select(receipt => new EvidenceRef("receipt", receipt.ReceiptId))
                 .ToArray(),
             CreatePolicySummary(run, context));
+
+    private PlanningFrame CreateGoalSpineFrame(
+        RunRequest request,
+        AgenticaRun run,
+        PlanningExecutionContext executionContext,
+        ToolSurfaceSnapshot toolSurface)
+    {
+        var spine = _goalSpineCompiler.CompileInitial(request);
+        var updateContext = new GoalSpineUpdateContext(
+            run.RunId,
+            run.AttemptNumber,
+            request.Context ?? new Dictionary<string, object?>(StringComparer.Ordinal),
+            executionContext);
+
+        foreach (var receipt in run.Receipts)
+        {
+            spine = _goalSpineCompiler.UpdateFromReceipt(spine, receipt, updateContext).Spine;
+        }
+
+        foreach (var refinement in run.PlanRefinements)
+        {
+            spine = _goalSpineCompiler.UpdateFromRefinement(spine, refinement, updateContext).Spine;
+        }
+
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["goalSpine"] = spine,
+            ["proofBoundary"] =
+                "GoalSpine shapes continuity only; receipts, observations, artifacts, host checks, and verifiers prove reality.",
+            ["plannerUse"] =
+                "Use GoalSpine to preserve run-level continuity and divergence pressure. Do not use it as completion evidence."
+        };
+
+        return new PlanningFrame(
+            FrameId: AgenticaIds.New("frame"),
+            Kind: "agentica.goal_spine",
+            Version: "1.0",
+            CreatedAt: DateTimeOffset.UtcNow,
+            Payload: payload,
+            EvidenceRefs: spine.EvidenceRefs)
+        {
+            ToolSurfaceId = toolSurface.SurfaceId
+        };
+    }
 
     private IReadOnlyDictionary<string, object?> CreatePolicySummary(
         AgenticaRun run,

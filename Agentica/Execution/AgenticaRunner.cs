@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Agentica.Artifacts;
+using Agentica.Continuity;
 using Agentica.Events;
 using Agentica.Observations;
 using Agentica.Outcomes;
@@ -1136,6 +1137,21 @@ public sealed class AgenticaRunner
             },
             diagnostics: diagnostics ?? DiagnosticsFrom(validationIssues));
 
+        var continuityCompiler = new ContinuityLedgerCompiler();
+        var breadcrumbs = continuityCompiler.CompileBreadcrumbLedger(run);
+        var divergences = continuityCompiler.CompileDivergenceLedger(
+            run,
+            validationIssues,
+            status,
+            stopReason,
+            blockers);
+        var continuity = continuityCompiler.CompileSummary(
+            run,
+            breadcrumbs,
+            divergences,
+            validationIssues,
+            status);
+
         return new OutcomeEnvelope(
             Outcome: new RunOutcome(
                 RunId: run.RunId,
@@ -1157,7 +1173,10 @@ public sealed class AgenticaRunner
                 ValidationIssues: validationIssues)
             {
                 ToolSurfaces = run.ToolSurfaces.ToArray(),
-                PlanningFrames = run.PlanningFrames.ToArray()
+                PlanningFrames = run.PlanningFrames.ToArray(),
+                Breadcrumbs = breadcrumbs,
+                Divergences = divergences,
+                Continuity = continuity
             });
     }
 

@@ -379,6 +379,10 @@ public sealed class ChessQuestStrategicOrchestrationState
         result["chessquest.goalSpine.activePriority"] = goalSpine.ActivePriority;
         result["chessquest.goalSpine.knownDivergence"] = goalSpine.KnownDivergence;
         result["chessquest.goalSpine.nextDecisionPressure"] = goalSpine.NextDecisionPressure;
+        var continuityCapsule = ChessQuestContinuityCapsuleCompiler.Compile(Session, latest, projection);
+        result["chessquest.continuityCapsule"] = continuityCapsule;
+        result["chessquest.continuityCapsule.recommendedNextBias"] = continuityCapsule.RecommendedNextBias;
+        result["chessquest.continuityCapsule.confidence"] = continuityCapsule.Confidence;
 
         if (latest is not null)
         {
@@ -475,13 +479,16 @@ public sealed class ChessQuestPhaseRunExecutor : IRunExecutor
 
         runContext["chessquest.phaseSanityWarnings"] = phaseSanityWarnings;
         var goalSpine = (ChessQuestGoalSpine)plannerContext["goalSpine"]!;
+        var continuityCapsule = (ChessQuestContinuityCapsule)plannerContext["continuityCapsule"]!;
 
         var phaseObjective = BuildPhaseObjective(
             request.Objective,
             envelope,
             projection,
             goalSpine,
-            _state.Session.Scenario.DisclosurePolicy.AllowAttackInspection);
+            continuityCapsule,
+            _state.Session.Scenario.DisclosurePolicy.AllowAttackInspection,
+            _state.Session.Scenario.DisclosurePolicy.EffectiveAllowCandidateInspection);
         var phaseRequest = new RunRequest(phaseObjective, request.Origin, runContext);
         var runner = new AgenticaRunner(
             _plannerFactory(phaseRequest),
@@ -522,12 +529,20 @@ public sealed class ChessQuestPhaseRunExecutor : IRunExecutor
         ChessQuestPhaseTaskEnvelope task,
         ChessQuestStrategyProjection projection,
         ChessQuestGoalSpine goalSpine,
-        bool attackInspectionAllowed)
+        ChessQuestContinuityCapsule continuityCapsule,
+        bool attackInspectionAllowed,
+        bool candidateInspectionAllowed)
     {
         var doctrine = ChessQuestGoalShapingPolicy.StaticDoctrine;
         var attackInspectionContract = attackInspectionAllowed
             ? "- chess.inspect_attacks provides neutral public opponent-capture facts only; it does not score, choose, or prove a response is safe."
             : string.Empty;
+        var candidateInspectionContract = candidateInspectionAllowed
+            ? "- chess.inspect_candidate provides neutral after-candidate opponent capture facts for your submitted move. A bad scan should make you revise or abandon the candidate; a quiet scan still does not score, rank, recommend, choose a reply, or prove full safety."
+            : string.Empty;
+        var evidenceSourceContract = candidateInspectionAllowed
+            ? "- Evidence sources have distinct limits, not a proof ranking: current state gives placement, legal moves give affordances, project_line gives submitted rule projection, chess.inspect_candidate gives after-candidate capture facts for your submitted move, and self-authored opponent-reply lines model only the replies you supplied."
+            : "- Evidence sources have distinct limits, not a proof ranking: current state gives placement, legal moves give affordances, project_line gives submitted rule projection, and self-authored opponent-reply lines model only the replies you supplied.";
         return
         $"""
         {taskObjective}
@@ -561,13 +576,25 @@ public sealed class ChessQuestPhaseRunExecutor : IRunExecutor
         - Next decision pressure: {goalSpine.NextDecisionPressure}
         - GoalSpine is compact continuity from receipts/state; it is not proof, not a hidden solution, and not move-level guidance.
 
+        Chess continuity capsule:
+        - Strategic intent: {continuityCapsule.StrategicIntent}
+        - Recommended next bias: {continuityCapsule.RecommendedNextBias}
+        - Confidence: {continuityCapsule.Confidence} ({continuityCapsule.ConfidenceRationale})
+        - Pressure points:
+        {FormatBulletBlock(continuityCapsule.PressurePoints)}
+        - Uncertainties:
+        {FormatBulletBlock(continuityCapsule.Uncertainties)}
+        - The capsule is a bounded handoff artifact; it is not raw reasoning, not proof, and not a move recommendation.
+
         Active run contract:
         - You choose legal chess moves through the ChessQuest strict referee tools.
         - The orchestration tier chose this phase envelope; it did not choose a move.
         - Board truth, legal receipts, and chess.project_line verification override strategy claims.
         - Legal moves are affordances only; legal does not mean good or safe.
         - A one-ply chess.project_line result proves only the submitted move's public-rule projection.
+        {evidenceSourceContract}
         {attackInspectionContract}
+        {candidateInspectionContract}
         - chess.play_move turnIntent should include goal, evidence, hypothesis, riskCheck, claimLevel, and publicReason.
         """;
     }

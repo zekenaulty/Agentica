@@ -48,6 +48,7 @@ public sealed record ChessQuestDecisionProtocol(
     IReadOnlyList<string> SuccessSignals,
     IReadOnlyList<string> ReplanTriggers,
     IReadOnlyList<string> ClaimDiscipline,
+    IReadOnlyList<string> EvidenceDepthRules,
     IReadOnlyDictionary<string, string> ToolSemantics,
     IReadOnlyList<string> TurnIntentFields,
     IReadOnlyList<string> ForbiddenClaimLanguageWithoutEvidence,
@@ -79,6 +80,7 @@ public static partial class ChessQuestGoalShapingPolicy
         [
             "legal move listing proves legality only, not quality",
             "one-ply projection proves rule consequences only, not safety",
+            "public consequence facts can disprove a safety claim, but they are not a best move or full safety proof",
             "safety, material, forcing, and decisive claims require supporting projected lines or committed receipts",
             "phase guidance is public intent and must yield to board truth, legal moves, and receipts"
         ],
@@ -87,6 +89,7 @@ public static partial class ChessQuestGoalShapingPolicy
             "treating legal as safe",
             "treating nonterminal as harmless",
             "treating a one-ply projection as a tactical evaluation",
+            "treating current attack facts as proof that a candidate remains safe after the move",
             "continuing a phase after material or king-safety evidence invalidates it",
             "using fluent chess language without verifier-backed evidence"
         ]);
@@ -124,16 +127,20 @@ public static partial class ChessQuestGoalShapingPolicy
                 maxItems: 6),
             SuccessSignals: SanitizeList(
                 projection?.ProgressSignals,
-                DefaultSuccessSignals(phase),
+                DefaultSuccessSignals(phase, session),
                 maxItems: 6),
             ReplanTriggers: SanitizeList(
                 projection?.StopTriggers ?? frame?.ReplanTriggers,
                 DefaultReplanTriggers(),
                 maxItems: 8),
-            ClaimDiscipline: EnsureClaimDiscipline(SanitizeList(
+            ClaimDiscipline: EnsureClaimDiscipline(
+                SanitizeList(
                 projection?.ClaimDiscipline,
-                DefaultClaimDiscipline(phase),
-                maxItems: 8)),
+                DefaultClaimDiscipline(phase, session),
+                maxItems: 8),
+                phase,
+                session),
+            EvidenceDepthRules: EvidenceDepthRulesFor(session),
             ToolSemantics: ToolSemanticsFor(session),
             TurnIntentFields:
             [
@@ -231,6 +238,11 @@ public static partial class ChessQuestGoalShapingPolicy
             semantics["chess.inspect_attacks"] = "Returns opponent legal captures and capturable agent pieces from the current placement. It does not score, choose, or prove a response is safe.";
         }
 
+        if (session.Scenario.DisclosurePolicy.EffectiveAllowCandidateInspection)
+        {
+            semantics["chess.inspect_candidate"] = "Inspects neutral public consequences after the agent's submitted candidate, including opponent capture facts from the resulting placement. It does not rank, score, recommend, choose a reply, or prove full safety.";
+        }
+
         return semantics;
     }
 
@@ -243,6 +255,7 @@ public static partial class ChessQuestGoalShapingPolicy
             [
                 phaseGoal,
                 "treat tactical ideas as hypotheses until opponent replies are modeled",
+                "use available evidence depth or self-authored opponent replies before treating a candidate as tactically safe",
                 "do not equate legal projection with safety",
                 "prefer verifier-backed claims over chess-sounding prose"
             ],
@@ -270,12 +283,15 @@ public static partial class ChessQuestGoalShapingPolicy
             ]
         };
 
-    private static IReadOnlyList<string> DefaultSuccessSignals(string phase) =>
+    private static IReadOnlyList<string> DefaultSuccessSignals(string phase, ChessQuestSession session) =>
         phase switch
         {
             "tactical" =>
             [
                 "agent-authored line includes plausible opponent replies before safety claims",
+                session.Scenario.DisclosurePolicy.EffectiveAllowCandidateInspection
+                    ? "candidate safety claims use available after-candidate capture facts or explicitly mark safety as unverified"
+                    : "candidate safety claims use modeled opponent replies or explicitly mark safety as unverified",
                 "material or terminal claims are backed by projection or receipts",
                 "phase ends without material collapse"
             ],
@@ -308,13 +324,16 @@ public static partial class ChessQuestGoalShapingPolicy
         "phase goal no longer fits legal board state"
     ];
 
-    private static IReadOnlyList<string> DefaultClaimDiscipline(string phase) =>
+    private static IReadOnlyList<string> DefaultClaimDiscipline(string phase, ChessQuestSession session) =>
         phase switch
         {
             "tactical" =>
             [
                 "treat unverified tactical ideas as hypotheses",
                 "do not describe a move as safe based only on one-ply projection",
+                session.Scenario.DisclosurePolicy.EffectiveAllowCandidateInspection
+                    ? "use available after-candidate capture facts or a self-authored opponent reply line before making tactical safety claims"
+                    : "use a self-authored opponent reply line or explicit uncertainty before making tactical safety claims",
                 "do not claim material gain unless the submitted line or receipt evidence supports it",
                 "do not claim checkmate unless terminal state is verified"
             ],
@@ -332,7 +351,10 @@ public static partial class ChessQuestGoalShapingPolicy
             ]
         };
 
-    private static IReadOnlyList<string> EnsureClaimDiscipline(IReadOnlyList<string> rules)
+    private static IReadOnlyList<string> EnsureClaimDiscipline(
+        IReadOnlyList<string> rules,
+        string phase,
+        ChessQuestSession session)
     {
         var result = rules.ToList();
         if (!result.Any(rule => rule.Contains("legal", StringComparison.OrdinalIgnoreCase) &&
@@ -347,7 +369,35 @@ public static partial class ChessQuestGoalShapingPolicy
             result.Add("one-ply projection does not prove tactical safety");
         }
 
+        if (string.Equals(phase, "tactical", StringComparison.OrdinalIgnoreCase) &&
+            !result.Any(rule => rule.Contains("after-candidate", StringComparison.OrdinalIgnoreCase) ||
+                                rule.Contains("opponent replies", StringComparison.OrdinalIgnoreCase)))
+        {
+            result.Add(session.Scenario.DisclosurePolicy.EffectiveAllowCandidateInspection
+                ? "after-candidate evidence or self-authored opponent replies are required before tactical safety claims unless uncertainty is explicit"
+                : "self-authored opponent replies or explicit uncertainty are required before tactical safety claims");
+        }
+
         return result.Take(8).ToArray();
+    }
+
+    private static IReadOnlyList<string> EvidenceDepthRulesFor(ChessQuestSession session)
+    {
+        var rules = new List<string>
+        {
+            "current board/state gives public placement and turn only",
+            "list_legal_moves gives legal affordances only, not quality or safety",
+            "one-ply project_line gives submitted rule projection only; opponent response is unmodeled"
+        };
+
+        if (session.Scenario.DisclosurePolicy.EffectiveAllowCandidateInspection)
+        {
+            rules.Add("inspect_candidate gives after-candidate opponent capture facts for your submitted move; bad scan results should make you revise or abandon the candidate, while quiet scans still do not prove full safety");
+        }
+
+        rules.Add("self-authored opponent-reply lines model only the replies you supplied, not best play");
+        rules.Add("when a stronger evidence source is unavailable, keep risk language explicit instead of upgrading a hypothesis into fact");
+        return rules;
     }
 
     [GeneratedRegex(@"\b(?:[a-h][1-8][a-h][1-8][qrbn]?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?|O-O(?:-O)?)\b", RegexOptions.IgnoreCase)]

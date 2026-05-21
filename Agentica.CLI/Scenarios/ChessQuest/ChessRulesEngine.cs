@@ -238,6 +238,90 @@ public sealed class GeraChessRulesEngine : IChessRulesEngine
             Note: "Neutral public attack inspection reports legal opponent captures from the current placement only; it does not choose moves or attach quality labels.");
     }
 
+    public ChessCandidateInspection InspectCandidate(string uciMove, ChessQuestColor agentColor)
+    {
+        var before = GetFen();
+        var normalized = uciMove.Trim().ToLowerInvariant();
+        var clone = new GeraChessRulesEngine(before);
+        var result = clone.TryPlayMove(normalized);
+
+        if (!result.Accepted || result.Move is null)
+        {
+            return new ChessCandidateInspection(
+                Kind: "ChessCandidateInspection",
+                RequestedMove: normalized,
+                AcceptedMove: null,
+                CandidateLegal: false,
+                RejectionReason: result.RefusalReason ?? "illegal_move",
+                ReadOnly: true,
+                SessionFenUnchanged: string.Equals(before, GetFen(), StringComparison.Ordinal),
+                AgentAuthoredCandidate: true,
+                CandidateScanOnly: true,
+                LegalProjectionOnly: true,
+                MoveQualityKnown: false,
+                SafetyKnown: false,
+                EvaluationIncluded: false,
+                GuidanceIncluded: false,
+                OpponentReplyModeled: false,
+                OpponentCaptureFactsIncluded: false,
+                FullOpponentReplyModeled: false,
+                FenBefore: before,
+                FenAfterCandidate: before,
+                BoardAfterCandidate: RenderAsciiLines(),
+                SideToMoveAfterCandidate: GetState().SideToMove,
+                SideToMoveInCheckAfterCandidate: false,
+                CandidateMoveGivesCheck: false,
+                CandidateMoveGivesCheckmate: false,
+                TerminalAfterCandidate: GetState().IsTerminal,
+                TerminalStateAfterCandidate: GetState().TerminalState,
+                CandidateCaptures: [],
+                AttackInspectionAfterCandidate: null,
+                Note: "Candidate was not legal from the current public position; no projected opponent capture facts were produced.");
+        }
+
+        var projectedState = clone.GetState();
+        var sideToMoveInCheckAfter = !projectedState.IsTerminal &&
+            clone.IsKingInCheck(projectedState.SideToMove);
+        var candidateMoveGivesCheckmate = projectedState.TerminalState is { Winner: not null } terminal &&
+            terminal.Winner == agentColor &&
+            terminal.Reason.Contains("Checkmate", StringComparison.OrdinalIgnoreCase);
+        var candidateMoveGivesCheck = sideToMoveInCheckAfter || candidateMoveGivesCheckmate;
+        var attackInspection = projectedState.IsTerminal
+            ? null
+            : clone.InspectAttacks(agentColor);
+
+        return new ChessCandidateInspection(
+            Kind: "ChessCandidateInspection",
+            RequestedMove: normalized,
+            AcceptedMove: result.Move,
+            CandidateLegal: true,
+            RejectionReason: null,
+            ReadOnly: true,
+            SessionFenUnchanged: string.Equals(before, GetFen(), StringComparison.Ordinal),
+            AgentAuthoredCandidate: true,
+            CandidateScanOnly: true,
+            LegalProjectionOnly: true,
+            MoveQualityKnown: false,
+            SafetyKnown: false,
+            EvaluationIncluded: false,
+            GuidanceIncluded: false,
+            OpponentReplyModeled: false,
+            OpponentCaptureFactsIncluded: attackInspection is not null,
+            FullOpponentReplyModeled: false,
+            FenBefore: before,
+            FenAfterCandidate: clone.GetFen(),
+            BoardAfterCandidate: clone.RenderAsciiLines(),
+            SideToMoveAfterCandidate: projectedState.SideToMove,
+            SideToMoveInCheckAfterCandidate: sideToMoveInCheckAfter,
+            CandidateMoveGivesCheck: candidateMoveGivesCheck,
+            CandidateMoveGivesCheckmate: candidateMoveGivesCheckmate,
+            TerminalAfterCandidate: projectedState.IsTerminal,
+            TerminalStateAfterCandidate: projectedState.TerminalState,
+            CandidateCaptures: result.Captures,
+            AttackInspectionAfterCandidate: attackInspection,
+            Note: "Neutral candidate scan reports public consequences after the submitted move, including opponent capture facts; it does not rank, score, recommend, or prove safety.");
+    }
+
     private Move? FindLegalMove(string uciMove)
     {
         if (!IsUci(uciMove))

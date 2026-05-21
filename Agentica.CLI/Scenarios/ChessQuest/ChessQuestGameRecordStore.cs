@@ -6,6 +6,7 @@ namespace Agentica.CLI.Scenarios.ChessQuest;
 public static class ChessQuestGameRecordStore
 {
     public const string GameRecordFileName = "chessquest-game.json";
+    public const string ContinuityCapsuleFileName = "chessquest-continuity-capsule.json";
     private const int CurrentVersion = 1;
 
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions(writeIndented: true);
@@ -44,6 +45,45 @@ public static class ChessQuestGameRecordStore
         var record = FromSession(session, existing?.CreatedAt);
         File.WriteAllText(path, JsonSerializer.Serialize(record, JsonOptions) + Environment.NewLine);
         return path;
+    }
+
+    public static string WriteContinuityCapsule(
+        string directoryPath,
+        ChessQuestSession session,
+        ChessQuestPhaseReport? latestPhaseReport = null,
+        ChessQuestStrategyProjection? latestStrategyProjection = null)
+    {
+        Directory.CreateDirectory(directoryPath);
+        var capsule = ChessQuestContinuityCapsuleCompiler.Compile(
+            session,
+            latestPhaseReport,
+            latestStrategyProjection);
+        var path = Path.Combine(directoryPath, ContinuityCapsuleFileName);
+        File.WriteAllText(path, JsonSerializer.Serialize(capsule, JsonOptions) + Environment.NewLine);
+        return path;
+    }
+
+    public static ChessQuestContinuityCapsule? TryLoadContinuityCapsule(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var capsulePath = Directory.Exists(fullPath)
+            ? Path.Combine(fullPath, ContinuityCapsuleFileName)
+            : Path.Combine(Path.GetDirectoryName(fullPath) ?? string.Empty, ContinuityCapsuleFileName);
+        if (!File.Exists(capsulePath))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<ChessQuestContinuityCapsule>(
+                File.ReadAllText(capsulePath),
+                JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     public static ChessQuestGameRecord Load(string path)

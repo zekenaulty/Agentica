@@ -537,6 +537,7 @@ internal static class ChessQuestCommand
         if (runLog is not null)
         {
             ChessQuestGameRecordStore.WriteDirectory(runLog.DirectoryPath, session);
+            ChessQuestGameRecordStore.WriteContinuityCapsule(runLog.DirectoryPath, session);
         }
 
         Action<ChessQuestCockpitTurnEnvelope>? turnRecorder = runLog is null
@@ -555,6 +556,7 @@ internal static class ChessQuestCommand
                 runLog.WriteJsonLine("chessquest-phase-reports.jsonl", report);
                 runLog.WriteJson("chessquest-latest-phase-report.json", report);
                 ChessQuestGameRecordStore.WriteDirectory(runLog.DirectoryPath, session);
+                ChessQuestGameRecordStore.WriteContinuityCapsule(runLog.DirectoryPath, session, report, projection);
             };
 
         PrintStrategicOrchestrationOpening(scenario, session, options, opponentMode, opponentPlanner);
@@ -614,11 +616,18 @@ internal static class ChessQuestCommand
             Console.CancelKeyPress -= cancelHandler;
         }
 
-        PrintStrategicOrchestrationSummary(outcome, state);
+        var diagnostics = BuildStrategicOrchestrationDiagnostics(outcome, state);
+        PrintStrategicOrchestrationSummary(outcome, state, diagnostics);
         runLog?.WriteJson("chessquest-orchestration-outcome.json", outcome);
+        runLog?.WriteJson("chessquest-orchestration-diagnostics.json", diagnostics);
         if (runLog is not null)
         {
             ChessQuestGameRecordStore.WriteDirectory(runLog.DirectoryPath, session);
+            ChessQuestGameRecordStore.WriteContinuityCapsule(
+                runLog.DirectoryPath,
+                session,
+                state.LatestPhaseReport,
+                state.LatestStrategyProjection);
             Console.WriteLine();
             Console.WriteLine($"Run log written: {runLog.DirectoryPath}");
         }
@@ -689,6 +698,11 @@ internal static class ChessQuestCommand
             try
             {
                 ChessQuestGameRecordStore.ReplayIntoSession(session, resumeRecord);
+                if (!string.IsNullOrWhiteSpace(resumeSource) &&
+                    ChessQuestGameRecordStore.TryLoadContinuityCapsule(resumeSource) is { } capsule)
+                {
+                    session.ImportContinuityCapsule(capsule);
+                }
             }
             catch (InvalidOperationException exception)
             {
@@ -701,6 +715,7 @@ internal static class ChessQuestCommand
         if (runLog is not null)
         {
             ChessQuestGameRecordStore.WriteDirectory(runLog.DirectoryPath, session);
+            ChessQuestGameRecordStore.WriteContinuityCapsule(runLog.DirectoryPath, session);
         }
 
         runLog?.WriteJson("chessquest-scenario.json", scenario);
@@ -755,6 +770,11 @@ internal static class ChessQuestCommand
                 {
                     runLog.WriteJson("chessquest-phase-report.json", phaseTracker.BuildReport(session));
                 }
+                ChessQuestGameRecordStore.WriteContinuityCapsule(
+                    runLog.DirectoryPath,
+                    session,
+                    phaseTracker?.BuildReport(session),
+                    phaseTracker?.Snapshot(session).StrategyProjection);
             };
 
         PrintOpening(scenario, session, options, opponentMode, opponentPlanner, phaseTracker, resumeRecord, resumeSource);
@@ -834,6 +854,11 @@ internal static class ChessQuestCommand
             {
                 runLog.WriteJson("chessquest-phase-report.json", phaseTracker.BuildReport(session));
             }
+            ChessQuestGameRecordStore.WriteContinuityCapsule(
+                runLog.DirectoryPath,
+                session,
+                phaseTracker?.BuildReport(session),
+                phaseTracker?.Snapshot(session).StrategyProjection);
         }
 
         services.FinishRunLog(runLog, envelope);
@@ -1098,6 +1123,12 @@ internal static class ChessQuestCommand
         var attackInspectionContract = scenario.DisclosurePolicy.AllowAttackInspection
             ? "- You may use chess.inspect_attacks for neutral public opponent-capture facts. It does not score, choose, or prove a response is safe."
             : string.Empty;
+        var candidateInspectionContract = scenario.DisclosurePolicy.EffectiveAllowCandidateInspection
+            ? "- If exposed, chess.inspect_candidate may inspect your own candidate move and report neutral opponent capture facts from the resulting placement. A bad scan should make you revise or abandon the candidate; a quiet scan still does not prove full safety, score the move, rank it, recommend it, or choose a reply."
+            : string.Empty;
+        var evidenceSourceContract = scenario.DisclosurePolicy.EffectiveAllowCandidateInspection
+            ? "- Evidence sources have distinct limits, not a proof ranking: current state gives placement, legal moves give affordances, project_line gives submitted rule projection, chess.inspect_candidate gives after-candidate capture facts for your submitted move, and self-authored opponent-reply lines model only the replies you supplied."
+            : "- Evidence sources have distinct limits, not a proof ranking: current state gives placement, legal moves give affordances, project_line gives submitted rule projection, and self-authored opponent-reply lines model only the replies you supplied.";
         var phaseContract = phaseTracker is null
             ? string.Empty
             : $"""
@@ -1140,9 +1171,11 @@ internal static class ChessQuestCommand
         - Strict gameplay requires passing the current chess.list_legal_moves legalMoveObservationId into chess.play_move. If the board changes or a move is refused as stale, refresh chess.list_legal_moves.
         - Before describing a move as check or checkmate, call chess.project_line for that exact move or line with claims ["check"] or ["checkmate"] and use the returned claimVerification.
         {attackInspectionContract}
+        {candidateInspectionContract}
         - Do not describe a selected move as checkmate, a forced win, or objective completion unless a prior chess.project_line result or committed receipt has already verified that terminal state.
         - Do not describe a move as safe, winning, material-gaining, forced, or decisive unless your evidence/riskCheck explains what was verified and what remains unmodeled.
         - Legal does not mean safe. One-ply project_line does not prove safety or move quality.
+        {evidenceSourceContract}
         - chess.play_move applies the host-controlled opponent reply after your accepted move unless the game is terminal.
         - Do not claim completion unless chess.complete_objective emits chessquest.objective_completed.
         - The strict surface does not provide move rankings, scores, tactical labels, or opponent policy details.
@@ -1346,7 +1379,8 @@ internal static class ChessQuestCommand
 
     private static void PrintStrategicOrchestrationSummary(
         OrchestrationOutcomeEnvelope outcome,
-        ChessQuestStrategicOrchestrationState state)
+        ChessQuestStrategicOrchestrationState state,
+        IReadOnlyDictionary<string, object?> diagnostics)
     {
         Console.WriteLine();
         Console.WriteLine("--- ChessQuest Strategic Orchestration Summary ---");
@@ -1361,6 +1395,30 @@ internal static class ChessQuestCommand
         }
 
         Console.WriteLine($"Final FEN: {state.Session.CurrentState.Fen}");
+        if (diagnostics.TryGetValue("failureModeCounts", out var failureModes) &&
+            failureModes is IReadOnlyDictionary<string, int> counts &&
+            counts.Count > 0)
+        {
+            Console.WriteLine("Failure Mode Counts:");
+            foreach (var pair in counts.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+            {
+                Console.WriteLine($"  {pair.Key}: {pair.Value}");
+            }
+        }
+
+        if (outcome.RunOutcomes.Count > 0)
+        {
+            Console.WriteLine("Child Run Outcomes:");
+            foreach (var item in outcome.RunOutcomes.Select((run, index) => new { run, index }))
+            {
+                var blockers = item.run.Outcome.Blockers.Count == 0
+                    ? string.Empty
+                    : $" blockers={string.Join(" | ", item.run.Outcome.Blockers.Take(2))}";
+                Console.WriteLine(
+                    $"  {item.index + 1}. run={item.run.Outcome.RunId} status={item.run.Outcome.Status} stop={item.run.Outcome.StopReason}{blockers}");
+            }
+        }
+
         foreach (var report in state.PhaseReports)
         {
             Console.WriteLine();
@@ -1371,6 +1429,92 @@ internal static class ChessQuestCommand
             Console.WriteLine($"  Opponent Moves: {(report.OpponentMoves.Count == 0 ? "none" : string.Join(", ", report.OpponentMoves))}");
             Console.WriteLine($"  Material Delta: {report.MaterialBalanceDelta}; Terminal: {report.Terminal}");
         }
+    }
+
+    private static IReadOnlyDictionary<string, object?> BuildStrategicOrchestrationDiagnostics(
+        OrchestrationOutcomeEnvelope outcome,
+        ChessQuestStrategicOrchestrationState state)
+    {
+        var terminalState = state.Session.CurrentState.TerminalState;
+        var agentWon = terminalState?.Winner == state.Session.Scenario.AgentColor;
+        var failureModes = new Dictionary<string, int>(StringComparer.Ordinal);
+        IncrementIf(failureModes, "terminal_loss", state.Session.CurrentState.IsTerminal && !agentWon && terminalState?.Winner is not null);
+        IncrementIf(failureModes, "terminal_draw", state.Session.CurrentState.IsTerminal && terminalState?.Winner is null);
+        IncrementIf(failureModes, "orchestration_plan_invalid", outcome.Status == OrchestrationStatus.PlanInvalid);
+        IncrementIf(failureModes, "orchestration_max_refinements", outcome.StopReason == OrchestrationStopReason.MaxRefinementsReached);
+        IncrementIf(failureModes, "orchestration_max_runs", outcome.StopReason == OrchestrationStopReason.MaxRunsReached);
+
+        foreach (var run in outcome.RunOutcomes)
+        {
+            IncrementIf(failureModes, "child_plan_invalid", run.Outcome.Status == RunOutcomeStatus.PlanInvalid);
+            IncrementIf(failureModes, "child_failed", run.Outcome.Status == RunOutcomeStatus.Failed);
+            IncrementIf(failureModes, "child_blocked", run.Outcome.Status == RunOutcomeStatus.Blocked);
+            IncrementIf(failureModes, "child_planner_unavailable", run.Outcome.StopReason == StopReason.PlannerUnavailable);
+            IncrementIf(failureModes, "child_terminal_loss", run.Outcome.StopReason == StopReason.TerminalLoss);
+            IncrementIf(failureModes, "child_terminal_draw", run.Outcome.StopReason == StopReason.TerminalDraw);
+            IncrementIf(failureModes, "child_timeout", run.Outcome.StopReason == StopReason.Timeout);
+        }
+
+        foreach (var report in state.PhaseReports)
+        {
+            IncrementIf(failureModes, "phase_material_loss", report.MaterialBalanceDelta < 0);
+            IncrementIf(failureModes, "phase_terminal", report.Terminal);
+            IncrementIf(failureModes, "phase_budget_exhausted", string.Equals(report.StopReason, "agent_turn_budget_exhausted", StringComparison.Ordinal));
+        }
+
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["status"] = outcome.Status.ToString(),
+            ["stopReason"] = outcome.StopReason.ToString(),
+            ["terminal"] = state.Session.CurrentState.IsTerminal,
+            ["terminalResult"] = terminalState?.Result,
+            ["agentWon"] = agentWon,
+            ["failureModeCounts"] = failureModes,
+            ["runOutcomeCounts"] = outcome.RunOutcomes
+                .GroupBy(run => $"{run.Outcome.Status}:{run.Outcome.StopReason}", StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal),
+            ["phaseStatusCounts"] = state.PhaseReports
+                .GroupBy(report => $"{report.Status}:{report.StopReason}", StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal),
+            ["runLineage"] = outcome.RunOutcomes
+                .Select((run, index) => new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["index"] = index + 1,
+                    ["runId"] = run.Outcome.RunId,
+                    ["status"] = run.Outcome.Status.ToString(),
+                    ["stopReason"] = run.Outcome.StopReason.ToString(),
+                    ["blockers"] = run.Outcome.Blockers
+                })
+                .ToArray(),
+            ["phaseLineage"] = state.PhaseReports
+                .Select((report, index) => new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["index"] = index + 1,
+                    ["phaseRunId"] = report.PhaseRunId,
+                    ["phase"] = report.Phase,
+                    ["status"] = report.Status,
+                    ["stopReason"] = report.StopReason,
+                    ["materialDelta"] = report.MaterialBalanceDelta,
+                    ["terminal"] = report.Terminal,
+                    ["terminalResult"] = report.TerminalState?.Result,
+                    ["agentMoves"] = report.AgentMoves,
+                    ["opponentMoves"] = report.OpponentMoves
+                })
+                .ToArray()
+        };
+    }
+
+    private static void IncrementIf(
+        Dictionary<string, int> counts,
+        string key,
+        bool condition)
+    {
+        if (!condition)
+        {
+            return;
+        }
+
+        counts[key] = counts.TryGetValue(key, out var count) ? count + 1 : 1;
     }
 
     private static void PrintStrategyProjection(ChessQuestStrategyProjectionResult result)

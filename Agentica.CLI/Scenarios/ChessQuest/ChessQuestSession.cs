@@ -13,6 +13,7 @@ public sealed class ChessQuestSession
     private readonly Dictionary<string, ChessQuestLegalMoveObservation> _legalMoveObservations = new(StringComparer.Ordinal);
     private ChessQuestLegalMoveObservation? _latestLegalMoveObservation;
     private int _projectedLinesThisTurn;
+    private int _candidateInspectionsThisTurn;
 
     public ChessQuestSession(
         ChessQuestScenario scenario,
@@ -32,6 +33,8 @@ public sealed class ChessQuestSession
 
     public int ProjectedLinesThisTurn => _projectedLinesThisTurn;
 
+    public ChessQuestContinuityCapsule? ImportedContinuityCapsule { get; private set; }
+
     public ChessPublicState CurrentState => _rules.GetState();
 
     public ChessQuestSessionContext SessionContext => BuildSessionContext();
@@ -40,6 +43,11 @@ public sealed class ChessQuestSession
     {
         var state = CurrentState;
         return !state.IsTerminal && _rules.IsKingInCheck(state.SideToMove);
+    }
+
+    public void ImportContinuityCapsule(ChessQuestContinuityCapsule capsule)
+    {
+        ImportedContinuityCapsule = capsule;
     }
 
     public async Task<ToolResult> ExecuteAsync(
@@ -54,6 +62,7 @@ public sealed class ChessQuestSession
             ChessQuestToolIds.ListLegalMoves => ListLegalMoves(invocation),
             ChessQuestToolIds.ProjectLine => ProjectLine(invocation),
             ChessQuestToolIds.InspectAttacks => InspectAttacks(invocation),
+            ChessQuestToolIds.InspectCandidate => InspectCandidate(invocation),
             ChessQuestToolIds.PlayMove => await PlayMoveAsync(invocation, cancellationToken).ConfigureAwait(false),
             ChessQuestToolIds.CompleteObjective => CompleteObjective(invocation),
             _ => Refused(invocation, "unknown_chess_tool", $"Unknown ChessQuest tool '{invocation.ToolId}'.")
@@ -104,6 +113,7 @@ public sealed class ChessQuestSession
             FenAfter = result.FenAfter
         });
         _projectedLinesThisTurn = 0;
+        _candidateInspectionsThisTurn = 0;
     }
 
     private ToolResult GetState(ToolInvocation invocation)
@@ -207,6 +217,72 @@ public sealed class ChessQuestSession
         return new ToolResult(receipt, Observation(invocation, receipt, "Public attack inspection observed.", data));
     }
 
+    private ToolResult InspectCandidate(ToolInvocation invocation)
+    {
+        if (!Scenario.DisclosurePolicy.EffectiveAllowCandidateInspection)
+        {
+            return Refused(invocation, "candidate_inspection_unavailable", "Candidate inspection is not available for this ChessQuest surface.");
+        }
+
+        if (!SessionContext.AgentToMove)
+        {
+            return Refused(invocation, "agent_not_to_move", "Candidate inspection is available only when it is the agent side's turn.");
+        }
+
+        if (_candidateInspectionsThisTurn >= Scenario.DisclosurePolicy.EffectiveMaxCandidateInspectionsPerTurn)
+        {
+            return Refused(
+                invocation,
+                "candidate_inspection_budget_exhausted",
+                "Candidate inspection budget is exhausted for the current agent turn.",
+                new Dictionary<string, object?>
+                {
+                    ["maxCandidateInspectionsPerTurn"] = Scenario.DisclosurePolicy.EffectiveMaxCandidateInspectionsPerTurn,
+                    ["candidateInspectionsThisTurn"] = _candidateInspectionsThisTurn
+                });
+        }
+
+        var move = ReadString(invocation, "move");
+        if (string.IsNullOrWhiteSpace(move))
+        {
+            return Refused(invocation, "missing_move", "Candidate inspection requires an agent-authored UCI move.");
+        }
+
+        var before = CurrentState;
+        if (ValidateLegalMoveObservation(invocation, move, before, ChessQuestToolIds.InspectCandidate) is { } refusal)
+        {
+            return refusal;
+        }
+
+        _candidateInspectionsThisTurn++;
+        var inspection = _rules.InspectCandidate(move, Scenario.AgentColor);
+        var data = Snapshot("inspect_candidate");
+        data["candidateInspection"] = inspection;
+        data["requestedMove"] = move.Trim().ToLowerInvariant();
+        data["legalMoveObservationId"] = ReadString(invocation, "legalMoveObservationId");
+        data["candidateLegal"] = inspection.CandidateLegal;
+        data["rejectionReason"] = inspection.RejectionReason;
+        data["fenAfterCandidate"] = inspection.FenAfterCandidate;
+        data["opponentLegalCapturesAfterCandidate"] =
+            inspection.AttackInspectionAfterCandidate?.OpponentLegalCaptures ?? Array.Empty<ChessPublicCapture>();
+        data["attackedAgentPiecesAfterCandidate"] =
+            inspection.AttackInspectionAfterCandidate?.AttackedAgentPieces ?? Array.Empty<ChessAttackedPiece>();
+        data["legalProjectionOnly"] = inspection.LegalProjectionOnly;
+        data["candidateScanOnly"] = inspection.CandidateScanOnly;
+        data["moveQualityKnown"] = inspection.MoveQualityKnown;
+        data["safetyKnown"] = inspection.SafetyKnown;
+        data["opponentReplyModeled"] = inspection.OpponentReplyModeled;
+        data["opponentCaptureFactsIncluded"] = inspection.OpponentCaptureFactsIncluded;
+        data["fullOpponentReplyModeled"] = inspection.FullOpponentReplyModeled;
+        data["evaluationIncluded"] = inspection.EvaluationIncluded;
+        data["guidanceIncluded"] = inspection.GuidanceIncluded;
+        data["candidateInspectionsThisTurn"] = _candidateInspectionsThisTurn;
+        data["maxCandidateInspectionsPerTurn"] = Scenario.DisclosurePolicy.EffectiveMaxCandidateInspectionsPerTurn;
+
+        var receipt = Receipt(invocation, ReceiptStatus.Succeeded, "Agent-authored candidate inspection returned.", data);
+        return new ToolResult(receipt, Observation(invocation, receipt, "Agent-authored candidate inspection observed.", data));
+    }
+
     private async Task<ToolResult> PlayMoveAsync(
         ToolInvocation invocation,
         CancellationToken cancellationToken)
@@ -234,7 +310,7 @@ public sealed class ChessQuestSession
         }
 
         var before = CurrentState;
-        if (ValidateLegalMoveObservation(invocation, turnIntent, move, before) is { } refusal)
+        if (ValidateLegalMoveObservation(invocation, move, before, ChessQuestToolIds.PlayMove) is { } refusal)
         {
             return refusal;
         }
@@ -311,6 +387,7 @@ public sealed class ChessQuestSession
         }
 
         _projectedLinesThisTurn = 0;
+        _candidateInspectionsThisTurn = 0;
         var state = CurrentState;
         var data = Snapshot("play_move");
         data["turnIntent"] = turnIntent;
@@ -467,9 +544,9 @@ public sealed class ChessQuestSession
 
     private ToolResult? ValidateLegalMoveObservation(
         ToolInvocation invocation,
-        IReadOnlyDictionary<string, object?> turnIntent,
         string move,
-        ChessPublicState currentState)
+        ChessPublicState currentState,
+        string toolIdForMessage)
     {
         var normalizedMove = move.Trim().ToLowerInvariant();
         var observationId = ReadString(invocation, "legalMoveObservationId");
@@ -486,7 +563,7 @@ public sealed class ChessQuestSession
                 ? Refused(
                     invocation,
                     "missing_legal_move_observation_id",
-                    "Strict gameplay requires legalMoveObservationId from the current chess.list_legal_moves observation before chess.play_move. Actor probes are the only surface that may bypass this binding.",
+                    $"Strict gameplay requires legalMoveObservationId from the current chess.list_legal_moves observation before {toolIdForMessage}. Actor probes are the only surface that may bypass this binding.",
                     LegalMoveRefusalData(currentState, normalizedMove, currentLegalMoveSnapshot))
                 : null;
         }

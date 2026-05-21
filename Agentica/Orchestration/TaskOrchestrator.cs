@@ -162,19 +162,13 @@ public sealed class TaskOrchestrator
             if (!acceptance.ShouldRefine)
             {
                 state.BlockedTaskIds.Add(task.TaskId);
-                state.Status = acceptance.Status == TaskAcceptanceStatus.Rejected
-                    ? OrchestrationStatus.Failed
-                    : OrchestrationStatus.Blocked;
-                state.StopReason = acceptance.Status == TaskAcceptanceStatus.Rejected
-                    ? OrchestrationStopReason.Failed
-                    : OrchestrationStopReason.Blocked;
+                ApplyFinalStateFromAcceptance(state, acceptance, outcome);
                 return Envelope(request, plan, state, outcomes);
             }
 
             if (state.RefinementCount >= _policy.MaxRefinements)
             {
-                state.Status = OrchestrationStatus.Blocked;
-                state.StopReason = OrchestrationStopReason.MaxRefinementsReached;
+                ApplyFinalStateFromRefinementBudget(state, outcome);
                 return Envelope(request, plan, state, outcomes);
             }
 
@@ -244,6 +238,95 @@ public sealed class TaskOrchestrator
 
     private static int RunCount(OrchestrationState state, string taskId) =>
         state.TaskRunCounts.TryGetValue(taskId, out var count) ? count : 0;
+
+    private static void ApplyFinalStateFromAcceptance(
+        OrchestrationState state,
+        TaskAcceptanceResult acceptance,
+        Agentica.Outcomes.OutcomeEnvelope outcome)
+    {
+        if (TryMapChildOutcome(outcome, out var status, out var stopReason))
+        {
+            state.Status = status;
+            state.StopReason = stopReason;
+            return;
+        }
+
+        state.Status = acceptance.Status == TaskAcceptanceStatus.Rejected
+            ? OrchestrationStatus.Failed
+            : OrchestrationStatus.Blocked;
+        state.StopReason = acceptance.Status == TaskAcceptanceStatus.Rejected
+            ? OrchestrationStopReason.Failed
+            : OrchestrationStopReason.Blocked;
+    }
+
+    private static void ApplyFinalStateFromRefinementBudget(
+        OrchestrationState state,
+        Agentica.Outcomes.OutcomeEnvelope outcome)
+    {
+        if (TryMapChildOutcome(outcome, out var status, out var stopReason))
+        {
+            state.Status = status;
+            state.StopReason = stopReason;
+            return;
+        }
+
+        state.Status = OrchestrationStatus.Blocked;
+        state.StopReason = OrchestrationStopReason.MaxRefinementsReached;
+    }
+
+    private static bool TryMapChildOutcome(
+        Agentica.Outcomes.OutcomeEnvelope outcome,
+        out OrchestrationStatus status,
+        out OrchestrationStopReason stopReason)
+    {
+        switch (outcome.Outcome.StopReason)
+        {
+            case Agentica.Outcomes.StopReason.TerminalLoss:
+                status = OrchestrationStatus.Failed;
+                stopReason = OrchestrationStopReason.TerminalLoss;
+                return true;
+            case Agentica.Outcomes.StopReason.TerminalDraw:
+                status = OrchestrationStatus.Failed;
+                stopReason = OrchestrationStopReason.TerminalDraw;
+                return true;
+            case Agentica.Outcomes.StopReason.PlannerUnavailable:
+                status = OrchestrationStatus.Blocked;
+                stopReason = OrchestrationStopReason.PlannerUnavailable;
+                return true;
+            case Agentica.Outcomes.StopReason.PlanInvalid:
+                status = OrchestrationStatus.PlanInvalid;
+                stopReason = OrchestrationStopReason.PlanInvalid;
+                return true;
+            case Agentica.Outcomes.StopReason.Timeout:
+                status = OrchestrationStatus.Cancelled;
+                stopReason = OrchestrationStopReason.Timeout;
+                return true;
+            case Agentica.Outcomes.StopReason.Cancelled:
+                status = OrchestrationStatus.Cancelled;
+                stopReason = OrchestrationStopReason.Cancelled;
+                return true;
+        }
+
+        switch (outcome.Outcome.Status)
+        {
+            case Agentica.Outcomes.RunOutcomeStatus.PlanInvalid:
+                status = OrchestrationStatus.PlanInvalid;
+                stopReason = OrchestrationStopReason.PlanInvalid;
+                return true;
+            case Agentica.Outcomes.RunOutcomeStatus.Failed:
+                status = OrchestrationStatus.Failed;
+                stopReason = OrchestrationStopReason.ChildRunFailed;
+                return true;
+            case Agentica.Outcomes.RunOutcomeStatus.Cancelled:
+                status = OrchestrationStatus.Cancelled;
+                stopReason = OrchestrationStopReason.Cancelled;
+                return true;
+        }
+
+        status = OrchestrationStatus.Blocked;
+        stopReason = OrchestrationStopReason.Blocked;
+        return false;
+    }
 
     private static void ResetRunCountsForReplacedTasks(
         OrchestrationState state,
