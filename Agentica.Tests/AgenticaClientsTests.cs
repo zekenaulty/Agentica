@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using Agentica.Artifacts;
 using Agentica.Clients.Gemini;
+using Agentica.Clients.Images;
 using Agentica.Clients.Llm;
 using Agentica.Clients.Planning;
 using Agentica.Execution;
@@ -435,6 +436,25 @@ public sealed class AgenticaClientsTests
         var schema = Assert.IsType<JsonElement>(config.ResponseJsonSchema);
         Assert.Equal("object", schema.GetProperty("type").GetString());
         Assert.True(schema.GetProperty("properties").TryGetProperty("status", out _));
+    }
+
+    [Fact]
+    public void Gemini_image_config_maps_generation_options()
+    {
+        var config = GeminiImageGenerationClient.CreateConfig(new ImageGenerationRequest(
+            GeminiModelId.FlashImage31Preview,
+            "Create a cover illustration.",
+            AspectRatio: "16:9",
+            ImageSize: "2K",
+            OutputMimeType: "image/jpeg",
+            OutputCompressionQuality: 82));
+
+        Assert.Equal(["TEXT", "IMAGE"], config.ResponseModalities);
+        Assert.NotNull(config.ImageConfig);
+        Assert.Equal("16:9", config.ImageConfig.AspectRatio);
+        Assert.Equal("2K", config.ImageConfig.ImageSize);
+        Assert.Equal("image/jpeg", config.ImageConfig.OutputMimeType);
+        Assert.Equal(82, config.ImageConfig.OutputCompressionQuality);
     }
 
     [Fact]

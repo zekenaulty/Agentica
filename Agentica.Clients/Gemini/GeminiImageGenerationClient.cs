@@ -107,7 +107,7 @@ public sealed class GeminiImageGenerationClient : IImageGenerationClient
         return new Client(apiKey: apiKey);
     }
 
-    private static GenerateContentConfig CreateConfig(ImageGenerationRequest request)
+    internal static GenerateContentConfig CreateConfig(ImageGenerationRequest request)
     {
         var config = new GenerateContentConfig
         {
@@ -115,7 +115,9 @@ public sealed class GeminiImageGenerationClient : IImageGenerationClient
             ImageConfig = new ImageConfig
             {
                 AspectRatio = EmptyToNull(request.AspectRatio),
-                ImageSize = EmptyToNull(request.ImageSize)
+                ImageSize = EmptyToNull(request.ImageSize),
+                OutputMimeType = EmptyToNull(request.OutputMimeType),
+                OutputCompressionQuality = request.OutputCompressionQuality
             }
         };
 
