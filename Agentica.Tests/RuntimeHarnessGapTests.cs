@@ -90,6 +90,33 @@ public sealed class RuntimeHarnessGapTests
     }
 
     [Fact]
+    public async Task Allow_all_effect_policy_still_rejects_unknown_tool_effect_before_execution()
+    {
+        var tool = new CountingTool();
+        var catalog = ToolCatalog.Create(new ToolRegistration(
+            new ToolDescriptor("maze.unknown", "Maze Unknown", ToolKind.Action, ToolEffect.Unknown),
+            tool));
+        var runner = CreateRunner(
+            new StaticPlanner(Plan(Step(
+                "step_001",
+                "maze.unknown",
+                ToolKind.Action,
+                ToolEffect.Unknown))),
+            catalog,
+            policy: new ExecutionPolicy(
+                MaxSteps: 4,
+                MaxRefinements: 0,
+                PlanningMode: PlanningMode.PlanOnly,
+                EffectPolicy: ToolEffectPolicy.AllowAll));
+
+        var envelope = await runner.RunAsync(Request());
+
+        Assert.Equal(RunOutcomeStatus.PlanInvalid, envelope.Outcome.Status);
+        Assert.Contains(envelope.Details.ValidationIssues, issue => issue.Code == "plan.step.effect_not_allowed");
+        Assert.Equal(0, tool.ExecutionCount);
+    }
+
+    [Fact]
     public async Task Completion_evidence_gate_blocks_plan_exhaustion_without_required_artifact()
     {
         var catalog = ToolCatalog.Create(new ToolRegistration(

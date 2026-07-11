@@ -11,7 +11,14 @@ public sealed record ToolEffectPolicy(IReadOnlySet<ToolEffect> AllowedEffects)
             ToolEffect.WritesLocalState
         });
 
-    public static ToolEffectPolicy AllowAll { get; } = new(
+    public static ToolEffectPolicy AllowKnown { get; } = new(
+        Enum.GetValues<ToolEffect>()
+            .Where(effect => effect != ToolEffect.Unknown)
+            .ToHashSet());
+
+    public static ToolEffectPolicy AllowAll { get; } = AllowKnown;
+
+    public static ToolEffectPolicy UnsafeAllowUnknown { get; } = new(
         Enum.GetValues<ToolEffect>().ToHashSet());
 
     public bool Allows(ToolEffect effect) =>

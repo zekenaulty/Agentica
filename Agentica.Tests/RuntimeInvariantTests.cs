@@ -151,6 +151,19 @@ public sealed class RuntimeInvariantTests
         Assert.True(policy.EffectiveEffectPolicy.Allows(ToolEffect.WritesLocalState));
         Assert.False(policy.EffectiveEffectPolicy.Allows(ToolEffect.ExternalSideEffect));
         Assert.False(policy.EffectiveEffectPolicy.Allows(ToolEffect.Destructive));
+        Assert.False(policy.EffectiveEffectPolicy.Allows(ToolEffect.Unknown));
+    }
+
+    [Fact]
+    public void Allow_all_effect_policy_excludes_unknown_unless_explicitly_unsafe()
+    {
+        Assert.True(ToolEffectPolicy.AllowAll.Allows(ToolEffect.ReadOnly));
+        Assert.True(ToolEffectPolicy.AllowAll.Allows(ToolEffect.WritesLocalState));
+        Assert.True(ToolEffectPolicy.AllowAll.Allows(ToolEffect.ExternalSideEffect));
+        Assert.True(ToolEffectPolicy.AllowAll.Allows(ToolEffect.Destructive));
+        Assert.False(ToolEffectPolicy.AllowAll.Allows(ToolEffect.Unknown));
+        Assert.False(ToolEffectPolicy.AllowKnown.Allows(ToolEffect.Unknown));
+        Assert.True(ToolEffectPolicy.UnsafeAllowUnknown.Allows(ToolEffect.Unknown));
     }
 
     private static AgenticaRunner CreateRunner(
