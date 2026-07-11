@@ -78,6 +78,23 @@ Deferred:
 - prompt evaluation suite
 - prompt versioning
 
+## Training And Adaptation Lab
+
+Future self-refinement, skill mining, prompt evolution, descriptor improvement, and risk-profile drafting belong in a separate sandboxed lifecycle, not inside live `AgenticaRunner` execution.
+
+See `docs/CodexGoal.Agentica.SecureEvolvingHarnessToolSystem.md` for the current planning boundary.
+
+Deferred:
+
+- trace intake and sanitization pipeline
+- LLM-assisted descriptor/risk/prompt candidate generation
+- deterministic and adversarial evaluation matrix
+- human or trusted maintainer promotion gate
+- signed or pinned manifest promotion
+- canary/shadow-mode rollout
+
+An LLM may draft risk classifications, but runtime enforcement needs a deterministic taxonomy or trusted pinned manifest. If neither exists, external or unknown-risk tools must fail closed.
+
 ## Harnesses
 
 Harnesses are host pressure tests.
