@@ -18,6 +18,14 @@ public sealed class ToolResultContractTests
     private const string ToolId = "hostile.read";
     private const string StepId = "step_hostile";
 
+    public static TheoryData<int, RunOutcomeStatus> NonterminalOrUndefinedStatusCases =>
+        new()
+        {
+            { (int)ReceiptStatus.Accepted, RunOutcomeStatus.PartiallyComplete },
+            { (int)ReceiptStatus.Partial, RunOutcomeStatus.PartiallyComplete },
+            { 999, RunOutcomeStatus.Failed }
+        };
+
     [Fact]
     public async Task Runtime_owns_result_identity_and_canonical_evidence_links()
     {
@@ -364,9 +372,7 @@ public sealed class ToolResultContractTests
     }
 
     [Theory]
-    [InlineData((int)ReceiptStatus.Accepted, RunOutcomeStatus.PartiallyComplete)]
-    [InlineData((int)ReceiptStatus.Partial, RunOutcomeStatus.PartiallyComplete)]
-    [InlineData(999, RunOutcomeStatus.Failed)]
+    [MemberData(nameof(NonterminalOrUndefinedStatusCases))]
     public async Task Nonterminal_or_undefined_status_cannot_succeed(
         int rawStatus,
         RunOutcomeStatus expectedStatus)
