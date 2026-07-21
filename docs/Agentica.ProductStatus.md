@@ -27,7 +27,7 @@ The repository has two distinct identities that must not be conflated:
 
 The lab's growth was productive: it exposed real planning, continuity, completion, and safety failures while keeping most domain vocabulary out of the runtime. The drift was primarily role, naming, and status-authority drift rather than valueless experimentation.
 
-The hardening gates now support internal research artifacts, not a public release. Public distribution remains deliberately deferred: the current source-available license does not permit reuse, the packages are marked research preview, no supported CLI exists, and CI/container evidence must be observed outside this workstation before any release claim.
+The hardening gates now support internal research artifacts, not a public release. Public distribution remains deliberately deferred: the current source-available license does not permit reuse, the packages are marked research preview, no supported CLI exists, and one green no-publish CI run does not establish supported-product readiness.
 
 ## Project Role And Naming Decision
 
@@ -76,13 +76,13 @@ Before this report, weighted completion was 17.75%, reported as 18%. The canonic
 Current weighted completion:
 
 ```text
-(10*100 + 15*100 + 25*100 + 20*100 + 10*100 + 10*100 + 10*95) / 100
-= 99.50%
+(10*100 + 15*100 + 25*100 + 20*100 + 10*100 + 10*100 + 10*100) / 100
+= 100.00%
 ```
 
-**Current hardening/product-truth program: 99.5% complete.**
+**Current hardening/product-truth program: 100% complete.**
 
-T0-T5 are complete against their defined gates. T6 is deliberately held at 95% until the new GitHub workflow runs successfully. The digest-pinned container now builds and smoke-tests locally on a working Docker engine. This score measures the agreed hardening program, not public-product readiness; the repository remains Incubating.
+T0-T6 are complete against their bounded gates. The no-publish GitHub workflow passed on Linux, including the digest-pinned container build and smoke. This score measures the agreed hardening program, not public-product readiness; the repository remains Incubating.
 
 | ID | Workstream | Weight | Before report | Current | Program state | Implemented credit | Remaining exit gate |
 | --- | --- | ---: | ---: | ---: | --- | --- | --- |
@@ -92,11 +92,11 @@ T0-T5 are complete against their defined gates. T6 is deliberately held at 95% u
 | T3 | Implement a minimal security vertical slice | 20% | 10% | 100% | Complete | Frozen compiled registrations include planner projection, effect/data/output/approval/retry/provenance declarations; one canonical hash binds planning and dispatch; exact grants and immediate recompile/recheck fail closed; all five Chat/path proofs pass | Keep the slice narrow; defer the broader taint and multi-hash architecture |
 | T4 | Fix or quarantine orchestration | 10% | 35% | 100% | Bounded gate complete; component still Incubating | Nonempty valid acceptance, global definition-of-done, concrete evidence, type-safe bounded host-state comparison, supported mutation vocabulary, normalized boundary failures, and failed-child regressions are enforced | Broader host integration and measured orchestration reliability are still required before product claims |
 | T5 | Create a measured LLM product proof | 10% | 15% | 100% | Complete for `agentica-product-proof-v1` | Versioned strict schemas/prompts, fixed matrix, durable telemetry, strict offline reaggregation, and zero-false-success gates landed; the measured cohort passed 29/30 overall, 25/25 primary, and 4/5 holdout | Repeat on intentional model/prompt/schema changes; do not generalize from this single fixed cohort |
-| T6 | Productize after the gates | 10% | 20% | 95% | Local and container gates complete; external CI evidence pending | Exact SDK and lock files, SHA-pinned no-publish CI, clean audits, clean Release/analyzer gates, 375 passing tests with 2 honest live skips, 84.16% line/67.02% branch coverage, real Lab process tests, package validation plus an external consumer, research metadata/license, an actual digest-pinned non-root container build/smoke, and bounded/redacted resilient Lab logs | Observe the complete GitHub workflow; public publishing and a supported CLI remain deferred |
+| T6 | Productize after the gates | 10% | 20% | 100% | Bounded research-repository productization gate complete | Exact SDK and lock files, SHA-pinned no-publish CI, clean audits, clean Release/analyzer gates, 375 passing tests with 2 honest live skips, 84.16% line/67.02% branch coverage, real Lab process tests, package validation plus an external consumer, research metadata/license, a digest-pinned non-root container build/smoke, bounded/redacted resilient Lab logs, and one complete green Linux CI run | No remaining gate in this bounded program; keep CI green while public publishing and a supported CLI remain deferred |
 
-## Active Slice: External CI Evidence
+## Active Slice: Preserve The Green Research Baseline
 
-Do not add a new harness family, router, MCP adapter, learning system, or broad tool taxonomy before the new release workflow is observed green and its failures, if any, are reconciled here.
+The agreed hardening/product-truth program is complete. Until a successor slice is explicitly selected, active work is to keep the no-publish CI gate green, reconcile regressions against this page, and preserve the research-repository boundary. Do not infer public-package, supported-CLI, or production readiness from 100% completion of this bounded program. New harness families, routers, MCP adapters, learning systems, and broad tool taxonomies remain deferred.
 
 ### T1: Immediate Blockers
 
@@ -170,7 +170,7 @@ Lab logs no longer retain raw argument values. They recursively redact common cr
 
 The final local gate on 2026-07-21 used SDK 10.0.302: locked restore, formatting, selected security analyzers, and the Release warnings-as-errors build passed; 375 tests passed, 2 opt-in live Gemini tests were explicitly skipped, and 0 failed; fresh core coverage was 84.16% line and 67.02% branch against 80%/60% floors; vulnerability and deprecation audits were clean; both research-preview packages passed validation plus a fresh temporary external-consumer build; and the Lab executable passed a real-process smoke.
 
-The container uses exact patch tags plus immutable manifest digests and locked restore. On 2026-07-21 it built successfully on Docker Engine 27.4.0, ran `quest list` successfully, and was inspected as a 118.73 MiB image running as non-root UID/GID 1654. CI performs the same build/smoke, scans verified/unknown/unverified secret findings, and never publishes. The complete GitHub workflow remains unobserved external evidence; that is the final 5% of this workstream.
+The container uses exact patch tags plus immutable manifest digests and locked restore. On 2026-07-21 it built successfully on Docker Engine 27.4.0, ran `quest list` successfully, and was inspected as a 118.73 MiB image running as non-root UID/GID 1654. The no-publish GitHub workflow [run 29877458089](https://github.com/zekenaulty/Agentica/actions/runs/29877458089) then passed on commit `b934136`, including locked restore, package audits, formatting, the zero-warning Release build, selected analyzers, Lab subprocess tests, the full coverage gate, package validation, the digest-pinned container build/smoke, and detected-secret scanning.
 
 ## Goal And Progress Document Xref
 

@@ -40,7 +40,7 @@ Implemented reality:
 - The runtime now supports small validated multi-step plan slices, read-only query batches, and dependency fields on plan steps.
 - The bounded orchestration proof contract now rejects empty acceptance, unmet global definition-of-done, unsupported mutations, planner/graph failures, and failed-child false success. Generic orchestration remains Incubating and excluded from product claims pending broader integration and measured reliability.
 - A fixed Gemini 2.5 Flash cohort passed 29/30 overall with zero false successes: WorkbenchQuest 25/25 and the MazeQuest holdout 4/5. This is a versioned product proof, not a general reliability guarantee.
-- The final local productization gate passes 375 tests with 2 explicitly skipped live-provider tests, 84.16% line/67.02% branch coverage, clean vulnerability/deprecation audits, a fresh external package-consumer build, and an actual digest-pinned non-root container build/smoke. The complete GitHub workflow remains the unobserved release evidence.
+- The productization gate passes locally and in the no-publish GitHub workflow: 375 tests with 2 explicitly skipped live-provider tests, 84.16% line/67.02% branch coverage, clean vulnerability/deprecation audits, a fresh external package-consumer build, a digest-pinned non-root container build/smoke, and detected-secret scanning.
 
 Runtime contract reference:
 
@@ -49,7 +49,7 @@ Runtime contract reference:
 
 Current active slice:
 
-Observe the new no-publish GitHub workflow, then reconcile any failures in the [canonical status](docs/Agentica.ProductStatus.md). The local and container gates are green; feature expansion remains deferred until CI evidence closes T6.
+Preserve the green research baseline while selecting the next explicit product slice. The bounded hardening program is complete, but public packaging, a supported CLI, and broad Lab expansion remain deferred; see the [canonical status](docs/Agentica.ProductStatus.md).
 
 ## The Goal
 

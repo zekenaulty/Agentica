@@ -41,5 +41,6 @@ contract.
 
 On 2026-07-21, the reviewed Dockerfile built successfully on Docker Engine 27.4.0 and the resulting
 118.73 MiB image passed `quest list`. Image inspection confirmed the expected entry point (`dotnet Agentica.Lab.dll`),
-source-available research labels, and non-root UID/GID 1654. The same build and
-smoke still need to pass in the repository's GitHub workflow before the external CI gate is closed.
+source-available research labels, and non-root UID/GID 1654. The no-publish GitHub workflow
+[run 29877458089](https://github.com/zekenaulty/Agentica/actions/runs/29877458089) then passed the same
+digest-pinned build and smoke on Linux, closing the bounded external CI gate.
