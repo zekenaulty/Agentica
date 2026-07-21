@@ -1,5 +1,7 @@
 # Codex Goal: Agentica Domain Router And Binding Harness
 
+> Lifecycle: **Draft** · Completion: **35%** · Canonical status: [Agentica Product Status And Goal Xref](Agentica.ProductStatus.md)
+
 Status: draft.
 
 Source check date: May 21, 2026.
@@ -36,7 +38,7 @@ Current solution shape:
 Agentica.slnx
   Agentica/          central in-process planner/executor runtime package
   Agentica.Clients/  LLM provider SDK isolation
-  Agentica.CLI/      console host and host-owned harnesses
+  Agentica.Lab/      console host and host-owned harnesses
   Agentica.Tests/    runtime, client, orchestration, and harness tests
 ```
 
@@ -1036,7 +1038,7 @@ Allowed first-slice locations:
 
 ```text
 docs/
-Agentica.CLI/Scenarios/      host-specific probes if needed
+Agentica.Lab/Scenarios/      host-specific probes if needed
 Agentica.Tests/              targeted host/runtime boundary tests
 ```
 

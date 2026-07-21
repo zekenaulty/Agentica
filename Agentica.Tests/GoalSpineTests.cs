@@ -99,7 +99,8 @@ public sealed class GoalSpineTests
             DemoTools.CreateCatalog(),
             new InMemoryEventSink(),
             new DeterministicOutcomeReporter(),
-            new ExecutionPolicy(MaxSteps: 1, MaxRefinements: 0));
+            new ExecutionPolicy(MaxSteps: 1, MaxRefinements: 0),
+            PlanExhaustionCompletionEvaluator.Instance);
 
         var envelope = await runner.RunAsync(new RunRequest("Query state once."));
 
@@ -120,7 +121,8 @@ public sealed class GoalSpineTests
             DemoTools.CreateCatalog(),
             new InMemoryEventSink(),
             new DeterministicOutcomeReporter(),
-            new ExecutionPolicy(MaxSteps: 1, MaxRefinements: 0));
+            new ExecutionPolicy(MaxSteps: 1, MaxRefinements: 0),
+            PlanExhaustionCompletionEvaluator.Instance);
 
         var envelope = await runner.RunAsync(new RunRequest("Query state once."));
 
@@ -140,7 +142,7 @@ public sealed class GoalSpineTests
     [Fact]
     public async Task Divergence_ledger_records_refused_receipt_and_blocked_outcome()
     {
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("refuse.action", "Refuse Action", ToolKind.Action, ToolEffect.WritesLocalState),
             new RefusingTool()));
         var runner = new AgenticaRunner(
@@ -148,7 +150,8 @@ public sealed class GoalSpineTests
             catalog,
             new InMemoryEventSink(),
             new DeterministicOutcomeReporter(),
-            new ExecutionPolicy(MaxSteps: 1, MaxRefinements: 0));
+            new ExecutionPolicy(MaxSteps: 1, MaxRefinements: 0),
+            PlanExhaustionCompletionEvaluator.Instance);
 
         var envelope = await runner.RunAsync(new RunRequest("Try a refused action."));
 

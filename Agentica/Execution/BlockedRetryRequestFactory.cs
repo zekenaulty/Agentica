@@ -54,6 +54,13 @@ internal sealed class BlockedRetryRequestFactory
             ["previousAttemptNumber"] = nextAttemptNumber - 1,
             ["maxBlockedRetries"] = _policy.MaxBlockedRetries,
             ["remainingBlockedRetries"] = Math.Max(0, _policy.MaxBlockedRetries - (nextAttemptNumber - 1)),
+            ["retryableStopReasons"] = _policy.EffectiveBlockedRetries.RetryableStopReasons
+                .Select(reason => reason.ToString())
+                .OrderBy(reason => reason, StringComparer.Ordinal)
+                .ToArray(),
+            ["authorizedMutationRetryToolIds"] = _policy.EffectiveBlockedRetries.AuthorizedMutationToolIds
+                .OrderBy(toolId => toolId, StringComparer.Ordinal)
+                .ToArray(),
             ["instruction"] = "The previous Agentica run ended blocked. Use the supplied status, blockers, recent observations, recent receipts, validation issues, and available tools to plan a bounded strategy to unblock or resume. Do not claim success; Agentica will validate and execute any proposed plan.",
             ["previousAttempt"] = previousAttempt,
             ["recentReceipts"] = PlanningRequestFactory.Limit(blockedEnvelope.Receipts.Items, context.MaxRecentReceipts)

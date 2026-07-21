@@ -17,7 +17,7 @@ public sealed class RuntimeInvariantTests
     public async Task Validation_failure_prevents_all_tool_execution()
     {
         var tool = new CountingTool();
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("known.read", "Known Read", ToolKind.Query, ToolEffect.ReadOnly),
             tool));
         var runner = CreateRunner(new StaticPlanner(Plan(
@@ -71,10 +71,10 @@ public sealed class RuntimeInvariantTests
     public async Task Readonly_batch_failure_does_not_invent_partial_success()
     {
         var catalog = ToolCatalog.Create(
-            new ToolRegistration(
+            TestToolRegistration.Create(
                 new ToolDescriptor("read.good", "Read Good", ToolKind.Query, ToolEffect.ReadOnly),
                 new StatusTool(ReceiptStatus.Succeeded)),
-            new ToolRegistration(
+            TestToolRegistration.Create(
                 new ToolDescriptor("read.bad", "Read Bad", ToolKind.Query, ToolEffect.ReadOnly),
                 new StatusTool(ReceiptStatus.Failed)));
         var runner = CreateRunner(new StaticPlanner(Plan(
@@ -176,7 +176,7 @@ public sealed class RuntimeInvariantTests
             new InMemoryEventSink(),
             new DeterministicOutcomeReporter(),
             new ExecutionPolicy(MaxSteps: 8, MaxRefinements: 0, PlanningMode: PlanningMode.PlanOnly),
-            completionEvaluator);
+            completionEvaluator ?? PlanExhaustionCompletionEvaluator.Instance);
 
     private static WorkflowPlan Plan(params PlanStep[] steps) =>
         new("plan_test", 1, steps, "Runtime invariant test plan.");
@@ -185,7 +185,7 @@ public sealed class RuntimeInvariantTests
         new(stepId, toolId, ToolKind.Query, ToolEffect.ReadOnly, new Dictionary<string, object?>());
 
     private static ToolRegistration Registration(string toolId) =>
-        new(
+        TestToolRegistration.Create(
             new ToolDescriptor(toolId, toolId, ToolKind.Query, ToolEffect.ReadOnly),
             new StatusTool(ReceiptStatus.Succeeded));
 

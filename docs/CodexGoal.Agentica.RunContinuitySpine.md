@@ -1,5 +1,7 @@
 # Codex Goal: Agentica Run Continuity Spine
 
+> Lifecycle: **Incubating** · Completion: **85%** · Canonical status: [Agentica Product Status And Goal Xref](Agentica.ProductStatus.md)
+
 ## Feature Summary
 
 Add a run-level continuity subsystem that keeps a compact, evidence-grounded interpretation of a run across planning calls, refinements, tool calls, orchestration tasks, and bounded Agentica runs.
@@ -919,7 +921,7 @@ V1 is complete when:
    - `Agentica` core
    - incubating under `Agentica/Continuity`
    - orchestration package only
-   - CLI host first
+   - Lab host first
 
    Recommendation:
 

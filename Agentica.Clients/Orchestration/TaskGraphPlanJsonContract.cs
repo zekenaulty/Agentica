@@ -27,11 +27,16 @@ public sealed record TaskGraphPlanJsonContract(
             throw new LlmTaskPlannerException("Task graph payload did not include any tasks.");
         }
 
+        if (DefinitionOfDone is null || DefinitionOfDone.Count == 0)
+        {
+            throw new LlmTaskPlannerException("Task graph payload did not include a nonempty definitionOfDone.");
+        }
+
         return new TaskGraphPlan(
             PlanId,
             Objective,
             Tasks.Select(task => task.ToTaskNode()).ToArray(),
-            DefinitionOfDone?.Select(requirement => requirement.ToRequirement()).ToArray() ?? [],
+            DefinitionOfDone.Select(requirement => requirement.ToRequirement()).ToArray(),
             DateTimeOffset.UtcNow);
     }
 }
@@ -58,6 +63,11 @@ public sealed record TaskNodeJsonContract(
             throw new LlmTaskPlannerException($"Task '{TaskId}' is missing objective.");
         }
 
+        if (AcceptanceRequirements is null || AcceptanceRequirements.Count == 0)
+        {
+            throw new LlmTaskPlannerException($"Task '{TaskId}' did not include nonempty acceptanceRequirements.");
+        }
+
         return new TaskNode(
             TaskId,
             Objective,
@@ -72,10 +82,7 @@ public sealed record TaskNodeJsonContract(
                 pair => pair.Key,
                 pair => Agentica.Clients.Planning.JsonValueConverter.Convert(pair.Value),
                 StringComparer.Ordinal) ?? new Dictionary<string, object?>(StringComparer.Ordinal),
-            AcceptanceRequirements?.Select(requirement => requirement.ToRequirement()).ToArray() ??
-            [
-                new TaskAcceptanceRequirement(TaskAcceptanceRequirementKind.OutcomeStatus, RunOutcomeStatus.Succeeded)
-            ]);
+            AcceptanceRequirements.Select(requirement => requirement.ToRequirement()).ToArray());
     }
 }
 
@@ -105,7 +112,7 @@ public sealed record TaskAcceptanceRequirementJsonContract(
             status = parsed;
         }
 
-        return new TaskAcceptanceRequirement(
+        var requirement = new TaskAcceptanceRequirement(
             kind,
             status,
             ArtifactKind,
@@ -114,48 +121,29 @@ public sealed record TaskAcceptanceRequirementJsonContract(
             HostStateValue.HasValue
                 ? Agentica.Clients.Planning.JsonValueConverter.Convert(HostStateValue.Value)
                 : null);
+        try
+        {
+            TaskGraphValidator.ValidateRequirements([requirement], "Task acceptance");
+        }
+        catch (TaskGraphValidationException exception)
+        {
+            throw new LlmTaskPlannerException(exception.Message, exception);
+        }
+
+        return requirement;
     }
 
     private bool TryResolveKind(out TaskAcceptanceRequirementKind kind)
     {
-        if (Enum.TryParse(Kind, ignoreCase: true, out kind))
+        if (!string.IsNullOrWhiteSpace(Kind) &&
+            Enum.TryParse(Kind, ignoreCase: true, out kind) &&
+            Enum.IsDefined(kind) &&
+            string.Equals(kind.ToString(), Kind, StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
-        if (!string.IsNullOrWhiteSpace(ArtifactKind))
-        {
-            kind = TaskAcceptanceRequirementKind.Artifact;
-            return true;
-        }
-
-        if (!string.IsNullOrWhiteSpace(ToolId))
-        {
-            kind = TaskAcceptanceRequirementKind.Receipt;
-            return true;
-        }
-
-        if (!string.IsNullOrWhiteSpace(HostStateKey))
-        {
-            kind = TaskAcceptanceRequirementKind.HostState;
-            return true;
-        }
-
-        if (!string.IsNullOrWhiteSpace(RequiredOutcomeStatus))
-        {
-            kind = TaskAcceptanceRequirementKind.OutcomeStatus;
-            return true;
-        }
-
-        if (Kind is not null &&
-            (Kind.Equals("ObjectiveVerifier", StringComparison.OrdinalIgnoreCase) ||
-             Kind.Equals("ObjectiveVerification", StringComparison.OrdinalIgnoreCase) ||
-             Kind.Equals("Verifier", StringComparison.OrdinalIgnoreCase)))
-        {
-            kind = TaskAcceptanceRequirementKind.OutcomeStatus;
-            return true;
-        }
-
+        kind = default;
         return false;
     }
 }

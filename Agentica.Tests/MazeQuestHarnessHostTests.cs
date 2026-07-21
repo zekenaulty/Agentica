@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Agentica.CLI.Scenarios.MazeQuest;
+using Agentica.Lab.Scenarios.MazeQuest;
 using Agentica.Execution;
 using Agentica.Events;
 using Agentica.Outcomes;
@@ -104,15 +104,20 @@ public sealed class MazeQuestHarnessHostTests
             envelope.Details.Events,
             executionEvent =>
                 executionEvent.Payload.TryGetValue("contextFrameIds", out var value) &&
-                value is string[] frameIds &&
+                value is IReadOnlyList<string> frameIds &&
+                value is not string[] &&
                 frameIds.Contains(cockpitFrame.FrameId, StringComparer.Ordinal));
 
         var observationWithSurface = Assert.Single(
             envelope.Details.Observations.Take(1),
             observation => observation.Data.ContainsKey("agenticHarness"));
-        var observationHarness = Assert.IsType<MazeQuestHarnessContext>(observationWithSurface.Data["agenticHarness"]);
-        Assert.Equal("mazequest.harness", observationHarness.ActiveCapabilitySurface.ManifestId);
-        Assert.NotEqual(harness.ActiveCapabilitySurface.SurfaceId, observationHarness.ActiveCapabilitySurface.SurfaceId);
+        var observationHarness = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(
+            observationWithSurface.Data["agenticHarness"]);
+        Assert.IsNotType<MazeQuestHarnessContext>(observationHarness);
+        var observationSurface = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(
+            observationHarness["ActiveCapabilitySurface"]);
+        Assert.Equal("mazequest.harness", observationSurface["ManifestId"]);
+        Assert.NotEqual(harness.ActiveCapabilitySurface.SurfaceId, observationSurface["SurfaceId"]);
     }
 
     [Fact]

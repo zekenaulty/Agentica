@@ -1,5 +1,7 @@
 # Codex Goal: Agentica Orchestrated Campaign Runs
 
+> Lifecycle: **Implemented** · Completion: **90%** · Canonical status: [Agentica Product Status And Goal Xref](Agentica.ProductStatus.md)
+
 ## Goal
 
 Add a small host-side orchestration concept above Agentica runs so longer goals can be completed as a chain of bounded, receipt-backed runs.

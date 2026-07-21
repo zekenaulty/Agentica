@@ -13,8 +13,25 @@ public sealed class EvidenceTaskAcceptanceEvaluator : ITaskAcceptanceEvaluator
         TaskAcceptanceContext context,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         var blockers = new List<string>();
         var evidence = new List<EvidenceRef>();
+
+        try
+        {
+            TaskGraphValidator.ValidateRequirements(
+                task.AcceptanceRequirements,
+                $"Task '{task.TaskId}' acceptance criteria");
+        }
+        catch (TaskGraphValidationException exception)
+        {
+            return Task.FromResult(new TaskAcceptanceResult(
+                TaskAcceptanceStatus.InvalidatedPlan,
+                [exception.Message],
+                [],
+                RequiresGraphRefinement: true));
+        }
 
         foreach (var requirement in task.AcceptanceRequirements)
         {
@@ -28,7 +45,7 @@ public sealed class EvidenceTaskAcceptanceEvaluator : ITaskAcceptanceEvaluator
                     }
                     else
                     {
-                        evidence.AddRange(outcome.Outcome.CompletionEvidence);
+                        evidence.Add(new EvidenceRef("run", outcome.Outcome.RunId));
                     }
 
                     break;
@@ -65,13 +82,26 @@ public sealed class EvidenceTaskAcceptanceEvaluator : ITaskAcceptanceEvaluator
                 case TaskAcceptanceRequirementKind.HostState:
                     if (string.IsNullOrWhiteSpace(requirement.HostStateKey) ||
                         !context.HostState.TryGetValue(requirement.HostStateKey, out var value) ||
-                        !HostValueEquals(value, requirement.HostStateValue))
+                        !StructuralValueEquality.AreEqual(value, requirement.HostStateValue))
                     {
                         blockers.Add($"Host state '{requirement.HostStateKey}' did not satisfy task requirement.");
+                    }
+                    else
+                    {
+                        evidence.Add(new EvidenceRef("host_state", requirement.HostStateKey));
                     }
 
                     break;
             }
+        }
+
+        var explicitlyAcceptsActualStatus = task.AcceptanceRequirements.Any(requirement =>
+            requirement.Kind == TaskAcceptanceRequirementKind.OutcomeStatus &&
+            requirement.RequiredOutcomeStatus == outcome.Outcome.Status);
+        if (outcome.Outcome.Status != RunOutcomeStatus.Succeeded && !explicitlyAcceptsActualStatus)
+        {
+            blockers.Add(
+                $"Outcome status {outcome.Outcome.Status} cannot satisfy task acceptance without an explicit matching OutcomeStatus requirement.");
         }
 
         if (blockers.Count == 0)
@@ -98,15 +128,5 @@ public sealed class EvidenceTaskAcceptanceEvaluator : ITaskAcceptanceEvaluator
             evidence
                 .DistinctBy(item => $"{item.Kind}:{item.RefId}")
                 .ToArray()));
-    }
-
-    private static bool HostValueEquals(object? actual, object? expected)
-    {
-        if (actual is null || expected is null)
-        {
-            return actual is null && expected is null;
-        }
-
-        return string.Equals(actual.ToString(), expected.ToString(), StringComparison.Ordinal);
     }
 }

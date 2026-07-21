@@ -4,4 +4,6 @@ public sealed record LlmUsage(
     int? PromptTokens = null,
     int? OutputTokens = null,
     int? ThinkingTokens = null,
-    int? TotalTokens = null);
+    int? TotalTokens = null,
+    int? CachedPromptTokens = null,
+    int? ToolUsePromptTokens = null);

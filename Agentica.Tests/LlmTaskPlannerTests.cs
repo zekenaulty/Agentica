@@ -47,7 +47,12 @@ public sealed class LlmTaskPlannerTests
                   ]
                 }
               ],
-              "definitionOfDone": []
+              "definitionOfDone": [
+                {
+                  "kind": "OutcomeStatus",
+                  "requiredOutcomeStatus": "Succeeded"
+                }
+              ]
             }
             """);
         var taskPlanner = new LlmTaskPlanner(client);
@@ -57,6 +62,7 @@ public sealed class LlmTaskPlannerTests
             _ => DemoTools.CreateCatalog(),
             eventSink,
             new DeterministicOutcomeReporter(),
+            _ => PlanExhaustionCompletionEvaluator.Instance,
             _ => new ExecutionPolicy(MaxSteps: 10, MaxRefinements: 2));
         var orchestrator = new TaskOrchestrator(
             taskPlanner,
@@ -120,7 +126,12 @@ public sealed class LlmTaskPlannerTests
                   ]
                 }
               ],
-              "definitionOfDone": []
+              "definitionOfDone": [
+                {
+                  "kind": "OutcomeStatus",
+                  "requiredOutcomeStatus": "Succeeded"
+                }
+              ]
             }
             """);
         var planner = new LlmTaskPlanner(client);
@@ -137,7 +148,7 @@ public sealed class LlmTaskPlannerTests
     }
 
     [Fact]
-    public async Task Llm_task_planner_infers_acceptance_kind_from_evidence_fields()
+    public async Task Llm_task_planner_rejects_prohibited_acceptance_kind_aliases()
     {
         var client = new FakeLlmClient(
             """
@@ -161,18 +172,74 @@ public sealed class LlmTaskPlannerTests
                   ]
                 }
               ],
-              "definitionOfDone": []
+              "definitionOfDone": [
+                {
+                  "kind": "OutcomeStatus",
+                  "requiredOutcomeStatus": "Succeeded"
+                }
+              ]
             }
             """);
         var planner = new LlmTaskPlanner(client);
 
-        var plan = await planner.CreatePlanAsync(new TaskPlanningRequest(
+        await Assert.ThrowsAsync<LlmTaskPlannerException>(() => planner.CreatePlanAsync(new TaskPlanningRequest(
             new LargeTaskRequest("Run ChessQuest phase.", RequestOrigin.User, new Dictionary<string, object?>()),
-            new OrchestrationPolicy()));
+            new OrchestrationPolicy())));
+    }
 
-        var requirement = Assert.Single(plan.Tasks[0].AcceptanceRequirements);
-        Assert.Equal(TaskAcceptanceRequirementKind.Artifact, requirement.Kind);
-        Assert.Equal("chessquest.phase_report", requirement.ArtifactKind);
+    [Fact]
+    public async Task Llm_task_planner_rejects_empty_acceptance_and_definition_of_done()
+    {
+        var emptyAcceptance = new LlmTaskPlanner(new FakeLlmClient(
+            """
+            {
+              "planId": "empty_acceptance",
+              "objective": "Invalid proof contract.",
+              "tasks": [
+                {
+                  "taskId": "task",
+                  "objective": "Attempt work.",
+                  "dependsOn": [],
+                  "optional": false,
+                  "priority": 1,
+                  "maxRuns": 1,
+                  "contextProjection": {},
+                  "acceptanceRequirements": []
+                }
+              ],
+              "definitionOfDone": [
+                { "kind": "OutcomeStatus", "requiredOutcomeStatus": "Succeeded" }
+              ]
+            }
+            """));
+        var emptyDefinitionOfDone = new LlmTaskPlanner(new FakeLlmClient(
+            """
+            {
+              "planId": "empty_dod",
+              "objective": "Invalid proof contract.",
+              "tasks": [
+                {
+                  "taskId": "task",
+                  "objective": "Attempt work.",
+                  "dependsOn": [],
+                  "optional": false,
+                  "priority": 1,
+                  "maxRuns": 1,
+                  "contextProjection": {},
+                  "acceptanceRequirements": [
+                    { "kind": "OutcomeStatus", "requiredOutcomeStatus": "Succeeded" }
+                  ]
+                }
+              ],
+              "definitionOfDone": []
+            }
+            """));
+        var request = new TaskPlanningRequest(
+            new LargeTaskRequest("Invalid proof contract.", RequestOrigin.User, new Dictionary<string, object?>()),
+            new OrchestrationPolicy());
+
+        await Assert.ThrowsAsync<LlmTaskPlannerException>(() => emptyAcceptance.CreatePlanAsync(request));
+        await Assert.ThrowsAsync<LlmTaskPlannerException>(() => emptyDefinitionOfDone.CreatePlanAsync(request));
     }
 
     [Fact]
@@ -192,7 +259,12 @@ public sealed class LlmTaskPlannerTests
                   "priority": 1,
                   "maxRuns": 1,
                   "contextProjection": {},
-                  "acceptanceRequirements": []
+                  "acceptanceRequirements": [
+                    {
+                      "kind": "OutcomeStatus",
+                      "requiredOutcomeStatus": "Succeeded"
+                    }
+                  ]
                 },
                 {
                   "taskId": "b",
@@ -202,10 +274,20 @@ public sealed class LlmTaskPlannerTests
                   "priority": 2,
                   "maxRuns": 1,
                   "contextProjection": {},
-                  "acceptanceRequirements": []
+                  "acceptanceRequirements": [
+                    {
+                      "kind": "OutcomeStatus",
+                      "requiredOutcomeStatus": "Succeeded"
+                    }
+                  ]
                 }
               ],
-              "definitionOfDone": []
+              "definitionOfDone": [
+                {
+                  "kind": "OutcomeStatus",
+                  "requiredOutcomeStatus": "Succeeded"
+                }
+              ]
             }
             """);
         var planner = new LlmTaskPlanner(client);
@@ -271,8 +353,47 @@ public sealed class LlmTaskPlannerTests
         Assert.Equal("design_attempts", refinement.Mutations[0].Task?.TaskId);
     }
 
+    [Fact]
+    public async Task Llm_task_planner_rejects_removed_proof_authority_mutations()
+    {
+        var planner = new LlmTaskPlanner(new FakeLlmClient(
+            """
+            {
+              "reason": "model_claims_acceptance",
+              "mutations": [
+                {
+                  "kind": "MarkTaskAccepted",
+                  "taskId": "inspect"
+                }
+              ],
+              "blockers": [],
+              "requiresUserInput": false
+            }
+            """));
+        var task = Task("inspect");
+        var plan = Plan([task]);
+        var state = new OrchestrationState(
+            "orchestration_test",
+            new WorkContextSnapshot("Build persistence.", null, [], [], [], [], [], [], [], new Dictionary<string, object?>(), DateTimeOffset.UtcNow));
+
+        await Assert.ThrowsAsync<LlmTaskPlannerException>(() => planner.RefinePlanAsync(new TaskRefinementRequest(
+            new LargeTaskRequest("Build persistence.", RequestOrigin.User, new Dictionary<string, object?>()),
+            plan,
+            state,
+            task,
+            Envelope("run_test", RunOutcomeStatus.Succeeded),
+            new TaskAcceptanceResult(TaskAcceptanceStatus.InvalidatedPlan, ["Need repair."], []),
+            state.WorkingContext,
+            new OrchestrationPolicy())));
+    }
+
     private static TaskGraphPlan Plan(IReadOnlyList<TaskNode> tasks) =>
-        new("plan_test", "Build persistence.", tasks, [], DateTimeOffset.UtcNow);
+        new(
+            "plan_test",
+            "Build persistence.",
+            tasks,
+            [new TaskAcceptanceRequirement(TaskAcceptanceRequirementKind.OutcomeStatus, RunOutcomeStatus.Succeeded)],
+            DateTimeOffset.UtcNow);
 
     private static TaskNode Task(string taskId) =>
         new(

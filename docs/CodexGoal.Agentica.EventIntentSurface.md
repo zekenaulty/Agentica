@@ -1,5 +1,7 @@
 # Codex Goal: Agentica Event Intent Surface
 
+> Lifecycle: **Implemented** · Completion: **100%** · Canonical status: [Agentica Product Status And Goal Xref](Agentica.ProductStatus.md)
+
 Status: implemented for the current slice.
 
 ## Mission
@@ -733,13 +735,13 @@ Run:
 ```powershell
 dotnet build Agentica.slnx
 dotnet test Agentica.slnx
-dotnet run --project Agentica.CLI -- run "Create a two-step workflow that queries state and then acts"
+dotnet run --project Agentica.Lab -- run "Create a two-step workflow that queries state and then acts"
 ```
 
 For a harness smoke test:
 
 ```powershell
-dotnet run --project Agentica.CLI -- hexquest run record_scope_conflict_v2
+dotnet run --project Agentica.Lab -- hexquest run record_scope_conflict_v2
 ```
 
 Only run live Gemini tests when explicitly requested and credentials are configured.

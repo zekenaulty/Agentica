@@ -1,5 +1,7 @@
 # Agentica Deferred Work
 
+> Supporting reference only. [Agentica Product Status And Goal Xref](Agentica.ProductStatus.md) is the canonical authority for the active slice and deferred experiments.
+
 This file names work that is intentionally outside the current Agentica core stabilization slice.
 
 ## Higher-Level Orchestration
@@ -10,7 +12,7 @@ The reusable orchestration contracts were migrated into `Agentica/Orchestration`
 
 Long-horizon orchestration should still become a separate `Agentica.Orchestration` package if the contracts stabilize as reusable API surface, durable state/replay becomes real, or the orchestration layer starts changing independently from the bounded run runtime.
 
-Current host campaign code in `Agentica.CLI/Scenarios/Campaign` is a harness and design probe, not core runtime identity.
+Current host campaign code in `Agentica.Lab/Scenarios/Campaign` is a harness and design probe, not core runtime identity.
 
 Deferred:
 
@@ -64,7 +66,7 @@ Deferred:
 - run store
 - resume store
 - artifact persistence provider
-- event sink persistence provider beyond CLI run logs
+- event sink persistence provider beyond Lab run logs
 
 ## Prompt Optimization
 

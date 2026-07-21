@@ -148,7 +148,11 @@ public sealed class HiddenWorldOrchestrationHarnessTests
                 "hidden_world_plan",
                 request.Request.Objective,
                 VisibleTasks().ToArray(),
-                [],
+                [
+                    new TaskAcceptanceRequirement(
+                        TaskAcceptanceRequirementKind.OutcomeStatus,
+                        RunOutcomeStatus.Succeeded)
+                ],
                 DateTimeOffset.UtcNow));
 
         public Task<TaskGraphRefinement> RefinePlanAsync(
@@ -254,7 +258,7 @@ public sealed class HiddenWorldOrchestrationHarnessTests
             RunOutcomeStatus status,
             StopReason stopReason,
             string message,
-            IReadOnlyList<string> unlocked) 
+            IReadOnlyList<string> unlocked)
         {
             var runId = AgenticaIds.New("run");
             var receipt = new Receipt(

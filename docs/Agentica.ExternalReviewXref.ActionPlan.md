@@ -1,5 +1,9 @@
 # Agentica External Review Xref And Action Plan
 
+> Lifecycle: **Superseded** · Completion: **45%** · Canonical status: [Agentica Product Status And Goal Xref](Agentica.ProductStatus.md)
+>
+> Rename note: `Agentica.CLI` was renamed to `Agentica.Lab`; legacy names below are retained as historical evidence.
+
 Date: 2026-05-11
 
 This document cross-references the Grok and Opus 4.6 reviews against the current local repository state and turns grounded concerns into action tracks.

@@ -1,5 +1,5 @@
 <Solution>
-  <Project Path="Agentica.CLI/Agentica.CLI.csproj" />
+  <Project Path="Agentica.Lab/Agentica.Lab.csproj" />
   <Project Path="Agentica.Clients/Agentica.Clients.csproj" />
   <Project Path="Agentica.Tests/Agentica.Tests.csproj" />
   <Project Path="Agentica/Agentica.csproj" />

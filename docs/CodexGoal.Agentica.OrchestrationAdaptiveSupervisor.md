@@ -1,5 +1,9 @@
 # Codex Goal: Agentica Adaptive Supervisory Orchestration
 
+> Lifecycle: **Incubating** · Completion: **90%** · Canonical status: [Agentica Product Status And Goal Xref](Agentica.ProductStatus.md)
+
+> **Target-contract warning:** The normative sections below describe the intended orchestration contract, not a general product-readiness claim. The bounded core now fails closed on invalid acceptance, unmet global definition-of-done, unsupported mutations, and planner/graph/refinement failures, but the surface remains experimental and quarantined pending broader host integration, measured reliability evidence, and removal or explicit recording of scenario fallbacks.
+
 ## Goal
 
 Define and build `Agentica.Orchestration` as the adaptive supervisory layer above bounded Agentica runs.
@@ -102,7 +106,7 @@ LargeTaskRequest
   -> OrchestrationOutcomeEnvelope
 ```
 
-The orchestrator's observation is an `OutcomeEnvelope`. The orchestrator's refinement is a validated mutation to the task graph: add a task, replace a task, remove a task, add a dependency, revise acceptance criteria, mark a task blocked, or change priority.
+The orchestrator's observation is an `OutcomeEnvelope`. The orchestrator's refinement is a validated mutation to the task graph: add, replace, or remove a task; add or remove a dependency; revise acceptance criteria or global definition-of-done; or change priority. Acceptance and blocked state are proof-bearing runtime decisions, not planner-authored graph mutations.
 
 Without task graph refinement, the layer is only a sequencer. The intended product is an adaptive orchestrator.
 
@@ -312,8 +316,6 @@ RemoveTask
 AddDependency
 RemoveDependency
 ReorderPriority
-MarkTaskBlocked
-MarkTaskAccepted
 ReviseAcceptanceCriteria
 ReviseDefinitionOfDone
 ```
@@ -510,11 +512,11 @@ Create `Agentica.Orchestration` as a separate class library only when the bounda
 
 Initial source can be extracted from:
 
-- `Agentica.CLI/Scenarios/Campaign/CampaignRunner.cs`
-- `Agentica.CLI/Scenarios/Campaign/CampaignGraph.cs`
-- `Agentica.CLI/Scenarios/Campaign/CampaignAcceptance.cs`
-- `Agentica.CLI/Scenarios/Campaign/CampaignProgressSnapshotCompiler.cs`
-- `Agentica.CLI/Scenarios/Campaign/CampaignWorkingContextCompiler.cs`
+- `Agentica.Lab/Scenarios/Campaign/CampaignRunner.cs`
+- `Agentica.Lab/Scenarios/Campaign/CampaignGraph.cs`
+- `Agentica.Lab/Scenarios/Campaign/CampaignAcceptance.cs`
+- `Agentica.Lab/Scenarios/Campaign/CampaignProgressSnapshotCompiler.cs`
+- `Agentica.Lab/Scenarios/Campaign/CampaignWorkingContextCompiler.cs`
 - `Agentica.Tests/CampaignHarnessTests.cs`
 
 But the extraction must add the adaptive surface:

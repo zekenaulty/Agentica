@@ -76,6 +76,7 @@ internal sealed class PlanningRequestFactory
         PlanningContextOptions context) =>
         new(
             AgenticaIds.New("surface"),
+            _toolCatalog.ManifestHash,
             DateTimeOffset.UtcNow,
             _toolCatalog.Descriptors,
             executionContext,
@@ -159,6 +160,13 @@ internal sealed class PlanningRequestFactory
             ["planContinuationCount"] = continuationCount,
             ["remainingPlanContinuationBudget"] = remainingContinuationBudget,
             ["maxBlockedRetries"] = _policy.MaxBlockedRetries,
+            ["retryableStopReasons"] = _policy.EffectiveBlockedRetries.RetryableStopReasons
+                .Select(reason => reason.ToString())
+                .OrderBy(reason => reason, StringComparer.Ordinal)
+                .ToArray(),
+            ["authorizedMutationRetryToolIds"] = _policy.EffectiveBlockedRetries.AuthorizedMutationToolIds
+                .OrderBy(toolId => toolId, StringComparer.Ordinal)
+                .ToArray(),
             ["maxBatchSize"] = _policy.MaxBatchSize,
             ["maxParallelism"] = _policy.MaxParallelism,
             ["allowReadOnlyParallelBatches"] = _policy.AllowReadOnlyParallelBatches,
@@ -167,6 +175,23 @@ internal sealed class PlanningRequestFactory
             ["allowedEffects"] = _policy.EffectiveEffectPolicy.AllowedEffects
                 .Select(effect => effect.ToString())
                 .ToArray(),
+            ["toolManifestHash"] = _toolCatalog.ManifestHash,
+            ["plannerBoundaryMode"] = _policy.EffectiveSecurityPolicy.UsesExternalPlanner
+                ? "external"
+                : "local",
+            ["initialDataBoundaries"] = _policy.EffectiveSecurityPolicy.InitialBoundaries
+                .Select(boundary => boundary.ToString())
+                .OrderBy(boundary => boundary, StringComparer.Ordinal)
+                .ToArray(),
+            ["exposedDataBoundaries"] = run.ExposedBoundaries
+                .Select(boundary => boundary.ToString())
+                .OrderBy(boundary => boundary, StringComparer.Ordinal)
+                .ToArray(),
+            ["externalPlannerAllowedBoundaries"] = _policy.EffectiveSecurityPolicy.ExternalPlannerAllowedBoundaries?
+                .Select(boundary => boundary.ToString())
+                .OrderBy(boundary => boundary, StringComparer.Ordinal)
+                .ToArray(),
+            ["executionGrantCount"] = _policy.EffectiveSecurityPolicy.ExecutionGrants.Count,
             ["elapsedMs"] = Milliseconds(elapsed),
             ["timeoutMs"] = _policy.Timeout is null ? null : Milliseconds(_policy.Timeout.Value),
             ["remainingTimeoutMs"] = remainingTimeout is null ? null : Milliseconds(remainingTimeout.Value),

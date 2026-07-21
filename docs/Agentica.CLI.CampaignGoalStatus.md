@@ -1,5 +1,9 @@
 # Agentica CLI Campaign Goal Status
 
+> Lifecycle: **Historical** · Completion: **100%** · Canonical status: [Agentica Product Status And Goal Xref](Agentica.ProductStatus.md)
+>
+> Rename note: `Agentica.CLI` was renamed to `Agentica.Lab`; legacy names below are retained as historical evidence.
+
 Status note for `docs/CodexGoal.Agentica.OrchestratedCampaignRuns.md`.
 
 ## Implemented

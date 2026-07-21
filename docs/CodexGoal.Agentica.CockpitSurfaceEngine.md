@@ -1,5 +1,7 @@
 # Codex Goal: Agentica Capability Surface Engine
 
+> Lifecycle: **Incubating** · Completion: **70%** · Canonical status: [Agentica Product Status And Goal Xref](Agentica.ProductStatus.md)
+
 ## Mission
 
 Define the `CapabilitySurfaceEngine`: a deterministic host-binding layer that compiles host reality into the constrained decision surface consumed by Agentica planners, runners, orchestration planners, and future operator views.
@@ -1081,4 +1083,3 @@ This goal is complete when one harness demonstrates:
 - and artifact-gated completion.
 
 The result should make the planner's next legal decision obvious without letting the surface engine make the decision itself.
-

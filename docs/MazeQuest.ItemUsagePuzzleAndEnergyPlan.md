@@ -1,5 +1,7 @@
 # MazeQuest Item Usage, Puzzle Bindings, And Energy Plan
 
+> Lifecycle: **Incubating** · Completion: **50%** · Canonical status: [Agentica Product Status And Goal Xref](Agentica.ProductStatus.md)
+
 ## Purpose
 
 This document pins the next MazeQuest host-harness enhancements without turning the test game into a full game engine.
@@ -12,7 +14,7 @@ The goal is to improve the test surface for Agentica planning, execution, and ad
 - Make resource pressure real but not accidentally impossible.
 - Preserve truthful blocked outcomes when the host intentionally starves resources.
 
-MazeQuest remains a CLI host scenario. These concepts must not move into the Agentica runtime vocabulary.
+MazeQuest remains a Lab host scenario. These concepts must not move into the Agentica runtime vocabulary.
 
 ## Item And Puzzle Scope
 

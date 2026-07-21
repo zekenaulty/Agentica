@@ -1,5 +1,7 @@
 # Codex Goal: Agentica.Clients LLM Planning Slice
 
+> Lifecycle: **Implemented** · Completion: **100%** · Canonical status: [Agentica Product Status And Goal Xref](Agentica.ProductStatus.md)
+
 ## Mission
 
 Implement the first `Agentica.Clients` slice.
@@ -49,7 +51,7 @@ The LLM is not "chatting" with the app. It receives an Agentica-shaped problem s
 3. Do not create `Agentica.Core`, `Agentica.Abstractions`, `Agentica.Runtime`, `Agentica.Storage`, `Agentica.Persistence`, `Agentica.Tools`, or other project-per-concern layers.
 4. `Agentica` must not reference `Agentica.Clients`.
 5. `Agentica.Clients` may reference `Agentica`.
-6. `Agentica.CLI` may reference `Agentica.Clients` for boundary-host wiring.
+6. `Agentica.Lab` may reference `Agentica.Clients` for boundary-host wiring.
 7. Provider SDK types must not leak into `Agentica`.
 8. Provider SDK types must not appear in `WorkflowPlan`, `PlanStep`, `PlanRefinement`, `OutcomeEnvelope`, `Receipt`, `Observation`, or `ToolDescriptor`.
 9. Do not implement MCP.
@@ -79,7 +81,7 @@ Thought summaries are diagnostics. They are not proof. They are not raw private 
 ```text
 Agentica.slnx
   Agentica/
-  Agentica.CLI/
+  Agentica.Lab/
   Agentica.Clients/
   Agentica.Tests/
 ```
@@ -199,22 +201,22 @@ The planner may choose and sequence tools. Legality is enforced by Agentica runt
 Deterministic default must still work:
 
 ```powershell
-dotnet run --project Agentica.CLI -- run "Create a two-step workflow that queries state and then acts"
+dotnet run --project Agentica.Lab -- run "Create a two-step workflow that queries state and then acts"
 ```
 
 Add model-backed planning flags:
 
 ```powershell
-dotnet run --project Agentica.CLI -- run "Create a two-step workflow that queries state and then acts" --planner gemini --model gemini-2.5-flash --thinking-budget 4096 --include-thoughts
+dotnet run --project Agentica.Lab -- run "Create a two-step workflow that queries state and then acts" --planner gemini --model gemini-2.5-flash --thinking-budget 4096 --include-thoughts
 ```
 
 Support dynamic thinking:
 
 ```powershell
-dotnet run --project Agentica.CLI -- run "Create a two-step workflow that queries state and then acts" --planner gemini --model gemini-2.5-flash --thinking-budget dynamic --include-thoughts
+dotnet run --project Agentica.Lab -- run "Create a two-step workflow that queries state and then acts" --planner gemini --model gemini-2.5-flash --thinking-budget dynamic --include-thoughts
 ```
 
-If no Gemini API key is available, the CLI must fail clearly and safely:
+If no Gemini API key is available, the Lab command must fail clearly and safely:
 
 ```text
 Gemini planner requested, but no Gemini API key was configured.
@@ -251,13 +253,13 @@ Run before completion:
 ```powershell
 dotnet build Agentica.slnx
 dotnet test Agentica.slnx
-dotnet run --project Agentica.CLI -- run "Create a two-step workflow that queries state and then acts"
+dotnet run --project Agentica.Lab -- run "Create a two-step workflow that queries state and then acts"
 ```
 
 If Gemini credentials are present, also run:
 
 ```powershell
-dotnet run --project Agentica.CLI -- run "Create a two-step workflow that queries state and then acts" --planner gemini --model gemini-2.5-flash --thinking-budget 4096 --include-thoughts
+dotnet run --project Agentica.Lab -- run "Create a two-step workflow that queries state and then acts" --planner gemini --model gemini-2.5-flash --thinking-budget 4096 --include-thoughts
 ```
 
 If credentials are not present, run the Gemini command and verify the error is clear and does not print secrets.
@@ -286,4 +288,3 @@ This goal is complete only when:
 18. Missing API credentials fail clearly and safely.
 19. Unit tests cover planner mapping and adapter configuration without network.
 20. `docs/Agentica.Clients.GoalStatus.md` contains milestone logs, steelman review, verification evidence, known limitations, and deferred work.
-

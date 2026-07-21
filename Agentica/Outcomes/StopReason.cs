@@ -18,5 +18,8 @@ public enum StopReason
     TerminalLoss,
     TerminalDraw,
     Cancelled,
-    Timeout
+    Timeout,
+    ToolRefused,
+    CompletionEvaluationFailed,
+    PlannerDataBoundaryDenied
 }

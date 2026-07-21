@@ -296,7 +296,7 @@ public sealed class AgenticaRunnerTests
                 DateTimeOffset.UtcNow,
                 new Dictionary<string, object?>()));
 
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("known_tool", "Known Tool", ToolKind.Query, ToolEffect.ReadOnly),
             tool));
         var events = new InMemoryEventSink();
@@ -327,7 +327,7 @@ public sealed class AgenticaRunnerTests
                 DateTimeOffset.UtcNow,
                 new Dictionary<string, object?>()));
 
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("known_tool", "Known Tool", ToolKind.Query, ToolEffect.ReadOnly),
             tool));
 
@@ -366,7 +366,7 @@ public sealed class AgenticaRunnerTests
             DateTimeOffset.UtcNow,
             new Dictionary<string, object?>()));
 
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("query_disguised_action", "Disguised Action", ToolKind.Action, ToolEffect.WritesLocalState),
             actionTool));
 
@@ -403,7 +403,7 @@ public sealed class AgenticaRunnerTests
             At: DateTimeOffset.UtcNow,
             Data: new Dictionary<string, object?>()));
 
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("blocked_query", "Blocked Query", ToolKind.Query, ToolEffect.ReadOnly),
             blockedTool));
 
@@ -421,7 +421,7 @@ public sealed class AgenticaRunnerTests
     [Fact]
     public async Task Tool_exception_failure_events_include_readable_diagnostics()
     {
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("throwing_tool", "Throwing Tool", ToolKind.Action, ToolEffect.WritesLocalState),
             new ThrowingTool()));
         var runner = CreateRunner(new ThrowingToolPlanner(), catalog, new InMemoryEventSink());
@@ -501,7 +501,8 @@ public sealed class AgenticaRunnerTests
             catalog,
             events,
             new DeterministicOutcomeReporter(),
-            policy ?? new ExecutionPolicy(MaxSteps: 10, MaxRefinements: 2));
+            policy ?? new ExecutionPolicy(MaxSteps: 10, MaxRefinements: 2),
+            PlanExhaustionCompletionEvaluator.Instance);
 
     private static void AssertOrder(IReadOnlyList<string> actual, params string[] expected)
     {

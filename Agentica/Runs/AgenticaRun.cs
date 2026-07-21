@@ -5,11 +5,16 @@ using Agentica.Observations;
 using Agentica.Outcomes;
 using Agentica.Planning;
 using Agentica.Requests;
+using Agentica.Tools;
 
 namespace Agentica.Runs;
 
 public sealed class AgenticaRun
 {
+    private readonly List<ExecutionEvent> _events = [];
+
+    internal object EventDeliveryGate { get; } = new();
+
     public AgenticaRun(string runId, RunRequest request, int attemptNumber = 1)
     {
         RunId = runId;
@@ -42,13 +47,25 @@ public sealed class AgenticaRun
 
     public List<ExecutionBatch> Batches { get; } = [];
 
-    public List<ExecutionEvent> Events { get; } = [];
+    public IReadOnlyList<ExecutionEvent> Events => _events.AsReadOnly();
+
+    internal void AddEvent(ExecutionEvent executionEvent) => _events.Add(executionEvent);
+
+    public EventDeliveryFailure? EventDeliveryFailure { get; internal set; }
 
     public List<ToolSurfaceSnapshot> ToolSurfaces { get; } = [];
 
     public List<PlanningFrame> PlanningFrames { get; } = [];
 
     public Dictionary<string, string> PlanToolSurfaceIds { get; } = new(StringComparer.Ordinal);
+
+    public Dictionary<string, string> PlanToolManifestHashes { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Sticky classifications for data that has entered planner-visible run state.
+    /// Boundaries are never removed during an attempt.
+    /// </summary>
+    public HashSet<ToolDataBoundary> ExposedBoundaries { get; } = [];
 
     private long EventSequence { get; set; }
 

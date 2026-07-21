@@ -1,5 +1,7 @@
 # Codex Goal: Secure Evolving Harness And Tool System
 
+> Lifecycle: **Incubating** · Completion: **40%** · Canonical status: [Agentica Product Status And Goal Xref](Agentica.ProductStatus.md)
+
 ## Mission
 
 Define the next Agentica slice for a secure, evolvable harness and tool system.

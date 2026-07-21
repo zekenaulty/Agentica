@@ -1,5 +1,7 @@
 # Codex Goal: Agentic Harness Host Pattern
 
+> Lifecycle: **Incubating** · Completion: **90%** · Canonical status: [Agentica Product Status And Goal Xref](Agentica.ProductStatus.md)
+
 ## Mission
 
 Define the host-side pattern for Agentica benchmark and domain harnesses.

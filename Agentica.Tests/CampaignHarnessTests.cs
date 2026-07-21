@@ -1,6 +1,6 @@
 using Agentica;
 using Agentica.Artifacts;
-using Agentica.CLI.Scenarios.Campaign;
+using Agentica.Lab.Scenarios.Campaign;
 using Agentica.Events;
 using Agentica.Execution;
 using Agentica.Observations;
@@ -187,7 +187,7 @@ public sealed class CampaignHarnessTests
             definition,
             state,
             _ => planner,
-            () => ToolCatalog.Create(new ToolRegistration(
+            () => ToolCatalog.Create(TestToolRegistration.Create(
                 new ToolDescriptor("context.complete", "Context Complete", ToolKind.Action, ToolEffect.WritesLocalState),
                 new ContextCompleteTool())),
             new DeterministicOutcomeReporter(),

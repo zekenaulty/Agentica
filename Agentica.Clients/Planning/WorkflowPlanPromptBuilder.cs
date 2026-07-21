@@ -8,6 +8,16 @@ namespace Agentica.Clients.Planning;
 
 public static class WorkflowPlanPromptBuilder
 {
+    public const string PromptVersionMetadataKey = "agentica.planner.promptVersion";
+    public const string SchemaVersionMetadataKey = "agentica.planner.schemaVersion";
+    public const string RequestKindMetadataKey = "agentica.planner.requestKind";
+    public const string InitialPromptVersion = "workflow-plan-initial-prompt-v1";
+    public const string RefinementPromptVersion = "workflow-plan-refinement-prompt-v1";
+    public const string InitialSchemaVersion = "workflow-plan-initial-schema-v1";
+    public const string RefinementSchemaVersion = "workflow-plan-refinement-schema-v1";
+    public const string InitialRequestKind = "initial_plan";
+    public const string RefinementRequestKind = "refinement";
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -32,7 +42,12 @@ public static class WorkflowPlanPromptBuilder
                 new LlmMessage(LlmMessageRole.User, BuildInitialPrompt(request))
             ],
             GenerationOptions: options.GenerationOptions,
-            StructuredOutput: new LlmStructuredOutputOptions());
+            StructuredOutput: new LlmStructuredOutputOptions(
+                JsonSchema: WorkflowPlanJsonSchemas.InitialPlan),
+            Metadata: CreateRequestMetadata(
+                InitialPromptVersion,
+                InitialSchemaVersion,
+                InitialRequestKind));
     }
 
     public static LlmRequest BuildRefinementRequest(
@@ -48,7 +63,12 @@ public static class WorkflowPlanPromptBuilder
                 new LlmMessage(LlmMessageRole.User, BuildRefinementPrompt(request, observation))
             ],
             GenerationOptions: options.GenerationOptions,
-            StructuredOutput: new LlmStructuredOutputOptions());
+            StructuredOutput: new LlmStructuredOutputOptions(
+                JsonSchema: WorkflowPlanJsonSchemas.Refinement),
+            Metadata: CreateRequestMetadata(
+                RefinementPromptVersion,
+                RefinementSchemaVersion,
+                RefinementRequestKind));
     }
 
     public static LlmRequest BuildInitialPlanRepairRequest(
@@ -282,6 +302,17 @@ public static class WorkflowPlanPromptBuilder
 
     private static string Serialize<T>(T value) =>
         JsonSerializer.Serialize(value, JsonOptions);
+
+    private static IReadOnlyDictionary<string, string> CreateRequestMetadata(
+        string promptVersion,
+        string schemaVersion,
+        string requestKind) =>
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [PromptVersionMetadataKey] = promptVersion,
+            [SchemaVersionMetadataKey] = schemaVersion,
+            [RequestKindMetadataKey] = requestKind
+        };
 
     private static LlmRequest BuildRepairRequest(
         LlmRequest originalRequest,

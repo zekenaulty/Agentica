@@ -1,3 +1,5 @@
+> Historical design conversation. It is not a current goal or status authority; see [Agentica Product Status And Goal Xref](Agentica.ProductStatus.md).
+
 summary by opus::
 
 This is a really productive conversation. Let me pull out what actually matters from the noise.

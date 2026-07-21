@@ -11,7 +11,8 @@ public sealed record ToolDescriptor(
     ToolInputSchema? InputSchema = null,
     string? Description = null,
     ToolContextHint? ContextHint = null,
-    ToolCooldownPolicy? Cooldown = null);
+    ToolCooldownPolicy? Cooldown = null,
+    ToolRetrySafety RetrySafety = ToolRetrySafety.Unknown);
 
 public sealed record ToolContextHint(
     string Produces,

@@ -1,9 +1,18 @@
+using System.Collections.Frozen;
 using Agentica.Tools;
 
 namespace Agentica.Execution;
 
-public sealed record ToolEffectPolicy(IReadOnlySet<ToolEffect> AllowedEffects)
+public sealed record ToolEffectPolicy
 {
+    public ToolEffectPolicy(IEnumerable<ToolEffect> AllowedEffects)
+    {
+        ArgumentNullException.ThrowIfNull(AllowedEffects);
+        this.AllowedEffects = AllowedEffects.ToFrozenSet();
+    }
+
+    public IReadOnlySet<ToolEffect> AllowedEffects { get; }
+
     public static ToolEffectPolicy LocalOnly { get; } = new(
         new HashSet<ToolEffect>
         {
