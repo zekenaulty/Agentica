@@ -30,12 +30,17 @@ internal sealed class PlanningRequestFactory
     public PlanningRequest Create(RunRequest request, AgenticaRun run)
     {
         var context = _policy.EffectivePlanningContext;
-        var observations = Limit(run.Observations, context.MaxRecentObservations);
-        var receipts = Limit(run.Receipts, context.MaxRecentReceipts);
+        var requestSnapshot = ExecutionRecordSnapshot.PlannerRequest(request);
+        var observations = Limit(run.Observations, context.MaxRecentObservations)
+            .Select(ExecutionRecordSnapshot.Observation)
+            .ToArray();
+        var receipts = Limit(run.Receipts, context.MaxRecentReceipts)
+            .Select(ExecutionRecordSnapshot.Receipt)
+            .ToArray();
         var executionContext = CreateExecutionContext(run);
         var toolSurface = CreateToolSurfaceSnapshot(run, observations, receipts, executionContext, context);
         var requestContext = new PlanningRequest(
-            request,
+            requestSnapshot,
             _toolCatalog.Descriptors,
             observations,
             receipts)
@@ -47,7 +52,7 @@ internal sealed class PlanningRequestFactory
         var projectedFrames = _frameProjector?.Project(new PlanningFrameProjectionRequest(
             RunId: run.RunId,
             AttemptNumber: run.AttemptNumber,
-            Request: request,
+            Request: requestSnapshot,
             ExecutionContext: executionContext,
             ToolDescriptors: _toolCatalog.Descriptors,
             Observations: observations,
@@ -351,11 +356,14 @@ internal sealed class PlanningRequestFactory
             artifact?.ArtifactId);
     }
 
-    internal static IReadOnlyList<T> Limit<T>(IReadOnlyList<T> items, int? maxItems) =>
-        maxItems switch
+    internal static IReadOnlyList<T> Limit<T>(IReadOnlyList<T> items, int? maxItems)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        return Array.AsReadOnly(maxItems switch
         {
-            null => items,
+            null => items.ToArray(),
             <= 0 => [],
             _ => items.TakeLast(maxItems.Value).ToArray()
-        };
+        });
+    }
 }

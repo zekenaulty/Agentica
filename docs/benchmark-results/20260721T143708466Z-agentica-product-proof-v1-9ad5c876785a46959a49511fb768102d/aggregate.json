@@ -16,8 +16,8 @@
     "successRate": 0.9666666666666666666666666667,
     "falseSuccessCount": 0,
     "falseSuccessRate": 0,
-    "invalidPlanCount": 1,
-    "invalidPlanRate": 0.0333333333333333333333333333,
+    "invalidPlanCount": 2,
+    "invalidPlanRate": 0.0666666666666666666666666667,
     "runtimeRetryCount": 0,
     "runElapsed": {
       "total": "00:25:53.1099521",
@@ -88,8 +88,8 @@
     "successRate": 0.8,
     "falseSuccessCount": 0,
     "falseSuccessRate": 0,
-    "invalidPlanCount": 1,
-    "invalidPlanRate": 0.2,
+    "invalidPlanCount": 2,
+    "invalidPlanRate": 0.4,
     "runtimeRetryCount": 0,
     "runElapsed": {
       "total": "00:16:53.0182820",
@@ -374,8 +374,8 @@
         "successRate": 0.8,
         "falseSuccessCount": 0,
         "falseSuccessRate": 0,
-        "invalidPlanCount": 1,
-        "invalidPlanRate": 0.2,
+        "invalidPlanCount": 2,
+        "invalidPlanRate": 0.4,
         "runtimeRetryCount": 0,
         "runElapsed": {
           "total": "00:16:53.0182820",

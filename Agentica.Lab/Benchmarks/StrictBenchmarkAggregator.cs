@@ -277,7 +277,8 @@ public static class StrictBenchmarkAggregator
         var calls = results.SelectMany(result => result.LlmCalls).ToArray();
         var verifiedSuccesses = results.Count(result => result.ReportedSuccess && result.OracleSuccess);
         var falseSuccesses = results.Count(result => result.ReportedSuccess && !result.OracleSuccess);
-        var invalidPlans = results.Count(result => result.InvalidPlan);
+        var invalidPlans = results.Count(result =>
+            result.InvalidPlan || result.LlmCalls.Any(call => call.IsRepair));
         var tokens = TokenTotals(calls);
         var costAvailable = calls.Length > 0;
         decimal cost = 0;

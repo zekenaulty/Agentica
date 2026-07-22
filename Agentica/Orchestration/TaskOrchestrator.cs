@@ -185,6 +185,15 @@ public sealed class TaskOrchestrator
                 }
 
                 outcomes.Add(outcome);
+                var childRunIdentityFailure = ChildRunIdentityFailure(outcomes);
+                if (childRunIdentityFailure is not null)
+                {
+                    state.Status = OrchestrationStatus.Failed;
+                    state.StopReason = OrchestrationStopReason.ChildRunFailed;
+                    state.ActiveTaskId = null;
+                    diagnostics.Add(childRunIdentityFailure);
+                    return Envelope(request, plan, state, outcomes, definitionOfDone, diagnostics);
+                }
 
                 activeBoundary = "acceptance host-state projection";
                 var acceptanceHostState = ProjectHostState();
@@ -399,6 +408,51 @@ public sealed class TaskOrchestrator
 
     private static int RunCount(OrchestrationState state, string taskId) =>
         state.TaskRunCounts.TryGetValue(taskId, out var count) ? count : 0;
+
+    private static string? ChildRunIdentityFailure(
+        IReadOnlyList<Agentica.Outcomes.OutcomeEnvelope> outcomes)
+    {
+        var runIds = new HashSet<string>(StringComparer.Ordinal);
+        for (var outcomeIndex = 0; outcomeIndex < outcomes.Count; outcomeIndex++)
+        {
+            var pending = new Stack<(Agentica.Outcomes.OutcomeEnvelope? Envelope, string Location)>();
+            pending.Push((outcomes[outcomeIndex], $"Child outcome {outcomeIndex + 1}"));
+
+            while (pending.Count > 0)
+            {
+                var (envelope, location) = pending.Pop();
+                if (envelope is null || envelope.Outcome is null)
+                {
+                    return $"{location} is missing its outcome identity; child-run proof identities must be nonempty and globally unique across top-level outcomes and prior attempts.";
+                }
+
+                var runId = envelope.Outcome.RunId;
+                if (string.IsNullOrWhiteSpace(runId))
+                {
+                    return $"{location} has an empty run id; child-run proof identities must be nonempty and globally unique across top-level outcomes and prior attempts.";
+                }
+
+                if (!runIds.Add(runId))
+                {
+                    return $"{location} reused run id '{runId}'; child-run proof identities must be nonempty and globally unique across top-level outcomes and prior attempts.";
+                }
+
+                if (envelope.PriorAttempts is null)
+                {
+                    return $"{location} has no prior-attempt collection; child-run proof identities cannot be validated.";
+                }
+
+                for (var priorIndex = envelope.PriorAttempts.Count - 1; priorIndex >= 0; priorIndex--)
+                {
+                    pending.Push((
+                        envelope.PriorAttempts[priorIndex],
+                        $"{location} prior attempt {priorIndex + 1}"));
+                }
+            }
+        }
+
+        return null;
+    }
 
     private static async Task<TaskAcceptanceResult> EnforceDeclaredAcceptanceAsync(
         TaskNode task,

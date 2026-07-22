@@ -14,6 +14,7 @@ using Agentica.Tools;
 
 namespace Agentica.Tests;
 
+[Collection(ProcessEnvironmentTestCollection.Name)]
 public sealed class HiddenWorldOrchestrationHarnessTests
 {
     private const string PlannerModeVariable = "AGENTICA_HIDDEN_WORLD_PLANNER";

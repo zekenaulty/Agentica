@@ -55,7 +55,9 @@ public sealed class AgenticaRunner
 
     public async Task<OutcomeEnvelope> RunAsync(RunRequest request, CancellationToken cancellationToken = default)
     {
-        var originalRequest = request;
+        ArgumentNullException.ThrowIfNull(request);
+
+        RunRequest? originalRequest = null;
         var currentRequest = request;
         var attempts = new List<RunAttemptSummary>();
         var attemptEnvelopes = new List<OutcomeEnvelope>();
@@ -64,6 +66,7 @@ public sealed class AgenticaRunner
         while (true)
         {
             var envelope = await RunAttemptAsync(currentRequest, attemptNumber, cancellationToken).ConfigureAwait(false);
+            originalRequest ??= envelope.Details.Request;
             attempts.Add(RunAttemptSummary.From(attemptNumber, envelope));
             attemptEnvelopes.Add(envelope);
 
@@ -93,6 +96,17 @@ public sealed class AgenticaRunner
         }
 
         var ct = timeoutCts?.Token ?? cancellationToken;
+        Exception? requestSnapshotFailure = null;
+        try
+        {
+            request = ExecutionRecordSnapshot.Request(request);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            requestSnapshotFailure = exception;
+            request = new RunRequest(request.Objective, request.Origin);
+        }
+
         var run = new AgenticaRun(AgenticaIds.New("run"), request, attemptNumber);
         run.ExposedBoundaries.UnionWith(_policy.EffectiveSecurityPolicy.InitialBoundaries);
         // Every planning request contains RunRequest.Objective. Treat it as user content
@@ -123,6 +137,25 @@ public sealed class AgenticaRunner
                 ["origin"] = request.Origin.ToString(),
                 ["hasContext"] = request.Context is not null && request.Context.Count > 0
             });
+
+        if (requestSnapshotFailure is not null)
+        {
+            return Finish(
+                run,
+                RunOutcomeStatus.PlanInvalid,
+                StopReason.PlanInvalid,
+                validationIssues:
+                [
+                    new ValidationIssue(
+                        "request.context.snapshot.invalid",
+                        "Run context could not be safely snapshotted.")
+                ],
+                diagnostics: new ExecutionDiagnostics(
+                    "request.context.snapshot.invalid",
+                    "Run context could not be safely snapshotted.",
+                    requestSnapshotFailure.GetType().Name,
+                    "InvalidRequestContext"));
+        }
 
         if (!request.IsValid)
         {
@@ -156,6 +189,7 @@ public sealed class AgenticaRunner
                 currentPlan = await _planner
                     .CreatePlanAsync(initialPlanningRequest, ct)
                     .ConfigureAwait(false);
+                currentPlan = ExecutionRecordSnapshot.Plan(currentPlan);
                 RegisterPlanToolSurface(run, currentPlan, initialPlanningRequest);
             }
             catch (OperationCanceledException exception)
@@ -220,44 +254,9 @@ public sealed class AgenticaRunner
                 if (nextSteps.Count == 0)
                 {
                     var completion = EvaluateCompletion(run);
-                    if (completion.Decision == CompletionDecision.Complete)
+                    if (FinishTerminalCompletion(run, completion) is { } terminalEnvelope)
                     {
-                        return Finish(
-                            run,
-                            RunOutcomeStatus.Succeeded,
-                            completion.StopReason,
-                            blockers: completion.Blockers,
-                            completionEvidence: completion.EvidenceRefs);
-                    }
-
-                    if (completion.Decision == CompletionDecision.Partial)
-                    {
-                        return Finish(
-                            run,
-                            RunOutcomeStatus.PartiallyComplete,
-                            completion.StopReason,
-                            blockers: completion.Blockers,
-                            completionEvidence: completion.EvidenceRefs);
-                    }
-
-                    if (completion.Decision == CompletionDecision.Blocked)
-                    {
-                        return Finish(
-                            run,
-                            RunOutcomeStatus.Blocked,
-                            completion.StopReason,
-                            blockers: completion.Blockers,
-                            completionEvidence: completion.EvidenceRefs);
-                    }
-
-                    if (completion.Decision == CompletionDecision.Failed)
-                    {
-                        return Finish(
-                            run,
-                            RunOutcomeStatus.Failed,
-                            completion.StopReason,
-                            blockers: completion.Blockers,
-                            completionEvidence: completion.EvidenceRefs);
+                        return terminalEnvelope;
                     }
 
                     if (continuationCount >= _policy.MaxPlanContinuations)
@@ -292,6 +291,7 @@ public sealed class AgenticaRunner
                         currentPlan = await _planner
                             .CreatePlanAsync(continuationPlanningRequest, ct)
                             .ConfigureAwait(false);
+                        currentPlan = ExecutionRecordSnapshot.Plan(currentPlan);
                         RegisterPlanToolSurface(run, currentPlan, continuationPlanningRequest);
                     }
                     catch (OperationCanceledException exception)
@@ -420,24 +420,9 @@ public sealed class AgenticaRunner
                 if (_policy.EvaluateCompletionAfterEachBatch)
                 {
                     var postExecutionCompletion = EvaluateCompletion(run);
-                    if (postExecutionCompletion.Decision == CompletionDecision.Complete)
+                    if (FinishTerminalCompletion(run, postExecutionCompletion) is { } terminalEnvelope)
                     {
-                        return Finish(
-                            run,
-                            RunOutcomeStatus.Succeeded,
-                            postExecutionCompletion.StopReason,
-                            blockers: postExecutionCompletion.Blockers,
-                            completionEvidence: postExecutionCompletion.EvidenceRefs);
-                    }
-
-                    if (postExecutionCompletion.Decision == CompletionDecision.Failed)
-                    {
-                        return Finish(
-                            run,
-                            RunOutcomeStatus.Failed,
-                            postExecutionCompletion.StopReason,
-                            blockers: postExecutionCompletion.Blockers,
-                            completionEvidence: postExecutionCompletion.EvidenceRefs);
+                        return terminalEnvelope;
                     }
                 }
 
@@ -484,6 +469,7 @@ public sealed class AgenticaRunner
                         refinedPlan = await _planner
                             .RefinePlanAsync(refinementPlanningRequest, observation, ct)
                             .ConfigureAwait(false);
+                        refinedPlan = ExecutionRecordSnapshot.Plan(refinedPlan);
                         RegisterPlanToolSurface(run, refinedPlan, refinementPlanningRequest);
                     }
                     catch (OperationCanceledException exception)
@@ -612,11 +598,21 @@ public sealed class AgenticaRunner
         try
         {
             var context = CompletionContext.From(run);
-            var completion = _completionEvaluator.Evaluate(context);
+            var evaluated = _completionEvaluator.Evaluate(context);
+            var completion = evaluated is null
+                ? null
+                : evaluated with
+                {
+                    Blockers = Array.AsReadOnly(evaluated.Blockers?.ToArray() ?? []),
+                    EvidenceRefs = Array.AsReadOnly(evaluated.EvidenceRefs?
+                        .Select(reference => reference is null ? null! : reference with { })
+                        .ToArray() ?? [])
+                };
             if (completion is null ||
                 !Enum.IsDefined(completion.Decision) ||
                 !Enum.IsDefined(completion.StopReason) ||
                 completion.Blockers is null ||
+                completion.Blockers.Any(blocker => blocker is null) ||
                 completion.EvidenceRefs is null ||
                 completion.EvidenceRefs.Any(reference => !EvidenceResolves(context, reference)))
             {
@@ -634,6 +630,43 @@ public sealed class AgenticaRunner
                 $"Completion policy failed: {exception.GetType().Name}.");
         }
     }
+
+    private OutcomeEnvelope? FinishTerminalCompletion(
+        AgenticaRun run,
+        CompletionEvaluation completion) =>
+        completion.Decision switch
+        {
+            CompletionDecision.Complete => Finish(
+                run,
+                RunOutcomeStatus.Succeeded,
+                completion.StopReason,
+                blockers: completion.Blockers,
+                completionEvidence: completion.EvidenceRefs),
+            CompletionDecision.Partial => Finish(
+                run,
+                RunOutcomeStatus.PartiallyComplete,
+                completion.StopReason,
+                blockers: completion.Blockers,
+                completionEvidence: completion.EvidenceRefs),
+            CompletionDecision.Blocked => Finish(
+                run,
+                RunOutcomeStatus.Blocked,
+                completion.StopReason,
+                blockers: completion.Blockers,
+                completionEvidence: completion.EvidenceRefs),
+            CompletionDecision.Failed => Finish(
+                run,
+                RunOutcomeStatus.Failed,
+                completion.StopReason,
+                blockers: completion.Blockers,
+                completionEvidence: completion.EvidenceRefs),
+            CompletionDecision.Continue => null,
+            _ => Finish(
+                run,
+                RunOutcomeStatus.Failed,
+                StopReason.CompletionEvaluationFailed,
+                blockers: ["Completion policy returned an undefined decision."])
+        };
 
     private static bool EvidenceResolves(CompletionContext context, EvidenceRef? reference)
     {
@@ -1414,18 +1447,28 @@ public sealed class AgenticaRunner
         ExecutionDiagnostics? diagnostics = null,
         IReadOnlyList<EvidenceRef>? completionEvidence = null)
     {
-        validationIssues ??= [];
-        blockers ??= [];
+        validationIssues = Array.AsReadOnly((validationIssues ?? [])
+            .Select(issue => issue with { })
+            .ToArray());
+        blockers = Array.AsReadOnly((blockers ?? []).ToArray());
         run.Status = status;
 
-        completionEvidence ??= [];
+        completionEvidence = Array.AsReadOnly((completionEvidence ?? [])
+            .Select(reference => reference with { })
+            .ToArray());
 
         OutcomeReport report;
         ExecutionDiagnostics? reportDiagnostics = null;
         try
         {
-            report = _outcomeReporter.BuildReport(run, status, stopReason, validationIssues, blockers)
-                ?? throw new InvalidOperationException("Outcome reporter returned no report.");
+            var reportingRun = ExecutionRecordSnapshot.ReportingRun(run);
+            var rawReport = _outcomeReporter.BuildReport(
+                reportingRun,
+                status,
+                stopReason,
+                validationIssues,
+                blockers) ?? throw new InvalidOperationException("Outcome reporter returned no report.");
+            report = ExecutionRecordSnapshot.Report(rawReport);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -1519,7 +1562,7 @@ public sealed class AgenticaRunner
             Report: report,
             Receipts: new ReceiptEnvelope(run.Receipts.ToArray()),
             Details: new DetailEnvelope(
-                Request: run.Request,
+                Request: ExecutionRecordSnapshot.Request(run.Request),
                 PlanVersions: run.PlanVersions.ToArray(),
                 PlanRefinements: run.PlanRefinements.ToArray(),
                 Observations: run.Observations.ToArray(),
@@ -1882,10 +1925,11 @@ public sealed class AgenticaRunner
         var planningRequest = _planningRequestFactory.Create(request, run);
         if (planningRequest.ToolSurface is { } toolSurface)
         {
-            run.ToolSurfaces.Add(toolSurface);
+            run.ToolSurfaces.Add(ExecutionRecordSnapshot.ToolSurface(toolSurface));
         }
 
-        run.PlanningFrames.AddRange(planningRequest.ContextFrames);
+        run.PlanningFrames.AddRange(
+            planningRequest.ContextFrames.Select(ExecutionRecordSnapshot.PlanningFrame));
 
         return planningRequest;
     }

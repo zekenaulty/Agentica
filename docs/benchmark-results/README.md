@@ -25,5 +25,6 @@ same records, re-validated the fixed matrix and cohort identities, and wrote:
 - [`runs.jsonl`](20260721T143708466Z-agentica-product-proof-v1-9ad5c876785a46959a49511fb768102d/runs.jsonl) — one bounded telemetry record per run.
 
 Final gate: **passed**. Overall verified success was 29/30 (96.7%), false success was 0/30,
-WorkbenchQuest was 25/25, and the MazeQuest holdout was 4/5. The one failed holdout run was rejected
-as `PlanInvalid`; it did not become a false success.
+WorkbenchQuest was 25/25, and the MazeQuest holdout was 4/5. Invalid-plan incidence was 2/30
+overall, 0/25 for WorkbenchQuest, and 2/5 for the holdout: one holdout run required a JSON repair
+and succeeded, while another was rejected as `PlanInvalid`. Neither became a false success.

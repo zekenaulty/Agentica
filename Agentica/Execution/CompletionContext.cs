@@ -17,7 +17,7 @@ public sealed record CompletionContext(
             run.RunId,
             run.AttemptNumber,
             Array.AsReadOnly(run.CompletedSteps.ToArray()),
-            Array.AsReadOnly(run.Receipts.ToArray()),
-            Array.AsReadOnly(run.Observations.ToArray()),
-            Array.AsReadOnly(run.Artifacts.ToArray()));
+            Array.AsReadOnly(run.Receipts.Select(ExecutionRecordSnapshot.Receipt).ToArray()),
+            Array.AsReadOnly(run.Observations.Select(ExecutionRecordSnapshot.Observation).ToArray()),
+            Array.AsReadOnly(run.Artifacts.Select(ExecutionRecordSnapshot.Artifact).ToArray()));
 }

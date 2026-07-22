@@ -15,6 +15,7 @@ using Agentica.Tools;
 
 namespace Agentica.Tests;
 
+[Collection(ProcessEnvironmentTestCollection.Name)]
 public sealed class AgenticaClientsTests
 {
     [Fact]

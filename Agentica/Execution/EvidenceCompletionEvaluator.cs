@@ -12,14 +12,17 @@ public sealed class EvidenceCompletionEvaluator : ICompletionEvaluator
         bool continueWhenMissing = true)
     {
         ArgumentNullException.ThrowIfNull(requirements);
-        if (requirements.Count == 0)
+        var requirementSnapshot = requirements
+            .Select(requirement => requirement is null ? null! : requirement with { })
+            .ToArray();
+        if (requirementSnapshot.Length == 0)
         {
             throw new ArgumentException(
                 "At least one completion evidence requirement is required.",
                 nameof(requirements));
         }
 
-        if (requirements.Any(requirement =>
+        if (requirementSnapshot.Any(requirement =>
                 requirement is null ||
                 string.IsNullOrWhiteSpace(requirement.Kind) ||
                 string.IsNullOrWhiteSpace(requirement.Value)))
@@ -29,7 +32,7 @@ public sealed class EvidenceCompletionEvaluator : ICompletionEvaluator
                 nameof(requirements));
         }
 
-        _requirements = requirements;
+        _requirements = Array.AsReadOnly(requirementSnapshot);
         _continueWhenMissing = continueWhenMissing;
     }
 

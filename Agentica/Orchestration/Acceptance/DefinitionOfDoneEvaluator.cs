@@ -24,11 +24,13 @@ public static class DefinitionOfDoneEvaluator
 
         var reasons = new List<string>();
         var evidence = new List<EvidenceRef>();
-        var acceptedRunIds = state.RunRefs
-            .Select(runRef => runRef.RunId)
-            .ToHashSet(StringComparer.Ordinal);
-        var attempts = outcomes
-            .Where(outcome => acceptedRunIds.Contains(outcome.Outcome.RunId))
+        var acceptedOutcomes = ResolveAcceptedOutcomes(state, outcomes, reasons);
+        if (reasons.Count > 0)
+        {
+            return new DefinitionOfDoneResult(false, reasons, []);
+        }
+
+        var attempts = acceptedOutcomes
             .SelectMany(AcceptanceEvidenceResolver.Attempts)
             .ToArray();
 
@@ -97,6 +99,46 @@ public static class DefinitionOfDoneEvaluator
             reasons.Count == 0,
             reasons,
             evidence.Distinct().ToArray());
+    }
+
+    private static IReadOnlyList<OutcomeEnvelope> ResolveAcceptedOutcomes(
+        OrchestrationState state,
+        IReadOnlyList<OutcomeEnvelope> outcomes,
+        ICollection<string> reasons)
+    {
+        var acceptedRunIds = new HashSet<string>(StringComparer.Ordinal);
+        var acceptedOutcomes = new List<OutcomeEnvelope>(state.RunRefs.Count);
+        foreach (var runRef in state.RunRefs)
+        {
+            if (string.IsNullOrWhiteSpace(runRef.RunId))
+            {
+                reasons.Add($"Accepted run for task '{runRef.TaskId}' has an empty run id.");
+                continue;
+            }
+
+            if (!acceptedRunIds.Add(runRef.RunId))
+            {
+                reasons.Add($"Accepted run id '{runRef.RunId}' is duplicated in orchestration state.");
+                continue;
+            }
+
+            var matchingOutcomes = outcomes
+                .Where(outcome => string.Equals(
+                    outcome.Outcome.RunId,
+                    runRef.RunId,
+                    StringComparison.Ordinal))
+                .ToArray();
+            if (matchingOutcomes.Length != 1)
+            {
+                reasons.Add(
+                    $"Accepted run id '{runRef.RunId}' resolves to {matchingOutcomes.Length} child outcomes; exactly one is required.");
+                continue;
+            }
+
+            acceptedOutcomes.Add(matchingOutcomes[0]);
+        }
+
+        return acceptedOutcomes;
     }
 
     private static void EvaluateOutcomeStatus(

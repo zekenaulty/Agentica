@@ -28,6 +28,7 @@ public sealed class LiveGeminiFactAttribute : FactAttribute
     }
 }
 
+[Collection(ProcessEnvironmentTestCollection.Name)]
 public sealed class LiveGeminiSmokeTests
 {
     private const string RunLiveTestsVariable = "AGENTICA_RUN_LIVE_LLM_TESTS";

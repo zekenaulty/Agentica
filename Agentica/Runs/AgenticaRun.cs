@@ -16,11 +16,20 @@ public sealed class AgenticaRun
     internal object EventDeliveryGate { get; } = new();
 
     public AgenticaRun(string runId, RunRequest request, int attemptNumber = 1)
+        : this(runId, request, attemptNumber, DateTimeOffset.UtcNow)
+    {
+    }
+
+    internal AgenticaRun(
+        string runId,
+        RunRequest request,
+        int attemptNumber,
+        DateTimeOffset createdAt)
     {
         RunId = runId;
         Request = request;
         AttemptNumber = attemptNumber;
-        CreatedAt = DateTimeOffset.UtcNow;
+        CreatedAt = createdAt;
     }
 
     public string RunId { get; }

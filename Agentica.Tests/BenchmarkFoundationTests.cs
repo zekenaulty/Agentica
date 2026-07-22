@@ -248,6 +248,37 @@ public sealed class BenchmarkFoundationTests
     }
 
     [Fact]
+    public void Strict_aggregate_counts_repaired_invalid_planner_output_once_per_run()
+    {
+        var matrix = LabBenchmarks.ProductProofBenchmarkMatrix.Current;
+        var results = PassingResults(matrix);
+        results[0] = results[0] with
+        {
+            LlmCalls =
+            [
+                results[0].LlmCalls[0] with { IsRepair = true }
+            ]
+        };
+
+        var repairedReport = LabBenchmarks.StrictBenchmarkAggregator.Aggregate(
+            matrix,
+            results,
+            LabBenchmarks.ProductProofPricing.Current);
+
+        Assert.Equal(1, repairedReport.Overall.InvalidPlanCount);
+        Assert.Equal(1m / matrix.Runs.Count, repairedReport.Overall.InvalidPlanRate);
+
+        results[0] = results[0] with { InvalidPlan = true };
+        var repairedTerminalReport = LabBenchmarks.StrictBenchmarkAggregator.Aggregate(
+            matrix,
+            results,
+            LabBenchmarks.ProductProofPricing.Current);
+
+        Assert.Equal(1, repairedTerminalReport.Overall.InvalidPlanCount);
+        Assert.Equal(1m / matrix.Runs.Count, repairedTerminalReport.Overall.InvalidPlanRate);
+    }
+
+    [Fact]
     public void Strict_gate_rejects_false_success_and_each_success_threshold()
     {
         var matrix = LabBenchmarks.ProductProofBenchmarkMatrix.Current;

@@ -219,6 +219,196 @@ public sealed class TaskOrchestratorTests
     }
 
     [Fact]
+    public async Task Orchestrator_rejects_duplicate_child_run_ids_and_preserves_both_outcomes()
+    {
+        var task = Task("work", maxRuns: 2);
+        var plan = Plan([task]) with
+        {
+            DefinitionOfDone =
+            [
+                new TaskAcceptanceRequirement(TaskAcceptanceRequirementKind.Artifact, ArtifactKind: "test.artifact")
+            ]
+        };
+        var refinement = Refinement(new TaskGraphMutation(
+            TaskGraphMutationKind.ReorderPriority,
+            task.TaskId,
+            Priority: 2));
+        var first = Envelope("run_reused", RunOutcomeStatus.Succeeded);
+        var secondWithEvidence = Envelope("run_reused", RunOutcomeStatus.Succeeded);
+        var second = secondWithEvidence with
+        {
+            Details = secondWithEvidence.Details with { Artifacts = [] }
+        };
+        var evaluations = 0;
+        var evaluator = new ScriptedAcceptanceEvaluator(_ =>
+            ++evaluations == 1
+                ? new TaskAcceptanceResult(
+                    TaskAcceptanceStatus.PartiallyAccepted,
+                    ["The first child result is not acceptable."],
+                    [])
+                : new TaskAcceptanceResult(
+                    TaskAcceptanceStatus.Accepted,
+                    [],
+                    [new EvidenceRef("run", "run_reused")]));
+        var orchestrator = CreateOrchestrator(
+            new ScriptedTaskPlanner(plan, [refinement]),
+            new ScriptedRunExecutor([first, second]),
+            evaluator);
+
+        var outcome = await orchestrator.RunAsync(Request("Reject ambiguous child proof."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.ChildRunFailed, outcome.StopReason);
+        Assert.Null(outcome.State.ActiveTaskId);
+        Assert.Empty(outcome.State.CompletedTaskIds);
+        Assert.Equal(2, outcome.RunOutcomes.Count);
+        Assert.Same(first, outcome.RunOutcomes[0]);
+        Assert.Same(second, outcome.RunOutcomes[1]);
+        Assert.Equal(1, evaluations);
+        Assert.Contains(outcome.Diagnostics, diagnostic =>
+            diagnostic.Contains("reused run id 'run_reused'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Orchestrator_rejects_empty_child_run_id_and_preserves_the_outcome()
+    {
+        var child = Envelope(string.Empty, RunOutcomeStatus.Succeeded);
+        var orchestrator = CreateOrchestrator(
+            new ScriptedTaskPlanner(Plan([Task("work")])),
+            new ScriptedRunExecutor([child]),
+            new EvidenceTaskAcceptanceEvaluator());
+
+        var outcome = await orchestrator.RunAsync(Request("Reject empty child identity."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.ChildRunFailed, outcome.StopReason);
+        Assert.Single(outcome.RunOutcomes);
+        Assert.Same(child, outcome.RunOutcomes[0]);
+        Assert.Contains(outcome.Diagnostics, diagnostic =>
+            diagnostic.Contains("empty run id", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Orchestrator_rejects_run_id_reused_across_nested_prior_attempt_trees()
+    {
+        var task = Task("work", maxRuns: 2);
+        var plan = Plan([task]);
+        var refinement = Refinement(new TaskGraphMutation(
+            TaskGraphMutationKind.ReorderPriority,
+            task.TaskId,
+            Priority: 2));
+        var firstPrior = Envelope("run_first_prior", RunOutcomeStatus.Succeeded) with
+        {
+            PriorAttempts = [Envelope("run_shared", RunOutcomeStatus.Succeeded)]
+        };
+        var first = Envelope("run_first", RunOutcomeStatus.Succeeded) with
+        {
+            PriorAttempts = [firstPrior]
+        };
+        var secondPrior = Envelope("run_second_prior", RunOutcomeStatus.Succeeded) with
+        {
+            PriorAttempts = [Envelope("run_shared", RunOutcomeStatus.Succeeded)]
+        };
+        var second = Envelope("run_second", RunOutcomeStatus.Succeeded) with
+        {
+            PriorAttempts = [secondPrior]
+        };
+        var evaluations = 0;
+        var evaluator = new ScriptedAcceptanceEvaluator(_ =>
+        {
+            evaluations++;
+            return new TaskAcceptanceResult(
+                TaskAcceptanceStatus.PartiallyAccepted,
+                ["The child result requires another run."],
+                []);
+        });
+        var orchestrator = CreateOrchestrator(
+            new ScriptedTaskPlanner(plan, [refinement]),
+            new ScriptedRunExecutor([first, second]),
+            evaluator);
+
+        var outcome = await orchestrator.RunAsync(Request("Reject ambiguous retry proof."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.ChildRunFailed, outcome.StopReason);
+        Assert.Null(outcome.State.ActiveTaskId);
+        Assert.Empty(outcome.State.CompletedTaskIds);
+        Assert.Equal(2, outcome.RunOutcomes.Count);
+        Assert.Same(first, outcome.RunOutcomes[0]);
+        Assert.Same(second, outcome.RunOutcomes[1]);
+        Assert.Equal(1, evaluations);
+        Assert.Contains(outcome.Diagnostics, diagnostic =>
+            diagnostic.Contains("prior attempt 1 prior attempt 1 reused run id 'run_shared'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Orchestrator_rejects_empty_run_id_in_nested_prior_attempt_tree()
+    {
+        var prior = Envelope("run_prior", RunOutcomeStatus.Succeeded) with
+        {
+            PriorAttempts = [Envelope(" ", RunOutcomeStatus.Succeeded)]
+        };
+        var child = Envelope("run_child", RunOutcomeStatus.Succeeded) with
+        {
+            PriorAttempts = [prior]
+        };
+        var evaluations = 0;
+        var evaluator = new ScriptedAcceptanceEvaluator(_ =>
+        {
+            evaluations++;
+            return new TaskAcceptanceResult(TaskAcceptanceStatus.Accepted, [], []);
+        });
+        var orchestrator = CreateOrchestrator(
+            new ScriptedTaskPlanner(Plan([Task("work")])),
+            new ScriptedRunExecutor([child]),
+            evaluator);
+
+        var outcome = await orchestrator.RunAsync(Request("Reject empty retry identity."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.ChildRunFailed, outcome.StopReason);
+        Assert.Null(outcome.State.ActiveTaskId);
+        Assert.Empty(outcome.State.CompletedTaskIds);
+        Assert.Single(outcome.RunOutcomes);
+        Assert.Same(child, outcome.RunOutcomes[0]);
+        Assert.Equal(0, evaluations);
+        Assert.Contains(outcome.Diagnostics, diagnostic =>
+            diagnostic.Contains("prior attempt 1 prior attempt 1 has an empty run id", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Definition_of_done_rejects_an_accepted_run_id_that_resolves_to_multiple_child_outcomes()
+    {
+        var task = Task("work");
+        var plan = Plan([task]) with
+        {
+            DefinitionOfDone =
+            [
+                new TaskAcceptanceRequirement(TaskAcceptanceRequirementKind.Artifact, ArtifactKind: "test.artifact")
+            ]
+        };
+        var state = new OrchestrationState(
+            "orchestration_test",
+            new WorkContextSnapshot("test", null, [], [], [], [], [], [], [], new Dictionary<string, object?>(), DateTimeOffset.UtcNow));
+        state.CompletedTaskIds.Add(task.TaskId);
+        state.RunRefs.Add(new RunRef(task.TaskId, "run_reused", RunOutcomeStatus.Succeeded, []));
+
+        var result = DefinitionOfDoneEvaluator.Evaluate(
+            plan,
+            state,
+            [
+                Envelope("run_reused", RunOutcomeStatus.Succeeded),
+                Envelope("run_reused", RunOutcomeStatus.Succeeded)
+            ],
+            new Dictionary<string, object?>());
+
+        Assert.False(result.Satisfied);
+        Assert.Empty(result.EvidenceRefs);
+        Assert.Contains(result.Reasons, reason =>
+            reason.Contains("resolves to 2 child outcomes", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task All_optional_graph_does_not_succeed_without_running_a_task_that_satisfies_definition_of_done()
     {
         var optional = Task("optional") with { Optional = true };

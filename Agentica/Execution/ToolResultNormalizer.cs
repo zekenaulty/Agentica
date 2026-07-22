@@ -144,6 +144,17 @@ internal static class ToolResultNormalizer
         }
     }
 
+    internal static IReadOnlyDictionary<string, object?> SnapshotStructuredData(
+        IReadOnlyDictionary<string, object?> source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        return SnapshotDictionary(
+            source,
+            new ReadOnlyDictionary<string, string>(
+                new Dictionary<string, string>(StringComparer.Ordinal)),
+            new SnapshotBudget());
+    }
+
     private static ToolResultNormalization Invalid(
         ToolInvocation invocation,
         string code,
