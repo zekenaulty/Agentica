@@ -15,6 +15,7 @@ using Agentica.Tools;
 
 namespace Agentica.Tests;
 
+[Collection(ProcessEnvironmentTestCollection.Name)]
 public sealed class AgenticaClientsTests
 {
     [Fact]
@@ -82,6 +83,72 @@ public sealed class AgenticaClientsTests
         Assert.Equal("Invoke query_state.", step.Intent!.Action);
         Assert.Equal("Use the supplied tool.", step.Intent.Rationale);
         Assert.Null(step.Intent.ExpectedOutcome);
+    }
+
+    [Fact]
+    public async Task Llm_workflow_planner_initial_request_carries_versioned_strict_json_schema()
+    {
+        var client = new FakeLlmClient(PlanJson("query_state", "Query", "ReadOnly"));
+        var planner = new LlmWorkflowPlanner(client);
+
+        await planner.CreatePlanAsync(CreatePlanningRequest());
+
+        var request = Assert.Single(client.Requests);
+        Assert.Equal("application/json", request.StructuredOutput?.ResponseMimeType);
+        Assert.Equal(
+            WorkflowPlanPromptBuilder.InitialPromptVersion,
+            request.Metadata?[WorkflowPlanPromptBuilder.PromptVersionMetadataKey]);
+        Assert.Equal(
+            WorkflowPlanPromptBuilder.InitialSchemaVersion,
+            request.Metadata?[WorkflowPlanPromptBuilder.SchemaVersionMetadataKey]);
+        Assert.Equal(
+            WorkflowPlanPromptBuilder.InitialRequestKind,
+            request.Metadata?[WorkflowPlanPromptBuilder.RequestKindMetadataKey]);
+
+        using var schemaDocument = JsonDocument.Parse(Assert.IsType<string>(request.StructuredOutput?.JsonSchema));
+        var schema = schemaDocument.RootElement;
+        Assert.False(schema.GetProperty("additionalProperties").GetBoolean());
+        AssertRequiredProperties(schema, "planId", "description", "steps", "completionCondition");
+
+        var stepSchema = schema
+            .GetProperty("properties")
+            .GetProperty("steps")
+            .GetProperty("items");
+        Assert.False(stepSchema.GetProperty("additionalProperties").GetBoolean());
+        AssertRequiredProperties(
+            stepSchema,
+            "stepId",
+            "toolId",
+            "kind",
+            "effect",
+            "input",
+            "dependsOn",
+            "batchId",
+            "reason",
+            "intent");
+        AssertEnumValues(
+            stepSchema.GetProperty("properties").GetProperty("kind"),
+            "Query",
+            "Action",
+            "PlannerAssist",
+            "Validation",
+            "Synthesis");
+        AssertEnumValues(
+            stepSchema.GetProperty("properties").GetProperty("effect"),
+            "ReadOnly",
+            "WritesLocalState",
+            "ExternalSideEffect",
+            "Destructive",
+            "Unknown");
+
+        var intentSchema = stepSchema
+            .GetProperty("properties")
+            .GetProperty("intent");
+        Assert.False(intentSchema.GetProperty("additionalProperties").GetBoolean());
+        AssertRequiredProperties(intentSchema, "action", "rationale", "expectedOutcome");
+
+        var geminiConfig = GeminiLlmClient.CreateConfig(request);
+        Assert.IsType<JsonElement>(geminiConfig.ResponseJsonSchema);
     }
 
     [Fact]
@@ -195,6 +262,7 @@ public sealed class AgenticaClientsTests
         {
             ToolSurface = new ToolSurfaceSnapshot(
                 "surface_pressure_test",
+                $"sha256-v1:{new string('0', 64)}",
                 DateTimeOffset.UtcNow,
                 [],
                 PlanningExecutionContext.Empty,
@@ -239,11 +307,12 @@ public sealed class AgenticaClientsTests
     [Fact]
     public async Task Llm_workflow_planner_maps_valid_refinement_json_into_refined_plan()
     {
-        var planner = new LlmWorkflowPlanner(new FakeLlmClient(RefinementJson(
+        var client = new FakeLlmClient(RefinementJson(
             "perform_action",
             "Action",
             "WritesLocalState",
-            PlanRefinementReasons.AmbiguousAction)));
+            PlanRefinementReasons.AmbiguousAction));
+        var planner = new LlmWorkflowPlanner(client);
 
         var refinedPlan = await planner.RefinePlanAsync(
             CreatePlanningRequest(),
@@ -266,6 +335,57 @@ public sealed class AgenticaClientsTests
         Assert.NotNull(step.Intent);
         Assert.Equal("Invoke perform_action.", step.Intent!.Action);
         Assert.Equal("Use the observation.", step.Intent.Rationale);
+
+        var llmRequest = Assert.Single(client.Requests);
+        Assert.Equal(
+            WorkflowPlanPromptBuilder.RefinementPromptVersion,
+            llmRequest.Metadata?[WorkflowPlanPromptBuilder.PromptVersionMetadataKey]);
+        Assert.Equal(
+            WorkflowPlanPromptBuilder.RefinementSchemaVersion,
+            llmRequest.Metadata?[WorkflowPlanPromptBuilder.SchemaVersionMetadataKey]);
+        Assert.Equal(
+            WorkflowPlanPromptBuilder.RefinementRequestKind,
+            llmRequest.Metadata?[WorkflowPlanPromptBuilder.RequestKindMetadataKey]);
+
+        using var schemaDocument = JsonDocument.Parse(Assert.IsType<string>(llmRequest.StructuredOutput?.JsonSchema));
+        var schema = schemaDocument.RootElement;
+        Assert.False(schema.GetProperty("additionalProperties").GetBoolean());
+        AssertRequiredProperties(schema, "fromPlanId", "reason", "evidence", "refinedPlan");
+        AssertEnumValues(
+            schema.GetProperty("properties").GetProperty("reason"),
+            PlanRefinementReasons.Observation,
+            PlanRefinementReasons.Blocked,
+            PlanRefinementReasons.AmbiguousAction,
+            PlanRefinementReasons.LowConfidence,
+            PlanRefinementReasons.ConflictingSignals,
+            PlanRefinementReasons.CompletionCheck,
+            PlanRefinementReasons.Continue,
+            PlanRefinementReasons.ResourceRisk,
+            PlanRefinementReasons.RetryUnblock);
+
+        var refinedPlanSchema = schema
+            .GetProperty("properties")
+            .GetProperty("refinedPlan");
+        AssertRequiredProperties(refinedPlanSchema, "planId", "description", "steps", "completionCondition");
+        var refinedStepSchema = refinedPlanSchema
+            .GetProperty("properties")
+            .GetProperty("steps")
+            .GetProperty("items");
+        AssertRequiredProperties(
+            refinedStepSchema,
+            "stepId",
+            "toolId",
+            "kind",
+            "effect",
+            "input",
+            "dependsOn",
+            "batchId",
+            "reason",
+            "intent");
+        var refinedIntentSchema = refinedStepSchema
+            .GetProperty("properties")
+            .GetProperty("intent");
+        AssertRequiredProperties(refinedIntentSchema, "action", "rationale", "expectedOutcome");
     }
 
     [Fact]
@@ -306,13 +426,22 @@ public sealed class AgenticaClientsTests
         Assert.Contains("fromPlanId, reason, evidence, refinedPlan", client.Requests[1].Messages[^1].Content, StringComparison.Ordinal);
         Assert.Equal("refinement", client.Requests[1].Metadata?["agentica.planner.repairKind"]);
         Assert.Equal("1", client.Requests[1].Metadata?["agentica.planner.repairAttempt"]);
+        Assert.Equal(
+            WorkflowPlanPromptBuilder.RefinementPromptVersion,
+            client.Requests[1].Metadata?[WorkflowPlanPromptBuilder.PromptVersionMetadataKey]);
+        Assert.Equal(
+            WorkflowPlanPromptBuilder.RefinementSchemaVersion,
+            client.Requests[1].Metadata?[WorkflowPlanPromptBuilder.SchemaVersionMetadataKey]);
+        Assert.Equal(
+            client.Requests[0].StructuredOutput?.JsonSchema,
+            client.Requests[1].StructuredOutput?.JsonSchema);
     }
 
     [Fact]
     public async Task Invalid_model_json_fails_before_tool_execution()
     {
         var tool = new CountingTool("known_tool");
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("known_tool", "Known", ToolKind.Query, ToolEffect.ReadOnly),
             tool));
         var runner = CreateRunner(new LlmWorkflowPlanner(new FakeLlmClient("{not-json")), catalog);
@@ -329,7 +458,7 @@ public sealed class AgenticaClientsTests
     public async Task Max_tokens_model_json_failure_is_reported_as_truncation()
     {
         var tool = new CountingTool("known_tool");
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("known_tool", "Known", ToolKind.Query, ToolEffect.ReadOnly),
             tool));
         var runner = CreateRunner(
@@ -356,7 +485,7 @@ public sealed class AgenticaClientsTests
     public async Task Unknown_model_tool_id_fails_before_execution()
     {
         var tool = new CountingTool("known_tool");
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("known_tool", "Known", ToolKind.Query, ToolEffect.ReadOnly),
             tool));
         var runner = CreateRunner(new LlmWorkflowPlanner(new FakeLlmClient(PlanJson("missing_tool", "Query", "ReadOnly"))), catalog);
@@ -372,7 +501,7 @@ public sealed class AgenticaClientsTests
     public async Task Provider_unavailable_blocks_run_without_inventing_success()
     {
         var tool = new CountingTool("known_tool");
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("known_tool", "Known", ToolKind.Query, ToolEffect.ReadOnly),
             tool));
         var runner = CreateRunner(
@@ -392,7 +521,7 @@ public sealed class AgenticaClientsTests
     public async Task Model_hidden_mutation_step_remains_subject_to_runtime_validation()
     {
         var tool = new CountingTool("write_tool");
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("write_tool", "Write Tool", ToolKind.Action, ToolEffect.WritesLocalState),
             tool));
         var runner = CreateRunner(new LlmWorkflowPlanner(new FakeLlmClient(PlanJson("write_tool", "Query", "WritesLocalState"))), catalog);
@@ -436,6 +565,32 @@ public sealed class AgenticaClientsTests
         var schema = Assert.IsType<JsonElement>(config.ResponseJsonSchema);
         Assert.Equal("object", schema.GetProperty("type").GetString());
         Assert.True(schema.GetProperty("properties").TryGetProperty("status", out _));
+    }
+
+    [Fact]
+    public void Gemini_response_maps_cost_relevant_usage_dimensions()
+    {
+        var response = new Google.GenAI.Types.GenerateContentResponse
+        {
+            UsageMetadata = new Google.GenAI.Types.GenerateContentResponseUsageMetadata
+            {
+                PromptTokenCount = 101,
+                CandidatesTokenCount = 29,
+                ThoughtsTokenCount = 7,
+                TotalTokenCount = 137,
+                CachedContentTokenCount = 11,
+                ToolUsePromptTokenCount = 13
+            }
+        };
+
+        var mapped = GeminiResponseMapper.Map(GeminiModelId.Flash25, response);
+
+        Assert.Equal(101, mapped.Usage?.PromptTokens);
+        Assert.Equal(29, mapped.Usage?.OutputTokens);
+        Assert.Equal(7, mapped.Usage?.ThinkingTokens);
+        Assert.Equal(137, mapped.Usage?.TotalTokens);
+        Assert.Equal(11, mapped.Usage?.CachedPromptTokens);
+        Assert.Equal(13, mapped.Usage?.ToolUsePromptTokens);
     }
 
     [Fact]
@@ -648,7 +803,7 @@ public sealed class AgenticaClientsTests
     public async Task Retries_exhausted_surface_planner_unavailable_with_attempt_count()
     {
         var tool = new CountingTool("known_tool");
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("known_tool", "Known", ToolKind.Query, ToolEffect.ReadOnly),
             tool));
         var llmClient = new RetryingLlmClient(
@@ -687,6 +842,28 @@ public sealed class AgenticaClientsTests
         return type.HasElementType && type.GetElementType() is { } elementType && IsGoogleType(elementType);
     }
 
+    private static void AssertRequiredProperties(JsonElement schema, params string[] expected)
+    {
+        var required = schema
+            .GetProperty("required")
+            .EnumerateArray()
+            .Select(item => item.GetString())
+            .ToArray();
+
+        Assert.Equal(expected, required);
+    }
+
+    private static void AssertEnumValues(JsonElement schema, params string[] expected)
+    {
+        var values = schema
+            .GetProperty("enum")
+            .EnumerateArray()
+            .Select(item => item.GetString())
+            .ToArray();
+
+        Assert.Equal(expected, values);
+    }
+
     private static PlanningRequest CreatePlanningRequest() =>
         new(
             new RunRequest("Create a two-step workflow that queries state and then acts"),
@@ -697,13 +874,39 @@ public sealed class AgenticaClientsTests
     private static AgenticaRunner CreateRunner(
         IWorkflowPlanner planner,
         ToolCatalog catalog,
-        ExecutionPolicy? policy = null) =>
-        new(
+        ExecutionPolicy? policy = null)
+    {
+        var effectivePolicy = policy ?? new ExecutionPolicy(MaxSteps: 10, MaxRefinements: 2);
+        if (planner is IExternalWorkflowPlanner && effectivePolicy.SecurityPolicy is null)
+        {
+            effectivePolicy = effectivePolicy with
+            {
+                SecurityPolicy = new ToolSecurityPolicy(
+                    InitialBoundaries:
+                    [
+                        ToolDataBoundary.UserContent,
+                        ToolDataBoundary.HostState
+                    ],
+                    ExternalPlannerAllowedBoundaries:
+                    [
+                        ToolDataBoundary.Public,
+                        ToolDataBoundary.UserContent,
+                        ToolDataBoundary.ConversationContent,
+                        ToolDataBoundary.WorkspaceContent,
+                        ToolDataBoundary.HostState,
+                        ToolDataBoundary.ExternalUntrusted
+                    ])
+            };
+        }
+
+        return new AgenticaRunner(
             planner,
             catalog,
             new InMemoryEventSink(),
             new DeterministicOutcomeReporter(),
-            policy ?? new ExecutionPolicy(MaxSteps: 10, MaxRefinements: 2));
+            effectivePolicy,
+            PlanExhaustionCompletionEvaluator.Instance);
+    }
 
     private static LlmRequest SimpleLlmRequest() =>
         new(

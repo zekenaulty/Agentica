@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Agentica.Artifacts;
-using Agentica.CLI.Scenarios.ChessQuest;
+using Agentica.Lab.Scenarios.ChessQuest;
 using Agentica.Execution;
 using Agentica.Events;
 using Agentica.Observations;
@@ -1905,9 +1905,13 @@ public sealed class ChessQuestHarnessTests
         ]);
 
         var evaluation = new ChessQuestCompletionEvaluator(session).Evaluate(
-            new Agentica.Runs.AgenticaRun(
+            new CompletionContext(
                 "run_test",
-                new RunRequest("Win as White.", RequestOrigin.User, new Dictionary<string, object?>())));
+                1,
+                [],
+                [],
+                [],
+                []));
 
         Assert.Equal(CompletionDecision.Failed, evaluation.Decision);
         Assert.Equal(StopReason.TerminalLoss, evaluation.StopReason);
@@ -1970,6 +1974,7 @@ public sealed class ChessQuestHarnessTests
                 MaxRefinements: 1,
                 MaxPlanContinuations: 0,
                 PlanningMode: PlanningMode.QueryAndBlockerDriven),
+            PlanExhaustionCompletionEvaluator.Instance,
             planningFrameProjector: new ChessQuestPlanningFrameProjector(session));
 
         var envelope = await runner.RunAsync(new RunRequest(
@@ -2502,7 +2507,12 @@ public sealed class ChessQuestHarnessTests
                                 ArtifactKind: "chessquest.phase_report")
                         ])
                 ],
-                DefinitionOfDone: [],
+                DefinitionOfDone:
+                [
+                    new TaskAcceptanceRequirement(
+                        TaskAcceptanceRequirementKind.OutcomeStatus,
+                        RunOutcomeStatus.Succeeded)
+                ],
                 CreatedAt: DateTimeOffset.UtcNow));
 
         public Task<TaskGraphRefinement> RefinePlanAsync(

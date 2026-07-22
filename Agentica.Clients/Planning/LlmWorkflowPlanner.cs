@@ -5,7 +5,7 @@ using Agentica.Planning;
 
 namespace Agentica.Clients.Planning;
 
-public sealed class LlmWorkflowPlanner : IWorkflowPlanner
+public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

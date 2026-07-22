@@ -11,6 +11,7 @@ public sealed class InProcessAgenticaRunExecutor : IRunExecutor
     private readonly Func<RunRequest, Agentica.Tools.ToolCatalog> _toolCatalogFactory;
     private readonly Agentica.Events.IEventSink _eventSink;
     private readonly IOutcomeReporter _outcomeReporter;
+    private readonly Func<RunRequest, ICompletionEvaluator> _completionEvaluatorFactory;
     private readonly Func<RunRequest, ExecutionPolicy> _policyFactory;
 
     public InProcessAgenticaRunExecutor(
@@ -18,12 +19,16 @@ public sealed class InProcessAgenticaRunExecutor : IRunExecutor
         Func<RunRequest, Agentica.Tools.ToolCatalog> toolCatalogFactory,
         Agentica.Events.IEventSink eventSink,
         IOutcomeReporter outcomeReporter,
+        Func<RunRequest, ICompletionEvaluator> completionEvaluatorFactory,
         Func<RunRequest, ExecutionPolicy>? policyFactory = null)
     {
+        ArgumentNullException.ThrowIfNull(completionEvaluatorFactory);
+
         _plannerFactory = plannerFactory;
         _toolCatalogFactory = toolCatalogFactory;
         _eventSink = eventSink;
         _outcomeReporter = outcomeReporter;
+        _completionEvaluatorFactory = completionEvaluatorFactory;
         _policyFactory = policyFactory ?? (_ => new ExecutionPolicy());
     }
 
@@ -36,7 +41,8 @@ public sealed class InProcessAgenticaRunExecutor : IRunExecutor
             _toolCatalogFactory(request),
             _eventSink,
             _outcomeReporter,
-            _policyFactory(request));
+            _policyFactory(request),
+            _completionEvaluatorFactory(request));
         return runner.RunAsync(request, cancellationToken);
     }
 }

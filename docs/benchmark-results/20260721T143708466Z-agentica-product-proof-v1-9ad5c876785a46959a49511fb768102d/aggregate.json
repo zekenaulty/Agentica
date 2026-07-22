@@ -1,0 +1,411 @@
+{
+  "matrixVersion": "agentica-product-proof-v1",
+  "cohort": {
+    "cohortId": "20260721T143708466Z-agentica-product-proof-v1-9ad5c876785a46959a49511fb768102d",
+    "matrixVersion": "agentica-product-proof-v1",
+    "providerName": "Gemini",
+    "modelId": "gemini-2.5-flash",
+    "configurationId": "proof-h1-gemini-developer-api-standard-gemini25flash-t0-th0-o12288-stepwise-ip1-rp1-is1-rs1-repair2-pr3-d500-3000-c600-j0-pc8-8-wrr1s24r18c6t180-mrr2s240r240c16t900"
+  },
+  "pricingSnapshotId": "gemini-api-standard-pricing-2026-07-21-v2",
+  "pricingReviewedOn": "2026-07-21",
+  "pricingSourceUrl": "https://ai.google.dev/gemini-api/docs/pricing",
+  "overall": {
+    "runCount": 30,
+    "verifiedSuccessCount": 29,
+    "successRate": 0.9666666666666666666666666667,
+    "falseSuccessCount": 0,
+    "falseSuccessRate": 0,
+    "invalidPlanCount": 2,
+    "invalidPlanRate": 0.0666666666666666666666666667,
+    "runtimeRetryCount": 0,
+    "runElapsed": {
+      "total": "00:25:53.1099521",
+      "mean": "00:00:51.7703317",
+      "p50": "00:00:20.1217408",
+      "p95": "00:03:31.4068926",
+      "maximum": "00:04:31.2814314"
+    },
+    "llmCallCount": 210,
+    "failedLlmCallCount": 0,
+    "llmRetryCount": 0,
+    "repairCallCount": 1,
+    "llmLatency": {
+      "total": "00:25:52.0319913",
+      "mean": "00:00:07.3906285",
+      "p50": "00:00:02.9948842",
+      "p95": "00:00:26.5191224",
+      "maximum": "00:00:42.7772935"
+    },
+    "tokens": {
+      "promptTokens": 19448310,
+      "outputTokens": 81684,
+      "thinkingTokens": 0,
+      "totalTokens": 19529994
+    },
+    "costAvailable": true,
+    "estimatedCostUsd": 5.80573728
+  },
+  "primary": {
+    "runCount": 25,
+    "verifiedSuccessCount": 25,
+    "successRate": 1,
+    "falseSuccessCount": 0,
+    "falseSuccessRate": 0,
+    "invalidPlanCount": 0,
+    "invalidPlanRate": 0,
+    "runtimeRetryCount": 0,
+    "runElapsed": {
+      "total": "00:09:00.0916701",
+      "mean": "00:00:21.6036668",
+      "p50": "00:00:16.5892359",
+      "p95": "00:00:54.9927618",
+      "maximum": "00:01:07.5453065"
+    },
+    "llmCallCount": 149,
+    "failedLlmCallCount": 0,
+    "llmRetryCount": 0,
+    "repairCallCount": 0,
+    "llmLatency": {
+      "total": "00:08:59.7160483",
+      "mean": "00:00:03.6222553",
+      "p50": "00:00:02.6094604",
+      "p95": "00:00:06.6331281",
+      "maximum": "00:00:41.1492819"
+    },
+    "tokens": {
+      "promptTokens": 1455625,
+      "outputTokens": 50827,
+      "thinkingTokens": 0,
+      "totalTokens": 1506452
+    },
+    "costAvailable": true,
+    "estimatedCostUsd": 0.47625259
+  },
+  "holdout": {
+    "runCount": 5,
+    "verifiedSuccessCount": 4,
+    "successRate": 0.8,
+    "falseSuccessCount": 0,
+    "falseSuccessRate": 0,
+    "invalidPlanCount": 2,
+    "invalidPlanRate": 0.4,
+    "runtimeRetryCount": 0,
+    "runElapsed": {
+      "total": "00:16:53.0182820",
+      "mean": "00:03:22.6036564",
+      "p50": "00:03:11.7166081",
+      "p95": "00:04:31.2814314",
+      "maximum": "00:04:31.2814314"
+    },
+    "llmCallCount": 61,
+    "failedLlmCallCount": 0,
+    "llmRetryCount": 0,
+    "repairCallCount": 1,
+    "llmLatency": {
+      "total": "00:16:52.3159430",
+      "mean": "00:00:16.5953433",
+      "p50": "00:00:15.9950607",
+      "p95": "00:00:30.8865055",
+      "maximum": "00:00:42.7772935"
+    },
+    "tokens": {
+      "promptTokens": 17992685,
+      "outputTokens": 30857,
+      "thinkingTokens": 0,
+      "totalTokens": 18023542
+    },
+    "costAvailable": true,
+    "estimatedCostUsd": 5.32948469
+  },
+  "cases": [
+    {
+      "case": {
+        "caseId": "agentica-product-proof-v1/workbench/broken_check",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "broken_check",
+        "parameters": {
+          "scenario": "broken_check",
+          "suite": "workbench"
+        }
+      },
+      "metrics": {
+        "runCount": 5,
+        "verifiedSuccessCount": 5,
+        "successRate": 1,
+        "falseSuccessCount": 0,
+        "falseSuccessRate": 0,
+        "invalidPlanCount": 0,
+        "invalidPlanRate": 0,
+        "runtimeRetryCount": 0,
+        "runElapsed": {
+          "total": "00:01:04.6583468",
+          "mean": "00:00:12.9316693",
+          "p50": "00:00:12.4644594",
+          "p95": "00:00:14.3757458",
+          "maximum": "00:00:14.3757458"
+        },
+        "llmCallCount": 25,
+        "failedLlmCallCount": 0,
+        "llmRetryCount": 0,
+        "repairCallCount": 0,
+        "llmLatency": {
+          "total": "00:01:04.3967844",
+          "mean": "00:00:02.5758713",
+          "p50": "00:00:02.4318005",
+          "p95": "00:00:03.5549322",
+          "maximum": "00:00:04.3697717"
+        },
+        "tokens": {
+          "promptTokens": 216723,
+          "outputTokens": 8072,
+          "thinkingTokens": 0,
+          "totalTokens": 224795
+        },
+        "costAvailable": true,
+        "estimatedCostUsd": 0.07311926
+      }
+    },
+    {
+      "case": {
+        "caseId": "agentica-product-proof-v1/workbench/missing_mapping",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "missing_mapping",
+        "parameters": {
+          "scenario": "missing_mapping",
+          "suite": "workbench"
+        }
+      },
+      "metrics": {
+        "runCount": 5,
+        "verifiedSuccessCount": 5,
+        "successRate": 1,
+        "falseSuccessCount": 0,
+        "falseSuccessRate": 0,
+        "invalidPlanCount": 0,
+        "invalidPlanRate": 0,
+        "runtimeRetryCount": 0,
+        "runElapsed": {
+          "total": "00:01:17.4756744",
+          "mean": "00:00:15.4951348",
+          "p50": "00:00:13.8101774",
+          "p95": "00:00:24.5723661",
+          "maximum": "00:00:24.5723661"
+        },
+        "llmCallCount": 28,
+        "failedLlmCallCount": 0,
+        "llmRetryCount": 0,
+        "repairCallCount": 0,
+        "llmLatency": {
+          "total": "00:01:17.4489450",
+          "mean": "00:00:02.7660337",
+          "p50": "00:00:02.3409814",
+          "p95": "00:00:04.7599004",
+          "maximum": "00:00:07.4222289"
+        },
+        "tokens": {
+          "promptTokens": 231615,
+          "outputTokens": 7992,
+          "thinkingTokens": 0,
+          "totalTokens": 239607
+        },
+        "costAvailable": true,
+        "estimatedCostUsd": 0.07357770
+      }
+    },
+    {
+      "case": {
+        "caseId": "agentica-product-proof-v1/workbench/structured_doc_merge",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "structured_doc_merge",
+        "parameters": {
+          "scenario": "structured_doc_merge",
+          "suite": "workbench"
+        }
+      },
+      "metrics": {
+        "runCount": 5,
+        "verifiedSuccessCount": 5,
+        "successRate": 1,
+        "falseSuccessCount": 0,
+        "falseSuccessRate": 0,
+        "invalidPlanCount": 0,
+        "invalidPlanRate": 0,
+        "runtimeRetryCount": 0,
+        "runElapsed": {
+          "total": "00:02:52.6220515",
+          "mean": "00:00:34.5244103",
+          "p50": "00:00:21.1446291",
+          "p95": "00:01:07.5453065",
+          "maximum": "00:01:07.5453065"
+        },
+        "llmCallCount": 26,
+        "failedLlmCallCount": 0,
+        "llmRetryCount": 0,
+        "repairCallCount": 0,
+        "llmLatency": {
+          "total": "00:02:52.5961713",
+          "mean": "00:00:06.6383142",
+          "p50": "00:00:02.9948842",
+          "p95": "00:00:34.9647628",
+          "maximum": "00:00:41.1492819"
+        },
+        "tokens": {
+          "promptTokens": 280869,
+          "outputTokens": 9881,
+          "thinkingTokens": 0,
+          "totalTokens": 290750
+        },
+        "costAvailable": true,
+        "estimatedCostUsd": 0.09216353
+      }
+    },
+    {
+      "case": {
+        "caseId": "agentica-product-proof-v1/workbench/word_ladder",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "word_ladder",
+        "parameters": {
+          "scenario": "word_ladder",
+          "suite": "workbench"
+        }
+      },
+      "metrics": {
+        "runCount": 5,
+        "verifiedSuccessCount": 5,
+        "successRate": 1,
+        "falseSuccessCount": 0,
+        "falseSuccessRate": 0,
+        "invalidPlanCount": 0,
+        "invalidPlanRate": 0,
+        "runtimeRetryCount": 0,
+        "runElapsed": {
+          "total": "00:01:49.8352725",
+          "mean": "00:00:21.9670545",
+          "p50": "00:00:19.6143856",
+          "p95": "00:00:39.3148164",
+          "maximum": "00:00:39.3148164"
+        },
+        "llmCallCount": 34,
+        "failedLlmCallCount": 0,
+        "llmRetryCount": 0,
+        "repairCallCount": 0,
+        "llmLatency": {
+          "total": "00:01:49.8038207",
+          "mean": "00:00:03.2295241",
+          "p50": "00:00:02.3950990",
+          "p95": "00:00:05.4883609",
+          "maximum": "00:00:27.1318929"
+        },
+        "tokens": {
+          "promptTokens": 316981,
+          "outputTokens": 10114,
+          "thinkingTokens": 0,
+          "totalTokens": 327095
+        },
+        "costAvailable": true,
+        "estimatedCostUsd": 0.09948265
+      }
+    },
+    {
+      "case": {
+        "caseId": "agentica-product-proof-v1/workbench/release_gate",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "release_gate",
+        "parameters": {
+          "scenario": "release_gate",
+          "suite": "workbench"
+        }
+      },
+      "metrics": {
+        "runCount": 5,
+        "verifiedSuccessCount": 5,
+        "successRate": 1,
+        "falseSuccessCount": 0,
+        "falseSuccessRate": 0,
+        "invalidPlanCount": 0,
+        "invalidPlanRate": 0,
+        "runtimeRetryCount": 0,
+        "runElapsed": {
+          "total": "00:01:55.5003249",
+          "mean": "00:00:23.1000649",
+          "p50": "00:00:22.9699184",
+          "p95": "00:00:25.5745789",
+          "maximum": "00:00:25.5745789"
+        },
+        "llmCallCount": 36,
+        "failedLlmCallCount": 0,
+        "llmRetryCount": 0,
+        "repairCallCount": 0,
+        "llmLatency": {
+          "total": "00:01:55.4703269",
+          "mean": "00:00:03.2075090",
+          "p50": "00:00:02.9648898",
+          "p95": "00:00:06.0534667",
+          "maximum": "00:00:06.1621908"
+        },
+        "tokens": {
+          "promptTokens": 409437,
+          "outputTokens": 14768,
+          "thinkingTokens": 0,
+          "totalTokens": 424205
+        },
+        "costAvailable": true,
+        "estimatedCostUsd": 0.13790945
+      }
+    },
+    {
+      "case": {
+        "caseId": "agentica-product-proof-v1/maze/unlock-seed173-7x7-visibility2",
+        "suite": "GeneralizationHoldout",
+        "scenarioId": "unlock",
+        "parameters": {
+          "questType": "unlock",
+          "seed": "173",
+          "width": "7",
+          "height": "7",
+          "visibility": "2",
+          "suite": "maze"
+        }
+      },
+      "metrics": {
+        "runCount": 5,
+        "verifiedSuccessCount": 4,
+        "successRate": 0.8,
+        "falseSuccessCount": 0,
+        "falseSuccessRate": 0,
+        "invalidPlanCount": 2,
+        "invalidPlanRate": 0.4,
+        "runtimeRetryCount": 0,
+        "runElapsed": {
+          "total": "00:16:53.0182820",
+          "mean": "00:03:22.6036564",
+          "p50": "00:03:11.7166081",
+          "p95": "00:04:31.2814314",
+          "maximum": "00:04:31.2814314"
+        },
+        "llmCallCount": 61,
+        "failedLlmCallCount": 0,
+        "llmRetryCount": 0,
+        "repairCallCount": 1,
+        "llmLatency": {
+          "total": "00:16:52.3159430",
+          "mean": "00:00:16.5953433",
+          "p50": "00:00:15.9950607",
+          "p95": "00:00:30.8865055",
+          "maximum": "00:00:42.7772935"
+        },
+        "tokens": {
+          "promptTokens": 17992685,
+          "outputTokens": 30857,
+          "thinkingTokens": 0,
+          "totalTokens": 18023542
+        },
+        "costAvailable": true,
+        "estimatedCostUsd": 5.32948469
+      }
+    }
+  ],
+  "gatePassed": true,
+  "gateFailures": []
+}

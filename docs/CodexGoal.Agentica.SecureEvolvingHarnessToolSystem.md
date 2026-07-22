@@ -1,5 +1,7 @@
 # Codex Goal: Secure Evolving Harness And Tool System
 
+> Lifecycle: **Incubating** · Completion: **40%** · Canonical status: [Agentica Product Status And Goal Xref](Agentica.ProductStatus.md)
+
 ## Mission
 
 Define the next Agentica slice for a secure, evolvable harness and tool system.
@@ -12,7 +14,7 @@ Core direction:
 Risk vocabulary is deterministic.
 Tool metadata is provenance-bearing.
 Live surfaces are compiled and auditable.
-Planner prompts consume a bounded projection.
+Planner prompts consume a bounded projection, not the authoritative manifest.
 Execution gates enforce policy before tools run.
 Receipts and trajectory audits prove what happened.
 Self-refinement proposes candidates only; promotion is external and controlled.
@@ -64,6 +66,21 @@ or how future self-refinement is kept out of the live execution path.
 ```
 
 If risk is not defined by a pinned taxonomy or trusted manifest, then the system has no stable basis for enforcement. An LLM can help classify risk during review, but an LLM classification cannot be the runtime source of truth unless the result is accepted, pinned, versioned, and tested.
+
+This slice also separates three layers that must not collapse into one field:
+
+```text
+Declaration:
+  what a host, adapter, or manifest says a tool is and can do
+
+Policy:
+  deterministic rules that evaluate declarations, provenance, runtime context, and taint
+
+Decision:
+  allow, deny, require approval, or require review for this surface/run/invocation
+```
+
+`Denied` is therefore a policy decision, not intrinsic tool metadata.
 
 ## Non-Goals
 
@@ -132,6 +149,8 @@ Unknown
 
 `Unknown` must be treated as high risk. It should not be auto-approved for live execution outside local deterministic harnesses.
 
+`ToolEffectPolicy.AllowAll` means all known effects. It must not include `Unknown`. Any test-only or lab-only escape hatch that includes `Unknown` must be named explicitly as unsafe.
+
 ### Data Boundary
 
 Add a generic data-boundary vocabulary:
@@ -155,6 +174,8 @@ PrivateUserData requires explicit policy and consent before exposure.
 ExternalUntrusted taints downstream context.
 ```
 
+For this slice, hidden and secret exclusion is a host projection contract plus audit requirement. Agentica should not claim generic field-level noninterference while prompts still serialize raw request context, planning frames, observations, receipts, or execution context objects. A later structural boundary can promote this into enforced typed projections.
+
 ### Output Channel
 
 Describe where a tool can send or expose data:
@@ -172,21 +193,41 @@ Unknown
 
 External communication risk is not only an effect issue. A read-only tool that can send its observations to a remote service can still exfiltrate.
 
-### Trust Boundary
+### Metadata Origin, Integrity, Review, And Runtime Trust
 
-Represent trust of the metadata and implementation separately:
+Do not compress trust into one enum. The system needs to know where metadata came from, whether it has integrity evidence, whether it has been reviewed, and what the current runtime policy decided.
 
 ```text
-BuiltIn
-HostAuthored
-PinnedAdapter
-SignedExternal
-UnsignedExternal
-GeneratedCandidate
-Unknown
+MetadataOrigin:
+  BuiltIn
+  HostAuthored
+  AdapterProvided
+  External
+  Generated
+  Unknown
+
+IntegrityEvidence:
+  SourceControlled
+  PinnedHash
+  VerifiedSignature
+  Unsigned
+  Unknown
+
+ReviewStatus:
+  Unreviewed
+  Reviewed
+  Approved
+  Rejected
+
+RuntimeTrust:
+  TrustedForPlanning
+  TrustedForLocalExecution
+  RequiresApproval
+  RequiresReview
+  Denied
 ```
 
-`GeneratedCandidate` is never production-trusted by itself.
+Runtime trust is computed from policy. It is not declared by the tool. Promotion from generated candidate to approved manifest adds a review record and integrity evidence; it does not erase generated provenance.
 
 ### Input Trust
 
@@ -218,20 +259,26 @@ Unknown
 
 This controls repair/retry behavior. It must not be inferred from a friendly description.
 
-### Approval Posture
+### Approval Requirements And Decisions
 
 Keep approval as policy, not prose:
 
 ```text
-NotRequired
-RequiredPerRun
-RequiredPerCall
-RequiredPerInput
-Denied
-Unknown
+ApprovalRequirement:
+  None
+  PerRun
+  PerCall
+  PerDistinctInput
+  Unknown
+
+ToolSecurityDecision:
+  Allow
+  Deny
+  RequireApproval
+  RequireReview
 ```
 
-`ToolDescriptor.RequiresApproval` can map into this, but it is not enough by itself.
+`ToolDescriptor.RequiresApproval` can map into `ApprovalRequirement`, but it is not enough by itself. `Deny` is produced by the evaluator from the declaration, policy, runtime context, and taint state.
 
 ## Metadata Coverage Gaps
 
@@ -259,26 +306,36 @@ This slice should fill the planning and runtime coverage for the generic items w
 
 ## Proposed Runtime Shape
 
-Add one small generic profile family rather than turning `ToolDescriptor` into an unbounded manifest:
+Add a compiled manifest boundary rather than turning planner-visible `ToolDescriptor` into an authoritative security manifest:
 
 ```text
-ToolDescriptor
-  existing callable contract
-  optional ToolSecurityProfile
-  optional ToolOutputSchema or ToolResultContract, later only if needed
+CompiledToolManifest
+  PlannerDescriptor
+    existing callable contract and planner-facing prose
 
-ToolSecurityProfile
-  taxonomy version
-  trust boundary
-  data boundaries read
-  data boundaries written
-  output channels
-  input trust expectation
-  retry safety
-  approval posture
-  provenance
-  descriptor hash
-  policy tags
+  SecurityDeclaration
+    taxonomy version
+    data boundaries read
+    data boundaries written
+    output channels
+    input trust expectation
+    retry safety
+    approval requirement
+    policy tags
+
+  Provenance
+    metadata origin
+    publisher/source, when known
+    adapter id, when any
+    review status
+
+  Integrity
+    integrity evidence
+    callable contract hash
+    planner projection hash
+    security declaration hash
+    implementation identity
+    implementation hash, when available
 ```
 
 Keep this generic:
@@ -287,9 +344,11 @@ Keep this generic:
 No chess, maze, MCP, cloud, email, file-system, or product vocabulary in Agentica core.
 ```
 
-Hosts and adapters may keep richer manifests outside core and map them down to the generic profile.
+Hosts and adapters may keep richer manifests outside core and map them down to the generic declaration.
 
-## Provenance And Descriptor Integrity
+Prompt builders receive only `PlannerDescriptor` plus bounded public policy summaries. The validator, guard, executor, surface compiler, and audit path receive the full compiled manifest. The planner-visible descriptor may reference risk summaries, but it is not the source of authority for enforcement.
+
+## Provenance, Canonical Hashing, And Snapshot Semantics
 
 Every planner-visible tool surface should eventually have stable identity metadata:
 
@@ -298,17 +357,56 @@ tool id
 tool version, if known
 publisher/source, if known
 adapter id, if any
-trust boundary
-descriptor hash
-security profile hash
-schema hash
+metadata origin
+integrity evidence
+review status
+callable contract hash
+planner projection hash
+security declaration hash
+policy hash
 rendered planner projection hash
 ```
+
+Canonical hashing must be specified before hashes become acceptance criteria:
+
+```text
+CanonicalEncodingVersion
+HashAlgorithm
+Field inclusion rules
+Property order
+Set and map sorting
+Null-versus-absent semantics
+Enum wire values
+String normalization
+Line-ending normalization
+Binary/blob reference rules
+```
+
+Use separate hashes for separate purposes:
+
+```text
+CallableContractHash:
+  tool id, kind, effect, input schema, callable version, and other invocation contract fields
+
+PlannerProjectionHash:
+  planner-visible descriptor text, context hints, public schema text, and public policy summary
+
+SecurityDeclarationHash:
+  taxonomy version, data boundaries, output channels, retry safety, approval requirement, and policy tags
+
+PolicyHash:
+  deterministic security evaluator configuration and risk policy version
+
+SurfaceHash:
+  ordered exposed tool ids, projection hashes, declaration hashes, policy hash, state projection hash, and bounded public surface metadata
+```
+
+Snapshots must be deep snapshots. Nested collections, schemas, policy summaries, context frames, evidence refs, and descriptor projections should be copied into immutable or frozen structures before hashing and before publishing to planners. A shallow wrapper over mutable descriptors is not enough.
 
 `ToolSurfaceSnapshot` should record enough hash/provenance data to answer:
 
 - Which descriptor text did the planner see?
-- Which security profile did the policy gate use?
+- Which security declaration and policy did the guard use?
 - Did the descriptor change between planning turns?
 - Did the live surface change because host state changed or because metadata drifted?
 - Was a changed descriptor accepted, refused, or treated as requiring review?
@@ -316,16 +414,16 @@ rendered planner projection hash
 Descriptor drift policy:
 
 ```text
-BuiltIn/HostAuthored:
+BuiltIn or HostAuthored with SourceControlled or PinnedHash integrity:
   drift is allowed only through code/config change and should be visible in tests or snapshots.
 
-PinnedAdapter/SignedExternal:
+AdapterProvided or External with PinnedHash or VerifiedSignature integrity:
   drift requires matching version/signature or explicit re-approval.
 
-UnsignedExternal/Unknown:
+External, Unsigned, or Unknown integrity:
   drift blocks execution for non-read-only or non-local tools.
 
-GeneratedCandidate:
+Generated origin:
   drift is expected in the lab, but never trusted in runtime.
 ```
 
@@ -356,10 +454,10 @@ then derived planning frames and observations should carry taint refs.
 If a tool can communicate externally,
 then planner-generated inputs should be inspected against current taint state before execution.
 
-HiddenOracle must never enter planner-visible observations, frames, prompts, tool descriptors, or outcome reports.
+HiddenOracle and Secret data must never enter planner-visible observations, frames, prompts, tool descriptors, or outcome reports.
 ```
 
-This can start as snapshot/test coverage before becoming a full runtime gate.
+This can start as snapshot/test coverage before becoming a full runtime gate. The first slice should audit and reject known projection leaks; it should not claim to prove generic noninterference across arbitrary object graphs.
 
 ## Prompt Coverage
 
@@ -391,7 +489,7 @@ binding state
 binding reason
 tool ids exposed
 tool ids hidden/denied/demoted, redacted when needed
-security profile hashes
+security declaration hashes
 state projection hash
 receipt ids used
 taint summary
@@ -473,9 +571,9 @@ Acceptance:
 - Training/adaptation remains explicitly out of scope.
 - Risk-source blocker is explicit.
 
-### Slice 1: Risk Vocabulary And Metadata Contracts
+### Slice 1: Manifest And Taxonomy Contracts
 
-Add the smallest generic records needed to express deterministic risk.
+Add the smallest generic records needed to express deterministic risk, declarations, provenance, integrity evidence, review status, and planner projections.
 
 Likely code areas:
 
@@ -489,57 +587,93 @@ docs/Agentica.RuntimeContracts.md
 Acceptance:
 
 - Risk taxonomy is represented by stable enums or records.
+- `CompiledToolManifest` separates `PlannerDescriptor`, `SecurityDeclaration`, provenance, and integrity.
+- Planner-visible descriptors are not the authoritative policy source.
 - `Unknown` risk is fail-closed by policy for non-local/non-read-only tools.
-- Tool descriptors can carry optional security profiles without breaking existing harnesses.
 - Tests cover serialization shape and default behavior.
 
-### Slice 2: Surface Hashing And Provenance
+### Slice 2: Canonical Catalog Compilation
 
-Record descriptor/security/profile hashes in planner-visible snapshots.
+Compile host/adapter registrations into canonical manifest records and planner projections.
 
 Acceptance:
 
-- Tool surface snapshots expose stable hashes.
-- Same descriptors produce the same hash.
-- Description/schema/security changes produce a different hash.
-- Planning events can be correlated to the surface hash used for the plan.
+- Catalog compilation is deterministic.
+- Missing declarations become explicit `Unknown`, `Unsigned`, or `Unreviewed` values.
+- Descriptions and context hints cannot override declarations.
+- Existing harnesses can map current descriptors into a conservative local manifest.
 - Existing scenario tests continue to pass.
 
-### Slice 3: Metadata Guard
+### Slice 3: Deterministic Security Evaluator
 
-Add a deterministic pre-planning or pre-execution guard that evaluates descriptors and profiles against policy.
+Add a deterministic evaluator that turns declarations, provenance, integrity, policy, runtime context, and taint into a `ToolSecurityDecision`.
 
 Acceptance:
 
-- Missing security profile on risky tools is blocked or marked review-required.
+- Missing security declaration on risky tools is blocked or marked review-required.
+- `Deny` is produced by evaluation, not stored as intrinsic metadata.
 - `Unknown` effect/security posture does not silently execute.
 - Description text cannot lower risk.
-- `RequiresApproval` maps to approval posture but does not pretend approval exists.
-- Tests prove guard failures happen before mutation-capable execution.
+- `RequiresApproval` maps to `ApprovalRequirement` but does not pretend approval exists.
+- Tests prove evaluator output is deterministic.
 
-### Slice 4: Taint-Aware Planning Surface
+### Slice 4: Surface Identity And Drift Audit
 
-Introduce a lightweight taint summary carried through observations, planning frames, or policy summary.
+Record canonical hashes and drift decisions in planner-visible snapshots and audit details.
 
 Acceptance:
 
-- Tool outputs can mark content as external/untrusted.
+- Same manifests and projections produce the same hashes.
+- Callable contract, planner projection, security declaration, policy, and surface hashes are separate.
+- Description/schema/security/policy changes affect the correct hash.
+- Tool surface snapshots expose enough stable identity to correlate planning and execution.
+- Drifted untrusted descriptors block execution when policy requires pinning.
+- Existing scenario tests continue to pass.
+
+### Slice 5: Pre-Dispatch Guard
+
+Apply the evaluator immediately before tool dispatch against the current compiled manifest and active run state.
+
+Acceptance:
+
+- Guard failures happen before mutation-capable execution.
+- Approval-required tools do not execute unless a future explicit grant model is present.
+- A refined plan cannot execute with stale, demoted, hidden, or drifted metadata.
+- Invocation-bound authorization is left for a later slice unless a minimal grant model is explicitly accepted.
+
+### Slice 6: Result Classification And Coarse Taint
+
+Introduce a minimal result classification boundary that supports taint without claiming full information-flow control.
+
+Likely shape:
+
+```text
+ToolResultClassification
+  provenance
+  data boundaries
+  taint labels
+  output channels actually used
+```
+
+Acceptance:
+
+- Tool outputs can mark content as external/untrusted, private, secret, or host-only.
 - Planning context exposes a public taint summary, not hidden data.
 - Tainted runs restrict or warn on risky combinations.
 - Tests cover untrusted content followed by private read plus external send.
 
-### Slice 5: Prompt Contract Update
+### Slice 7: Prompt Contract Update
 
 Update LLM planner prompts only after structured policy exists.
 
 Acceptance:
 
-- Prompt states metadata trust boundaries.
+- Prompt states declaration, projection, and policy boundaries.
 - Prompt tells planner to treat unknown risk conservatively.
 - Prompt does not become the only control.
 - Prompt contract tests cover tool-description injection text.
 
-### Slice 6: Trajectory Audit
+### Slice 8: Trajectory Audit
 
 Add a compact audit projection over the existing event/receipt/surface trail.
 
@@ -548,7 +682,7 @@ Acceptance:
 - Audit can answer whether a run crossed a data boundary.
 - Audit can answer whether a plan used stale or drifted metadata.
 - Audit can answer whether final success hid a mid-trajectory policy violation.
-- Audit output is based on events, receipts, surfaces, profiles, and validation issues.
+- Audit output is based on events, receipts, surfaces, declarations, policies, and validation issues.
 
 ## Test Plan
 
@@ -556,16 +690,22 @@ Use deterministic and fake-planner tests first.
 
 Core tests:
 
-- `ToolSecurityProfile` defaults are conservative.
+- `CompiledToolManifest` keeps planner projection separate from security declaration.
+- Security declaration defaults are conservative.
 - `Unknown` risk blocks non-local mutation.
-- Descriptor hash is stable and sensitive to relevant metadata.
-- Security profile hash is stable and sensitive to policy fields.
-- A tool description containing hostile instructions does not change risk profile.
+- `ToolEffectPolicy.AllowAll` excludes `ToolEffect.Unknown`.
+- Callable contract hash is stable and sensitive to invocation contract metadata.
+- Planner projection hash is stable and sensitive to planner-visible prose.
+- Security declaration hash is stable and sensitive to declaration fields.
+- Policy hash is stable and sensitive to evaluator policy.
+- Surface hash is stable and sensitive to exposed tool projections, declarations, policy, and state projection.
+- Hashing uses canonical ordering and deep snapshots of nested collections.
+- A tool description containing hostile instructions does not change security declaration or evaluator decision.
 - Drifted descriptors produce a new surface hash.
 - Drifted untrusted descriptors block execution when policy requires pinning.
 - Approval-required tools do not execute unless a future explicit grant model is present.
 - Tainted external content tightens subsequent tool policy.
-- Planner-visible prompt/context excludes hidden oracle and secret fields.
+- Planner-visible prompt/context leak tests cover hidden oracle and secret projection contracts, without claiming generic noninterference until a structural projection boundary exists.
 
 Harness regression tests:
 
@@ -584,7 +724,8 @@ Provider tests:
 Update these after slices land:
 
 - `docs/Agentica.RuntimeContracts.md`
-  - tool security profile
+  - compiled tool manifest
+  - security declaration
   - risk source
   - surface hashes
   - taint summary
@@ -601,9 +742,23 @@ Update these after slices land:
 
 ## Open Questions
 
-1. Should the first risk profile live directly on `ToolDescriptor`, or should it be wrapped by a separate `ToolManifest` record that maps down to descriptors?
+1. Should the first security declaration live directly on `ToolDescriptor`, or should it be wrapped by a separate `ToolManifest` record that maps down to descriptors?
 
-2. Should `RequiresApproval` be deprecated in favor of `ApprovalPosture`, or retained as a convenience alias?
+Recommended answer:
+
+```text
+Use a separate `CompiledToolManifest`.
+`ToolDescriptor` or `PlannerDescriptor` remains planner-facing projection, not policy authority.
+```
+
+2. Should `RequiresApproval` be deprecated in favor of `ApprovalRequirement`, or retained as a convenience alias?
+
+Recommended answer:
+
+```text
+Retain it only as an adapter/convenience input.
+Map it into `ApprovalRequirement`; enforcement uses `ToolSecurityDecision`.
+```
 
 3. Should descriptor hash include `Description`, or should there be separate callable-contract and planner-projection hashes?
 
@@ -613,7 +768,9 @@ Recommended answer:
 Use separate hashes:
   callable contract hash
   planner projection hash
-  security profile hash
+  security declaration hash
+  policy hash
+  surface hash
 ```
 
 4. Should taint state be core runtime state or host-projected planning context first?

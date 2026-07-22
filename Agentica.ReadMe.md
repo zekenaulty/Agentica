@@ -1,5 +1,9 @@
 # Agentica
 
+> Lifecycle: **Historical** · Completion: **100%** · Canonical status: [Agentica Product Status And Goal Xref](docs/Agentica.ProductStatus.md)
+>
+> Rename note: `Agentica.CLI` was renamed to `Agentica.Lab`; legacy names below are retained as historical evidence.
+
 Agentica is a compact .NET package for planning and executing bounded tool-using workflows.
 
 The initial request often begins as a human prompt, as in Codex or Claude Code, but Agentica should not assume the requester is human. A run may be requested by a user, another agent, a scheduler, a host application, or a test harness. The package turns that request into a visible workflow plan, refines that plan through state/data queries when needed, executes approved tool steps, and stops only when the workflow reaches a truthful terminal outcome.

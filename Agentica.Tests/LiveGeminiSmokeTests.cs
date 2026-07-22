@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Runtime.CompilerServices;
 using Agentica.Clients.Gemini;
 using Agentica.Clients.Llm;
 using Agentica.Clients.Orchestration;
@@ -8,18 +9,33 @@ using Agentica.Requests;
 
 namespace Agentica.Tests;
 
+public sealed class LiveGeminiFactAttribute : FactAttribute
+{
+    private const string RunLiveTestsVariable = "AGENTICA_RUN_LIVE_LLM_TESTS";
+
+    public LiveGeminiFactAttribute(
+        [CallerFilePath] string? sourceFilePath = null,
+        [CallerLineNumber] int sourceLineNumber = -1)
+        : base(sourceFilePath, sourceLineNumber)
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable(RunLiveTestsVariable),
+                "true",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            Skip = $"Live Gemini tests are disabled. Set {RunLiveTestsVariable}=true to run this test.";
+        }
+    }
+}
+
+[Collection(ProcessEnvironmentTestCollection.Name)]
 public sealed class LiveGeminiSmokeTests
 {
     private const string RunLiveTestsVariable = "AGENTICA_RUN_LIVE_LLM_TESTS";
 
-    [Fact]
+    [LiveGeminiFact]
     public async Task Live_gemini_generation_smoke_test()
     {
-        if (!LiveTestsEnabled())
-        {
-            return;
-        }
-
         LoadSolutionRootEnvironmentFile();
 
         var apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY")
@@ -65,14 +81,9 @@ public sealed class LiveGeminiSmokeTests
         Assert.Equal("gemini", document.RootElement.GetProperty("provider").GetString());
     }
 
-    [Fact]
+    [LiveGeminiFact]
     public async Task Live_gemini_task_planner_smoke_test()
     {
-        if (!LiveTestsEnabled())
-        {
-            return;
-        }
-
         LoadSolutionRootEnvironmentFile();
 
         var apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY")
@@ -119,12 +130,6 @@ public sealed class LiveGeminiSmokeTests
             Assert.DoesNotContain("perform_action", task.Objective, StringComparison.OrdinalIgnoreCase);
         });
     }
-
-    private static bool LiveTestsEnabled() =>
-        string.Equals(
-            Environment.GetEnvironmentVariable(RunLiveTestsVariable),
-            "true",
-            StringComparison.OrdinalIgnoreCase);
 
     private static void LoadSolutionRootEnvironmentFile()
     {

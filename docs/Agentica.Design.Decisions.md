@@ -15,7 +15,7 @@ Current solution shape:
 ```text
   Agentica.slnx
   Agentica/                  runtime package
-  Agentica.CLI/              console proof host
+  Agentica.Lab/              console proof host
   Agentica.Clients/          provider SDK isolation for LLM integrations
 ```
 
@@ -282,7 +282,7 @@ Agentica may require an artifact kind before success; it must not own quest obje
 
 Agentica may bound planner-visible receipts and observations; it must not own fog of war or pathfinding.
 
-If a run ends blocked, Agentica may start a bounded retry attempt. A retry is a fresh Agentica run with the same host tool catalog and host state, `RequestOrigin.Agent`, and an `agentica.retry` request context that describes only the immediately previous blocked attempt. This lets the planner reason about how to unblock or resume without carrying stale blockers forever. The retry still proposes a normal `WorkflowPlan`; Agentica still validates every tool, input, effect, receipt, and completion claim.
+If a run ends blocked, Agentica may start a bounded retry attempt only when the frozen retry policy permits its stop reason and cumulative effect history. A retry is a fresh Agentica run with the same host tool catalog and host state, `RequestOrigin.Agent`, and an `agentica.retry` request context that describes only the immediately previous blocked attempt. This lets the planner reason about how to unblock or resume without carrying stale blockers forever, while `OutcomeEnvelope.PriorAttempts` preserves the complete history for proof. The retry still proposes a normal `WorkflowPlan`; Agentica still validates every tool, input, effect, normalized result, and completion claim.
 
 Extra thinking turns must stay inside the normal planning envelope. If the planner needs more granular reasoning, it returns a normal `WorkflowPlan` or `PlanRefinement` with an auditable reason code such as `ambiguous_action`, `blocked`, `low_confidence`, `conflicting_signals`, `completion_check`, `continue`, `resource_risk`, or `retry_unblock`. There is no hidden chain-of-thought store, no unbounded reasoning loop, and no execution path that bypasses plan validation.
 
@@ -317,3 +317,44 @@ It should not wait for:
 - Complex dependency graphs.
 - Background queues.
 - Dashboards.
+
+## Decision 011: The Final Envelope Must Preserve Dispatch Truth Across Attempts
+
+The top-level `OutcomeEnvelope` is the final run attempt, and `PriorAttempts` contains every complete earlier attempt in chronological order. Compact `RunAttemptSummary` records remain an index, not the proof store. A receipt, observation, artifact, event, diagnostic, or blocker from an earlier attempt must not disappear merely because a later attempt became the returned result.
+
+Tool results cross an untrusted boundary. The runtime owns canonical proof identity, invocation association, timestamps, evidence links, and bounded snapshots. Tool-supplied source tokens may be aliased for a later dispatch, but they cannot become receipt identity, completion proof by assertion, or retry authority.
+
+Retry is authorization, not convenience:
+
+- The default retryable stop reason is only `ToolUnavailable`.
+- `ToolRefused` is separate and is not retried by default.
+- Read-only work may repeat under the bounded policy.
+- Mutation retry is off unless the current registration declares `Idempotent` and the frozen host policy authorizes that exact tool id.
+- Safety is derived cumulatively from validated plan steps and current registrations, never from a tool-returned receipt claim.
+
+Completion is also explicit authority. Every runner host supplies an evaluator; evaluators receive an immutable snapshot and return resolved evidence. Plan exhaustion is a named demo policy, not a constructor default.
+
+The in-memory run ledger is authoritative. Event sinks, outcome reporters, and user-facing projections are observers. Their failure is diagnosed and isolated; it cannot erase a real invocation or change a proven business outcome. Durable audit delivery, if required later, needs a separate write-ahead/outbox contract.
+
+## Decision 012: One Compiled Manifest Is The Initial Security Authority
+
+The first secure-dispatch slice uses one canonical compiled manifest rather than introducing independent planner, executor, policy, and provenance hashes. Each required `ToolRegistration` contains a planner descriptor, executor, authoritative security declaration, and provenance. Compilation validates all required classifications, rejects descriptor/security disagreement, deep-snapshots caller-owned projection data, and produces a versioned canonical SHA-256 hash.
+
+Plans pin that manifest hash. Immediately before dispatch, the runtime recompiles the current registration sources and refuses any mismatch before calling the tool. A random `SurfaceId` remains useful for request correlation, but it is not authority and is not substituted for the stable manifest digest.
+
+Authorization uses two independent keys:
+
+- the effect policy must allow the declared effect; and
+- approval-required or external-side-effect work must have an exact, unexpired manifest/tool/data/output grant.
+
+Planner egress belongs inside the same boundary. External planners declare `IExternalWorkflowPlanner` and require a non-null allowed-boundary policy before the first request or any continuation/refinement. Coarse run data classifications are sticky and plan-time projected. This deliberately conservative slice can reject a safe operation; it must not silently transmit workspace or conversation content through an unapproved boundary.
+
+Destination-specific grants, single-use interactive approvals, signatures, independent sub-hashes, fine-grained taint, and OS-handle-relative path confinement remain later breadth. They do not weaken the initial rule: changed registrations and insufficient authority fail closed.
+
+## Decision 013: Orchestration Success Requires Local And Global Proof
+
+An orchestration task has no valid executable meaning without nonempty, kind-valid acceptance criteria. A graph has no valid success meaning without a nonempty global definition of done. Neither contract may be inferred from an empty list, a permissive custom evaluator, model-authored status mutation, or narrative planner output.
+
+Task acceptance is evaluated against the child outcome and host snapshot, then independently checked against the task's declared criteria. Every accepted evidence reference must resolve. After all required tasks are complete, the orchestrator evaluates the global definition of done across accepted child envelopes and current host state before reporting success.
+
+Graph changes are transactional and restricted to the mutation kinds the runtime actually implements. Planner, contract, validation, and mutation failures return structured orchestration outcomes while preserving the previous valid graph and child proof. The generic orchestration surface remains incubating until measured use establishes that this bounded contract is sufficient; implementing the proof gate does not make it a separate supported product.

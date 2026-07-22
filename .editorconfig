@@ -1,0 +1,13 @@
+root = true
+
+[*.cs]
+# Explicitly enable a small security-focused analyzer floor in addition to the
+# SDK's latest-recommended analyzer profile.
+dotnet_diagnostic.CA3001.severity = warning
+dotnet_diagnostic.CA3006.severity = warning
+dotnet_diagnostic.CA3075.severity = warning
+dotnet_diagnostic.CA5350.severity = warning
+dotnet_diagnostic.CA5351.severity = warning
+dotnet_diagnostic.CA5386.severity = warning
+dotnet_diagnostic.CA5390.severity = warning
+dotnet_diagnostic.CA5401.severity = warning

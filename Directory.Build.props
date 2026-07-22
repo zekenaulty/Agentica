@@ -1,0 +1,28 @@
+<Project>
+  <PropertyGroup>
+    <Deterministic>true</Deterministic>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <NuGetLockFilePath>$(MSBuildProjectDirectory)/Packages.lock.json</NuGetLockFilePath>
+    <!--
+      Existing API naming, localization, static-member, indexer, and concrete-type
+      performance suggestions are tracked baseline debt. Keep the recommended
+      analyzer profile enabled while allowing the release gate to focus on new
+      diagnostics and the explicitly enabled security rules in .editorconfig.
+    -->
+    <NoWarn>$(NoWarn);CA1068;CA1305;CA1720;CA1822;CA1826;CA1859;CA1861;CA1865;CA1869;CA2016</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(CI)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+</Project>

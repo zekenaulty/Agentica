@@ -2,4 +2,5 @@ namespace Agentica.Tools;
 
 public sealed record ToolRegistration(
     ToolDescriptor Descriptor,
-    ITool Tool);
+    ITool Tool,
+    ToolSecurityDeclaration Security);

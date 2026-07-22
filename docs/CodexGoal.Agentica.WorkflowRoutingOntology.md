@@ -1,5 +1,7 @@
 # Codex Goal: Agentica Workflow Routing Ontology
 
+> Lifecycle: **Draft** · Completion: **15%** · Canonical status: [Agentica Product Status And Goal Xref](Agentica.ProductStatus.md)
+
 ## Mission
 
 Define whether Agentica should create classification and routing behavior, and define the smallest generic workflow-execution ontology needed to avoid the flat tool trap without importing host vocabulary such as TurtleQuest IR, Minecraft nouns, maze pathfinding, campaign-specific routes, or UI concepts.
@@ -894,4 +896,3 @@ Agentica should record what the host exposed and what the planner chose.
 The host should prove what actually happened.
 
 The planner should not have to infer the execution layer from tool names and prose.
-

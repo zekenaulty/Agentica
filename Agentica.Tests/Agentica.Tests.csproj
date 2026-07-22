@@ -5,88 +5,99 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- Test names intentionally read as sentences. Cancellation-token migration
+         to xUnit v3's TestContext is tracked separately from the package upgrade. -->
+    <NoWarn>$(NoWarn);CA1707;xUnit1051</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="coverlet.collector" Version="10.0.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
     <PackageReference Include="Gera.Chess" Version="1.2.0" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Agentica\Agentica.csproj" />
     <ProjectReference Include="..\Agentica.Clients\Agentica.Clients.csproj" />
+    <ProjectReference Include="..\Agentica.Lab\Agentica.Lab.csproj" Aliases="AgenticaLab" />
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestCapabilitySurface.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestBoardProbe.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestCockpitEventSink.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestCockpitModels.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestContinuityCapsule.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestDeterministicPlanner.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestDisclosurePolicy.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestGameRecordStore.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestGoalSpine.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestModels.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestOpponents.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestOutcomeReporter.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestRenderer.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestSession.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestStrategy.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestStrategyProjectionRunner.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestStrategicOrchestration.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestToolIds.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessQuestTools.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\ChessRulesEngine.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\ChessQuest\IChessRulesEngine.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\CampaignAcceptance.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\CampaignGraph.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\CampaignModels.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\CampaignProgressSnapshotCompiler.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\CampaignRunner.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\CampaignWorkingContextCompiler.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\DungeonCampaignBoard.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\DungeonCampaignDeterministicPlanner.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\DungeonCampaignModels.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\DungeonCampaignSession.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\DungeonCampaignToolIds.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\Campaign\DungeonCampaignTools.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\HexQuest\HexQuestBoard.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\HexQuest\HexQuestCodec.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\HexQuest\HexQuestDeterministicPlanner.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\HexQuest\HexQuestModels.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\HexQuest\HexQuestOutcomeReporter.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\HexQuest\HexQuestSession.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\HexQuest\HexQuestToolIds.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\HexQuest\HexQuestTools.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\MazeQuest\MazePathfinder.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\MazeQuest\MazeQuestAnalyzer.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\MazeQuest\MazeQuestBoard.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\MazeQuest\MazeQuestCapabilitySurface.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\MazeQuest\MazeQuestCockpitFrame.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\MazeQuest\MazeQuestDecorators.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\MazeQuest\MazeQuestDeterministicPlanner.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\MazeQuest\MazeQuestGenerator.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\MazeQuest\MazeQuestModels.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\MazeQuest\MazeQuestOutcomeReporter.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\MazeQuest\MazeQuestRenderer.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\MazeQuest\MazeQuestSession.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\MazeQuest\MazeQuestTemplateGenerator.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\MazeQuest\MazeQuestToolIds.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\MazeQuest\MazeQuestTools.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\MazeQuest\MazeQuestUserFacingReasonProjector.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\MazeQuest\MazeQuestWatchModels.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\MazeQuest\MazeVisibility.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\Quest\QuestBoard.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\Quest\QuestDeterministicPlanner.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\Quest\QuestModels.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\Quest\QuestOutcomeReporter.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\Quest\QuestSession.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\Quest\QuestToolIds.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
-    <Compile Include="..\Agentica.CLI\Scenarios\Quest\QuestTools.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\LabSecurityPolicy.cs" Link="Fixtures\LabSecurityPolicy.cs" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\ChessQuestCapabilitySurface.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\ChessQuestBoardProbe.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\ChessQuestCockpitEventSink.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\ChessQuestCockpitModels.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\ChessQuestContinuityCapsule.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\ChessQuestDeterministicPlanner.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\ChessQuestDisclosurePolicy.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\ChessQuestGameRecordStore.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\ChessQuestGoalSpine.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\ChessQuestModels.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\ChessQuestOpponents.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\ChessQuestOutcomeReporter.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\ChessQuestRenderer.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\ChessQuestSession.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\ChessQuestStrategy.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\ChessQuestStrategyProjectionRunner.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\ChessQuestStrategicOrchestration.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\ChessQuestToolIds.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\ChessQuestTools.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\ChessRulesEngine.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\ChessQuest\IChessRulesEngine.cs" Link="Fixtures\ChessQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\Campaign\CampaignAcceptance.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\Campaign\CampaignGraph.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\Campaign\CampaignModels.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\Campaign\CampaignProgressSnapshotCompiler.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\Campaign\CampaignRunner.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\Campaign\CampaignWorkingContextCompiler.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\Campaign\DungeonCampaignBoard.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\Campaign\DungeonCampaignDeterministicPlanner.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\Campaign\DungeonCampaignModels.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\Campaign\DungeonCampaignSession.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\Campaign\DungeonCampaignToolIds.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\Campaign\DungeonCampaignTools.cs" Link="Fixtures\Campaign\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\HexQuest\HexQuestBoard.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\HexQuest\HexQuestCodec.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\HexQuest\HexQuestDeterministicPlanner.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\HexQuest\HexQuestModels.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\HexQuest\HexQuestOutcomeReporter.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\HexQuest\HexQuestSession.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\HexQuest\HexQuestToolIds.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\HexQuest\HexQuestTools.cs" Link="Fixtures\HexQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\MazeQuest\MazePathfinder.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\MazeQuest\MazeQuestAnalyzer.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\MazeQuest\MazeQuestBoard.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\MazeQuest\MazeQuestCapabilitySurface.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\MazeQuest\MazeQuestCockpitFrame.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\MazeQuest\MazeQuestDecorators.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\MazeQuest\MazeQuestDeterministicPlanner.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\MazeQuest\MazeQuestGenerator.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\MazeQuest\MazeQuestModels.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\MazeQuest\MazeQuestOutcomeReporter.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\MazeQuest\MazeQuestRenderer.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\MazeQuest\MazeQuestSession.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\MazeQuest\MazeQuestTemplateGenerator.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\MazeQuest\MazeQuestToolIds.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\MazeQuest\MazeQuestTools.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\MazeQuest\MazeQuestUserFacingReasonProjector.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\MazeQuest\MazeQuestWatchModels.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\MazeQuest\MazeVisibility.cs" Link="Fixtures\MazeQuest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\Quest\QuestBoard.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\Quest\QuestDeterministicPlanner.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\Quest\QuestModels.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\Quest\QuestOutcomeReporter.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\Quest\QuestSession.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\Quest\QuestToolIds.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
+    <Compile Include="..\Agentica.Lab\Scenarios\Quest\QuestTools.cs" Link="Fixtures\Quest\%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

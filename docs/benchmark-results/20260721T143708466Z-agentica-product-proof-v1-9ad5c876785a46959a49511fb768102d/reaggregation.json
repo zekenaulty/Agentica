@@ -1,0 +1,20 @@
+{
+  "receiptVersion": "agentica-product-proof-reaggregation-v1",
+  "reaggregatedAtUtc": "2026-07-22T00:03:41.0815065+00:00",
+  "originalManifest": {
+    "harnessVersion": "agentica-product-proof-harness-v1",
+    "matrixVersion": "agentica-product-proof-v1",
+    "cohortId": "20260721T143708466Z-agentica-product-proof-v1-9ad5c876785a46959a49511fb768102d",
+    "providerName": "Gemini",
+    "modelId": "gemini-2.5-flash",
+    "configurationId": "proof-h1-gemini-developer-api-standard-gemini25flash-t0-th0-o12288-stepwise-ip1-rp1-is1-rs1-repair2-pr3-d500-3000-c600-j0-pc8-8-wrr1s24r18c6t180-mrr2s240r240c16t900",
+    "originalPricingSnapshotId": "gemini-api-standard-pricing-2026-07-21-v1"
+  },
+  "pricingSnapshotId": "gemini-api-standard-pricing-2026-07-21-v2",
+  "pricingReviewedOn": "2026-07-21",
+  "pricingSourceUrl": "https://ai.google.dev/gemini-api/docs/pricing",
+  "runsSha256": "sha256-v1:cdc254965780f542c65cddf4e8bfb140cc5e7314b55afd06d6138cc101da9efd",
+  "runCount": 30,
+  "gatePassed": true,
+  "gateFailures": []
+}

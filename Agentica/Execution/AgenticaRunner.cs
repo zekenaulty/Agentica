@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using Agentica.Artifacts;
@@ -24,6 +25,7 @@ public sealed class AgenticaRunner
     private readonly PlanExecutionValidator _planValidator;
     private readonly PlanningRequestFactory _planningRequestFactory;
     private readonly BlockedRetryRequestFactory _blockedRetryRequestFactory;
+    private readonly BlockedRetryEvaluator _blockedRetryEvaluator;
     private readonly IUserFacingReasonProjector _userFacingReasonProjector;
 
     public AgenticaRunner(
@@ -31,39 +33,47 @@ public sealed class AgenticaRunner
         ToolCatalog toolCatalog,
         IEventSink eventSink,
         IOutcomeReporter outcomeReporter,
-        ExecutionPolicy? policy = null,
-        ICompletionEvaluator? completionEvaluator = null,
+        ExecutionPolicy? policy,
+        ICompletionEvaluator completionEvaluator,
         IPlanningFrameProjector? planningFrameProjector = null,
         IUserFacingReasonProjector? userFacingReasonProjector = null)
     {
+        ArgumentNullException.ThrowIfNull(completionEvaluator);
+
         _planner = planner;
         _toolCatalog = toolCatalog;
         _eventSink = eventSink;
         _outcomeReporter = outcomeReporter;
         _policy = policy ?? ExecutionPolicy.Default;
-        _completionEvaluator = completionEvaluator ?? PlanExhaustionCompletionEvaluator.Instance;
+        _completionEvaluator = completionEvaluator;
         _planValidator = new PlanExecutionValidator(_toolCatalog, _policy);
         _planningRequestFactory = new PlanningRequestFactory(_toolCatalog, _policy, planningFrameProjector);
         _blockedRetryRequestFactory = new BlockedRetryRequestFactory(_policy);
+        _blockedRetryEvaluator = new BlockedRetryEvaluator(_toolCatalog, _policy.EffectiveBlockedRetries);
         _userFacingReasonProjector = userFacingReasonProjector ?? DefaultUserFacingReasonProjector.Instance;
     }
 
     public async Task<OutcomeEnvelope> RunAsync(RunRequest request, CancellationToken cancellationToken = default)
     {
-        var originalRequest = request;
+        ArgumentNullException.ThrowIfNull(request);
+
+        RunRequest? originalRequest = null;
         var currentRequest = request;
         var attempts = new List<RunAttemptSummary>();
+        var attemptEnvelopes = new List<OutcomeEnvelope>();
         var attemptNumber = 1;
 
         while (true)
         {
             var envelope = await RunAttemptAsync(currentRequest, attemptNumber, cancellationToken).ConfigureAwait(false);
+            originalRequest ??= envelope.Details.Request;
             attempts.Add(RunAttemptSummary.From(attemptNumber, envelope));
+            attemptEnvelopes.Add(envelope);
 
-            if (envelope.Outcome.Status != RunOutcomeStatus.Blocked ||
-                attemptNumber > _policy.MaxBlockedRetries)
+            if (attemptNumber > _policy.MaxBlockedRetries ||
+                !_blockedRetryEvaluator.CanRetry(attemptEnvelopes))
             {
-                return AttachAttemptSummaries(envelope, attempts);
+                return AttachAttemptSummaries(envelope, attempts, attemptEnvelopes);
             }
 
             currentRequest = _blockedRetryRequestFactory.Create(originalRequest, envelope, attemptNumber + 1);
@@ -86,8 +96,24 @@ public sealed class AgenticaRunner
         }
 
         var ct = timeoutCts?.Token ?? cancellationToken;
+        Exception? requestSnapshotFailure = null;
+        try
+        {
+            request = ExecutionRecordSnapshot.Request(request);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            requestSnapshotFailure = exception;
+            request = new RunRequest(request.Objective, request.Origin);
+        }
+
         var run = new AgenticaRun(AgenticaIds.New("run"), request, attemptNumber);
+        run.ExposedBoundaries.UnionWith(_policy.EffectiveSecurityPolicy.InitialBoundaries);
+        // Every planning request contains RunRequest.Objective. Treat it as user content
+        // regardless of origin so an external planner cannot receive an unclassified prompt.
+        run.ExposedBoundaries.Add(ToolDataBoundary.UserContent);
         var toolCooldowns = new Dictionary<string, ToolCooldownState>(StringComparer.Ordinal);
+        var toolIdentityAliases = new ConcurrentDictionary<string, string>(StringComparer.Ordinal);
 
         Emit(
             run,
@@ -112,6 +138,25 @@ public sealed class AgenticaRunner
                 ["hasContext"] = request.Context is not null && request.Context.Count > 0
             });
 
+        if (requestSnapshotFailure is not null)
+        {
+            return Finish(
+                run,
+                RunOutcomeStatus.PlanInvalid,
+                StopReason.PlanInvalid,
+                validationIssues:
+                [
+                    new ValidationIssue(
+                        "request.context.snapshot.invalid",
+                        "Run context could not be safely snapshotted.")
+                ],
+                diagnostics: new ExecutionDiagnostics(
+                    "request.context.snapshot.invalid",
+                    "Run context could not be safely snapshotted.",
+                    requestSnapshotFailure.GetType().Name,
+                    "InvalidRequestContext"));
+        }
+
         if (!request.IsValid)
         {
             return Finish(
@@ -122,6 +167,15 @@ public sealed class AgenticaRunner
                 [
                     new ValidationIssue("request.objective.required", "Run objective is required.")
                 ]);
+        }
+
+        if (PlannerSecurityBlockers(run) is { Count: > 0 } initialPlannerBlockers)
+        {
+            return Finish(
+                run,
+                RunOutcomeStatus.Blocked,
+                StopReason.PlannerDataBoundaryDenied,
+                blockers: initialPlannerBlockers);
         }
 
         try
@@ -135,6 +189,7 @@ public sealed class AgenticaRunner
                 currentPlan = await _planner
                     .CreatePlanAsync(initialPlanningRequest, ct)
                     .ConfigureAwait(false);
+                currentPlan = ExecutionRecordSnapshot.Plan(currentPlan);
                 RegisterPlanToolSurface(run, currentPlan, initialPlanningRequest);
             }
             catch (OperationCanceledException exception)
@@ -173,7 +228,7 @@ public sealed class AgenticaRunner
             EmitPlanCreated(run, currentPlan);
 
             var executedSteps = new HashSet<string>(StringComparer.Ordinal);
-            var validationIssues = ValidatePlan(currentPlan, executedSteps);
+            var validationIssues = ValidatePlan(run, currentPlan, executedSteps);
             if (validationIssues.Count > 0)
             {
                 return Finish(run, RunOutcomeStatus.PlanInvalid, StopReason.PlanInvalid, validationIssues);
@@ -198,25 +253,10 @@ public sealed class AgenticaRunner
                 var nextSteps = SelectNextSteps(currentPlan, executedSteps);
                 if (nextSteps.Count == 0)
                 {
-                    var completion = _completionEvaluator.Evaluate(run);
-                    if (completion.Decision == CompletionDecision.Complete)
+                    var completion = EvaluateCompletion(run);
+                    if (FinishTerminalCompletion(run, completion) is { } terminalEnvelope)
                     {
-                        return Finish(run, RunOutcomeStatus.Succeeded, completion.StopReason, blockers: completion.Blockers);
-                    }
-
-                    if (completion.Decision == CompletionDecision.Partial)
-                    {
-                        return Finish(run, RunOutcomeStatus.PartiallyComplete, completion.StopReason, blockers: completion.Blockers);
-                    }
-
-                    if (completion.Decision == CompletionDecision.Blocked)
-                    {
-                        return Finish(run, RunOutcomeStatus.Blocked, completion.StopReason, blockers: completion.Blockers);
-                    }
-
-                    if (completion.Decision == CompletionDecision.Failed)
-                    {
-                        return Finish(run, RunOutcomeStatus.Failed, completion.StopReason, blockers: completion.Blockers);
+                        return terminalEnvelope;
                     }
 
                     if (continuationCount >= _policy.MaxPlanContinuations)
@@ -231,6 +271,15 @@ public sealed class AgenticaRunner
                     }
 
                     PlanningRequest? continuationPlanningRequest = null;
+                    if (PlannerSecurityBlockers(run) is { Count: > 0 } continuationPlannerBlockers)
+                    {
+                        return Finish(
+                            run,
+                            RunOutcomeStatus.Blocked,
+                            StopReason.PlannerDataBoundaryDenied,
+                            blockers: continuationPlannerBlockers);
+                    }
+
                     try
                     {
                         continuationPlanningRequest = CreatePlanningRequest(request, run);
@@ -242,6 +291,7 @@ public sealed class AgenticaRunner
                         currentPlan = await _planner
                             .CreatePlanAsync(continuationPlanningRequest, ct)
                             .ConfigureAwait(false);
+                        currentPlan = ExecutionRecordSnapshot.Plan(currentPlan);
                         RegisterPlanToolSurface(run, currentPlan, continuationPlanningRequest);
                     }
                     catch (OperationCanceledException exception)
@@ -281,7 +331,7 @@ public sealed class AgenticaRunner
                     run.PlanVersions.Add(currentPlan);
                     EmitPlanCreated(run, currentPlan);
 
-                    validationIssues = ValidatePlan(currentPlan, executedSteps);
+                    validationIssues = ValidatePlan(run, currentPlan, executedSteps);
                     if (validationIssues.Count > 0)
                     {
                         return Finish(run, RunOutcomeStatus.PlanInvalid, StopReason.PlanInvalid, validationIssues);
@@ -304,6 +354,7 @@ public sealed class AgenticaRunner
                     currentPlan,
                     nextSteps,
                     toolCooldowns,
+                    toolIdentityAliases,
                     ct).ConfigureAwait(false);
 
                 foreach (var executionResult in executionResults)
@@ -314,7 +365,8 @@ public sealed class AgenticaRunner
                         executionResult.Step,
                         executionResult.Result,
                         executionResult.DurationMs,
-                        executionResult.Diagnostics);
+                        executionResult.Diagnostics,
+                        executionResult.ExposedBoundaries);
                 }
 
                 var waitingResult = executionResults.FirstOrDefault(item =>
@@ -329,7 +381,7 @@ public sealed class AgenticaRunner
                 }
 
                 var failedResult = executionResults.FirstOrDefault(item =>
-                    item.Result.Receipt.Status is ReceiptStatus.Failed or ReceiptStatus.TimedOut or ReceiptStatus.Cancelled);
+                    item.Result.Receipt.Status is ReceiptStatus.Failed);
                 if (failedResult is not null)
                 {
                     return Finish(
@@ -339,25 +391,38 @@ public sealed class AgenticaRunner
                         diagnostics: failedResult.Diagnostics ?? DiagnosticsFromReceipt(failedResult.Result.Receipt));
                 }
 
+                var cancelledResult = executionResults.FirstOrDefault(item =>
+                    item.Result.Receipt.Status is ReceiptStatus.Cancelled or ReceiptStatus.TimedOut);
+                if (cancelledResult is not null)
+                {
+                    var timedOut = cancelledResult.Result.Receipt.Status == ReceiptStatus.TimedOut ||
+                        (ct.IsCancellationRequested && !cancellationToken.IsCancellationRequested);
+                    return Finish(
+                        run,
+                        RunOutcomeStatus.Cancelled,
+                        timedOut ? StopReason.Timeout : StopReason.Cancelled,
+                        blockers: [cancelledResult.Result.Receipt.Message],
+                        diagnostics: cancelledResult.Diagnostics ?? DiagnosticsFromReceipt(cancelledResult.Result.Receipt));
+                }
+
+                var incompleteResult = executionResults.FirstOrDefault(item =>
+                    item.Result.Receipt.Status is ReceiptStatus.Accepted or ReceiptStatus.Partial);
+                if (incompleteResult is not null)
+                {
+                    return Finish(
+                        run,
+                        RunOutcomeStatus.PartiallyComplete,
+                        StopReason.Partial,
+                        blockers: [incompleteResult.Result.Receipt.Message],
+                        diagnostics: incompleteResult.Diagnostics);
+                }
+
                 if (_policy.EvaluateCompletionAfterEachBatch)
                 {
-                    var postExecutionCompletion = _completionEvaluator.Evaluate(run);
-                    if (postExecutionCompletion.Decision == CompletionDecision.Complete)
+                    var postExecutionCompletion = EvaluateCompletion(run);
+                    if (FinishTerminalCompletion(run, postExecutionCompletion) is { } terminalEnvelope)
                     {
-                        return Finish(
-                            run,
-                            RunOutcomeStatus.Succeeded,
-                            postExecutionCompletion.StopReason,
-                            blockers: postExecutionCompletion.Blockers);
-                    }
-
-                    if (postExecutionCompletion.Decision == CompletionDecision.Failed)
-                    {
-                        return Finish(
-                            run,
-                            RunOutcomeStatus.Failed,
-                            postExecutionCompletion.StopReason,
-                            blockers: postExecutionCompletion.Blockers);
+                        return terminalEnvelope;
                     }
                 }
 
@@ -377,6 +442,15 @@ public sealed class AgenticaRunner
 
                     WorkflowPlan refinedPlan;
                     PlanningRequest? refinementPlanningRequest = null;
+                    if (PlannerSecurityBlockers(run) is { Count: > 0 } refinementPlannerBlockers)
+                    {
+                        return Finish(
+                            run,
+                            RunOutcomeStatus.Blocked,
+                            StopReason.PlannerDataBoundaryDenied,
+                            blockers: refinementPlannerBlockers);
+                    }
+
                     try
                     {
                         refinementPlanningRequest = CreatePlanningRequest(request, run);
@@ -395,6 +469,7 @@ public sealed class AgenticaRunner
                         refinedPlan = await _planner
                             .RefinePlanAsync(refinementPlanningRequest, observation, ct)
                             .ConfigureAwait(false);
+                        refinedPlan = ExecutionRecordSnapshot.Plan(refinedPlan);
                         RegisterPlanToolSurface(run, refinedPlan, refinementPlanningRequest);
                     }
                     catch (OperationCanceledException exception)
@@ -482,7 +557,7 @@ public sealed class AgenticaRunner
                                 .ToArray()
                         });
 
-                    validationIssues = ValidatePlan(currentPlan, executedSteps);
+                    validationIssues = ValidatePlan(run, currentPlan, executedSteps);
                     if (validationIssues.Count > 0)
                     {
                         return Finish(run, RunOutcomeStatus.PlanInvalid, StopReason.PlanInvalid, validationIssues);
@@ -498,7 +573,9 @@ public sealed class AgenticaRunner
                     return Finish(
                         run,
                         RunOutcomeStatus.Blocked,
-                        StopReason.ToolUnavailable,
+                        blockedResult.Result.Receipt.Status == ReceiptStatus.Refused
+                            ? StopReason.ToolRefused
+                            : StopReason.ToolUnavailable,
                         blockers: [blockedResult.Result.Receipt.Message]);
                 }
             }
@@ -516,10 +593,111 @@ public sealed class AgenticaRunner
     public IReadOnlyList<ValidationIssue> ValidatePlan(WorkflowPlan plan) =>
         _planValidator.Validate(plan);
 
+    private CompletionEvaluation EvaluateCompletion(AgenticaRun run)
+    {
+        try
+        {
+            var context = CompletionContext.From(run);
+            var evaluated = _completionEvaluator.Evaluate(context);
+            var completion = evaluated is null
+                ? null
+                : evaluated with
+                {
+                    Blockers = Array.AsReadOnly(evaluated.Blockers?.ToArray() ?? []),
+                    EvidenceRefs = Array.AsReadOnly(evaluated.EvidenceRefs?
+                        .Select(reference => reference is null ? null! : reference with { })
+                        .ToArray() ?? [])
+                };
+            if (completion is null ||
+                !Enum.IsDefined(completion.Decision) ||
+                !Enum.IsDefined(completion.StopReason) ||
+                completion.Blockers is null ||
+                completion.Blockers.Any(blocker => blocker is null) ||
+                completion.EvidenceRefs is null ||
+                completion.EvidenceRefs.Any(reference => !EvidenceResolves(context, reference)))
+            {
+                return CompletionEvaluation.Failed(
+                    StopReason.CompletionEvaluationFailed,
+                    "Completion policy returned an invalid evaluation.");
+            }
+
+            return completion;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return CompletionEvaluation.Failed(
+                StopReason.CompletionEvaluationFailed,
+                $"Completion policy failed: {exception.GetType().Name}.");
+        }
+    }
+
+    private OutcomeEnvelope? FinishTerminalCompletion(
+        AgenticaRun run,
+        CompletionEvaluation completion) =>
+        completion.Decision switch
+        {
+            CompletionDecision.Complete => Finish(
+                run,
+                RunOutcomeStatus.Succeeded,
+                completion.StopReason,
+                blockers: completion.Blockers,
+                completionEvidence: completion.EvidenceRefs),
+            CompletionDecision.Partial => Finish(
+                run,
+                RunOutcomeStatus.PartiallyComplete,
+                completion.StopReason,
+                blockers: completion.Blockers,
+                completionEvidence: completion.EvidenceRefs),
+            CompletionDecision.Blocked => Finish(
+                run,
+                RunOutcomeStatus.Blocked,
+                completion.StopReason,
+                blockers: completion.Blockers,
+                completionEvidence: completion.EvidenceRefs),
+            CompletionDecision.Failed => Finish(
+                run,
+                RunOutcomeStatus.Failed,
+                completion.StopReason,
+                blockers: completion.Blockers,
+                completionEvidence: completion.EvidenceRefs),
+            CompletionDecision.Continue => null,
+            _ => Finish(
+                run,
+                RunOutcomeStatus.Failed,
+                StopReason.CompletionEvaluationFailed,
+                blockers: ["Completion policy returned an undefined decision."])
+        };
+
+    private static bool EvidenceResolves(CompletionContext context, EvidenceRef? reference)
+    {
+        if (reference is null ||
+            string.IsNullOrWhiteSpace(reference.Kind) ||
+            string.IsNullOrWhiteSpace(reference.RefId))
+        {
+            return false;
+        }
+
+        return reference.Kind switch
+        {
+            "receipt" => context.Receipts.Any(item =>
+                string.Equals(item.ReceiptId, reference.RefId, StringComparison.Ordinal)),
+            "observation" => context.Observations.Any(item =>
+                string.Equals(item.ObservationId, reference.RefId, StringComparison.Ordinal)),
+            "artifact" => context.Artifacts.Any(item =>
+                string.Equals(item.ArtifactId, reference.RefId, StringComparison.Ordinal)),
+            _ => false
+        };
+    }
+
     private IReadOnlyList<ValidationIssue> ValidatePlan(
+        AgenticaRun run,
         WorkflowPlan plan,
         IReadOnlySet<string> completedStepIds) =>
-        _planValidator.Validate(plan, completedStepIds);
+        _planValidator.Validate(
+            plan,
+            completedStepIds,
+            run.ExposedBoundaries,
+            ToolManifestHashFor(run, plan) ?? string.Empty);
 
     private IReadOnlyList<PlanStep> SelectNextSteps(
         WorkflowPlan plan,
@@ -573,9 +751,11 @@ public sealed class AgenticaRunner
         WorkflowPlan plan,
         IReadOnlyList<PlanStep> steps,
         Dictionary<string, ToolCooldownState> toolCooldowns,
+        ConcurrentDictionary<string, string> toolIdentityAliases,
         CancellationToken cancellationToken)
     {
         var toolSurfaceId = ToolSurfaceIdFor(run, plan);
+        var manifestHash = ToolManifestHashFor(run, plan);
         if (steps.Count == 1)
         {
             var step = steps[0];
@@ -588,7 +768,16 @@ public sealed class AgenticaRunner
                 intent: IntentFor(step),
                 payload: StepPayload(step));
 
-            return [await ExecuteStepAsync(run, step, toolCooldowns, cancellationToken).ConfigureAwait(false)];
+            return
+            [
+                await ExecuteStepAsync(
+                    run,
+                    step,
+                    manifestHash,
+                    toolCooldowns,
+                    toolIdentityAliases,
+                    cancellationToken).ConfigureAwait(false)
+            ];
         }
 
         var batchId = steps[0].BatchId ?? AgenticaIds.New("batch");
@@ -618,7 +807,13 @@ public sealed class AgenticaRunner
         }
 
         var tasks = steps
-            .Select(step => ExecuteStepAsync(run, step, toolCooldowns, cancellationToken))
+            .Select(step => ExecuteStepAsync(
+                run,
+                step,
+                manifestHash,
+                toolCooldowns,
+                toolIdentityAliases,
+                cancellationToken))
             .ToArray();
         var results = await Task.WhenAll(tasks).ConfigureAwait(false);
         var completedAt = DateTimeOffset.UtcNow;
@@ -648,32 +843,119 @@ public sealed class AgenticaRunner
     private async Task<StepExecutionResult> ExecuteStepAsync(
         AgenticaRun run,
         PlanStep step,
+        string? expectedManifestHash,
         Dictionary<string, ToolCooldownState> toolCooldowns,
+        ConcurrentDictionary<string, string> toolIdentityAliases,
         CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
-        var registration = _toolCatalog.Resolve(step.ToolId);
-        if (registration is null)
+        if (string.IsNullOrWhiteSpace(expectedManifestHash))
         {
-            stopwatch.Stop();
-            return new StepExecutionResult(
+            return CreateSecurityRefusal(
                 step,
-                new ToolResult(new Receipt(
-                    AgenticaIds.New("receipt"),
-                    step.StepId,
-                    step.ToolId,
-                    ReceiptStatus.Unavailable,
-                    $"Unknown tool '{step.ToolId}'.",
-                    DateTimeOffset.UtcNow,
-                    new Dictionary<string, object?>())),
-                new ExecutionDiagnostics(
-                    "tool.unknown",
-                    $"Unknown tool '{step.ToolId}'.",
-                    FailureKind: ReceiptStatus.Unavailable.ToString()),
-                stopwatch.ElapsedMilliseconds);
+                stopwatch,
+                "tool.security.manifest_unpinned",
+                "Tool dispatch was refused because the plan is not pinned to a compiled manifest.");
         }
 
-        if (TryCreateCooldownResultOrReserve(run, step, registration.Descriptor, toolCooldowns) is { } cooldownResult)
+        CompiledToolManifest currentManifest;
+        try
+        {
+            currentManifest = _toolCatalog.CompileCurrentManifest();
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return CreateSecurityRefusal(
+                step,
+                stopwatch,
+                "tool.security.registration_invalid",
+                $"Tool dispatch was refused because the current registration surface is invalid: {exception.Message}",
+                exception.GetType().Name);
+        }
+
+        if (!string.Equals(currentManifest.ManifestHash, expectedManifestHash, StringComparison.Ordinal))
+        {
+            return CreateSecurityRefusal(
+                step,
+                stopwatch,
+                "tool.security.manifest_changed",
+                "Tool dispatch was refused because the compiled registration manifest changed after planning.",
+                data: new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["expectedManifestHash"] = expectedManifestHash,
+                    ["currentManifestHash"] = currentManifest.ManifestHash
+                });
+        }
+
+        var registration = currentManifest.Resolve(step.ToolId);
+        if (registration is null)
+        {
+            return CreateSecurityRefusal(
+                step,
+                stopwatch,
+                "tool.security.tool_missing",
+                $"Tool dispatch was refused because '{step.ToolId}' is absent from the checked manifest.");
+        }
+
+        var descriptor = registration.PlannerProjection;
+        var security = registration.Security;
+        if (descriptor.Kind != step.Kind || security.Effect != step.Effect)
+        {
+            return CreateSecurityRefusal(
+                step,
+                stopwatch,
+                "tool.security.plan_registration_mismatch",
+                "Tool dispatch was refused because the planned kind/effect does not match the checked registration.");
+        }
+
+        if (!_policy.EffectiveEffectPolicy.Allows(security.Effect))
+        {
+            return CreateSecurityRefusal(
+                step,
+                stopwatch,
+                "tool.security.effect_not_allowed",
+                $"Tool dispatch was refused because effect '{security.Effect}' is not allowed by policy.");
+        }
+
+        var plannerBoundaryViolations = ToolSecurityEvaluator.PlannerBoundaryViolations(
+            _policy.EffectiveSecurityPolicy,
+            security.ExposesToPlanner);
+        if (plannerBoundaryViolations.Count > 0)
+        {
+            return CreateSecurityRefusal(
+                step,
+                stopwatch,
+                "tool.security.planner_boundary_not_allowed",
+                "Tool dispatch was refused because its result would taint a later external-planner call with " +
+                $"disallowed boundaries: {string.Join(", ", plannerBoundaryViolations)}.");
+        }
+
+        var grant = ToolSecurityEvaluator.EvaluateDispatch(
+            _policy.EffectiveSecurityPolicy,
+            expectedManifestHash,
+            registration,
+            run.ExposedBoundaries,
+            DateTimeOffset.UtcNow);
+        if (!grant.Allowed)
+        {
+            return CreateSecurityRefusal(
+                step,
+                stopwatch,
+                grant.Code ?? "tool.security.grant_required",
+                grant.Message ?? $"Tool '{step.ToolId}' is not authorized for dispatch.");
+        }
+
+        var inputIssues = ToolInputValidator.Validate(step, descriptor.InputSchema);
+        if (inputIssues.Count > 0)
+        {
+            return CreateSecurityRefusal(
+                step,
+                stopwatch,
+                "tool.security.input_invalid_at_dispatch",
+                "Tool dispatch was refused because input no longer validates against the checked registration.");
+        }
+
+        if (TryCreateCooldownResultOrReserve(run, step, descriptor, toolCooldowns) is { } cooldownResult)
         {
             stopwatch.Stop();
             return new StepExecutionResult(
@@ -688,17 +970,56 @@ public sealed class AgenticaRunner
 
         try
         {
-            var result = await registration.Tool.ExecuteAsync(
-                new ToolInvocation(run.RunId, step.StepId, step.ToolId, step.Input),
+            var invocation = new ToolInvocation(
+                run.RunId,
+                step.StepId,
+                step.ToolId,
+                ToolResultNormalizer.RestoreSourceIdentities(step.Input, toolIdentityAliases));
+            var rawResult = await registration.Tool.ExecuteAsync(
+                invocation,
                 cancellationToken).ConfigureAwait(false);
-            UpdateCooldownReceipt(step, registration.Descriptor, result.Receipt, toolCooldowns);
-            ResetCooldownsAfterMutation(registration.Descriptor, result, toolCooldowns);
+            var normalization = ToolResultNormalizer.Normalize(invocation, rawResult);
+            var result = normalization.Result;
+            foreach (var alias in normalization.IdentityAliases)
+            {
+                toolIdentityAliases[alias.Key] = alias.Value;
+            }
+
+            UpdateCooldownReceipt(step, descriptor, result.Receipt, toolCooldowns);
+            ResetCooldownsAfterMutation(descriptor, result, toolCooldowns);
             stopwatch.Stop();
-            return new StepExecutionResult(step, result, null, stopwatch.ElapsedMilliseconds);
+            return new StepExecutionResult(
+                step,
+                result,
+                normalization.Diagnostics,
+                stopwatch.ElapsedMilliseconds,
+                security.ExposesToPlanner);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException exception)
         {
-            throw;
+            var receipt = new Receipt(
+                AgenticaIds.New("receipt"),
+                step.StepId,
+                step.ToolId,
+                ReceiptStatus.Cancelled,
+                $"Tool '{step.ToolId}' was cancelled after dispatch.",
+                DateTimeOffset.UtcNow,
+                new Dictionary<string, object?>
+                {
+                    ["errorClass"] = exception.GetType().Name,
+                    ["cancellationRequested"] = cancellationToken.IsCancellationRequested
+                });
+            stopwatch.Stop();
+            return new StepExecutionResult(
+                step,
+                new ToolResult(receipt),
+                new ExecutionDiagnostics(
+                    "tool.execution.cancelled",
+                    receipt.Message,
+                    exception.GetType().Name,
+                    ReceiptStatus.Cancelled.ToString()),
+                stopwatch.ElapsedMilliseconds,
+                security.ExposesToPlanner);
         }
         catch (Exception exception)
         {
@@ -713,7 +1034,7 @@ public sealed class AgenticaRunner
                 {
                     ["errorClass"] = exception.GetType().Name
                 });
-            UpdateCooldownReceipt(step, registration.Descriptor, receipt, toolCooldowns);
+            UpdateCooldownReceipt(step, descriptor, receipt, toolCooldowns);
             stopwatch.Stop();
             return new StepExecutionResult(
                 step,
@@ -723,8 +1044,45 @@ public sealed class AgenticaRunner
                     $"Tool '{step.ToolId}' failed: {exception.Message}",
                     exception.GetType().Name,
                     ReceiptStatus.Failed.ToString()),
-                stopwatch.ElapsedMilliseconds);
+                stopwatch.ElapsedMilliseconds,
+                security.ExposesToPlanner);
         }
+    }
+
+    private static StepExecutionResult CreateSecurityRefusal(
+        PlanStep step,
+        Stopwatch stopwatch,
+        string code,
+        string message,
+        string? errorClass = null,
+        IReadOnlyDictionary<string, object?>? data = null)
+    {
+        stopwatch.Stop();
+        var receiptData = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["securityCode"] = code
+        };
+        if (data is not null)
+        {
+            foreach (var item in data)
+            {
+                receiptData[item.Key] = item.Value;
+            }
+        }
+
+        var receipt = new Receipt(
+            AgenticaIds.New("receipt"),
+            step.StepId,
+            step.ToolId,
+            ReceiptStatus.Refused,
+            message,
+            DateTimeOffset.UtcNow,
+            receiptData);
+        return new StepExecutionResult(
+            step,
+            new ToolResult(receipt),
+            new ExecutionDiagnostics(code, message, errorClass, ReceiptStatus.Refused.ToString()),
+            stopwatch.ElapsedMilliseconds);
     }
 
     private static ToolResult? TryCreateCooldownResultOrReserve(
@@ -973,10 +1331,15 @@ public sealed class AgenticaRunner
         PlanStep step,
         ToolResult result,
         long durationMs,
-        ExecutionDiagnostics? diagnostics)
+        ExecutionDiagnostics? diagnostics,
+        IReadOnlySet<ToolDataBoundary>? exposedBoundaries)
     {
         run.CompletedSteps.Add(step.StepId);
         run.Receipts.Add(result.Receipt);
+        if (exposedBoundaries is not null)
+        {
+            run.ExposedBoundaries.UnionWith(exposedBoundaries);
+        }
 
         if (result.Observation is not null)
         {
@@ -1061,9 +1424,14 @@ public sealed class AgenticaRunner
 
     private OutcomeEnvelope AttachAttemptSummaries(
         OutcomeEnvelope envelope,
-        IReadOnlyList<RunAttemptSummary> attempts) =>
+        IReadOnlyList<RunAttemptSummary> attempts,
+        IReadOnlyList<OutcomeEnvelope> attemptEnvelopes) =>
         envelope with
         {
+            PriorAttempts = attemptEnvelopes
+                .Take(Math.Max(0, attemptEnvelopes.Count - 1))
+                .Select(attempt => attempt with { PriorAttempts = [] })
+                .ToArray(),
             Details = envelope.Details with
             {
                 RunAttempts = attempts.ToArray()
@@ -1076,19 +1444,50 @@ public sealed class AgenticaRunner
         StopReason stopReason,
         IReadOnlyList<ValidationIssue>? validationIssues = null,
         IReadOnlyList<string>? blockers = null,
-        ExecutionDiagnostics? diagnostics = null)
+        ExecutionDiagnostics? diagnostics = null,
+        IReadOnlyList<EvidenceRef>? completionEvidence = null)
     {
-        validationIssues ??= [];
-        blockers ??= [];
+        validationIssues = Array.AsReadOnly((validationIssues ?? [])
+            .Select(issue => issue with { })
+            .ToArray());
+        blockers = Array.AsReadOnly((blockers ?? []).ToArray());
         run.Status = status;
 
-        var completionEvidence = run.Receipts
-            .Where(receipt => receipt.Status == ReceiptStatus.Succeeded)
-            .Select(receipt => new EvidenceRef("receipt", receipt.ReceiptId))
-            .Concat(run.Artifacts.Select(artifact => new EvidenceRef("artifact", artifact.ArtifactId)))
-            .ToArray();
+        completionEvidence = Array.AsReadOnly((completionEvidence ?? [])
+            .Select(reference => reference with { })
+            .ToArray());
 
-        var report = _outcomeReporter.BuildReport(run, status, stopReason, validationIssues, blockers);
+        OutcomeReport report;
+        ExecutionDiagnostics? reportDiagnostics = null;
+        try
+        {
+            var reportingRun = ExecutionRecordSnapshot.ReportingRun(run);
+            var rawReport = _outcomeReporter.BuildReport(
+                reportingRun,
+                status,
+                stopReason,
+                validationIssues,
+                blockers) ?? throw new InvalidOperationException("Outcome reporter returned no report.");
+            report = ExecutionRecordSnapshot.Report(rawReport);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            reportDiagnostics = new ExecutionDiagnostics(
+                "outcome.reporter.failed",
+                "Outcome reporter failed; the runtime emitted a canonical fallback report.",
+                exception.GetType().Name,
+                "OutcomeReportingFailure");
+            report = new OutcomeReport(
+                AgenticaIds.New("report"),
+                $"The run stopped with status {status}. Stop reason: {stopReason}. The configured outcome reporter failed.",
+                [
+                    new ReportClaim(
+                        "The runtime preserved the outcome after the configured reporter failed.",
+                        [new EvidenceRef("stopReason", stopReason.ToString())])
+                ]);
+        }
+
+        var effectiveDiagnostics = diagnostics ?? reportDiagnostics;
         var outcomeEvidence = completionEvidence
             .Concat(validationIssues.Select(issue => new EvidenceRef("validationIssue", issue.Code)))
             .ToArray();
@@ -1117,7 +1516,7 @@ public sealed class AgenticaRunner
                     })
                     .ToArray()
             },
-            diagnostics: diagnostics ?? DiagnosticsFrom(validationIssues));
+            diagnostics: effectiveDiagnostics ?? DiagnosticsFrom(validationIssues));
 
         Emit(
             run,
@@ -1135,7 +1534,7 @@ public sealed class AgenticaRunner
                 ["receiptCount"] = run.Receipts.Count,
                 ["artifactCount"] = run.Artifacts.Count
             },
-            diagnostics: diagnostics ?? DiagnosticsFrom(validationIssues));
+            diagnostics: effectiveDiagnostics ?? DiagnosticsFrom(validationIssues));
 
         var continuityCompiler = new ContinuityLedgerCompiler();
         var breadcrumbs = continuityCompiler.CompileBreadcrumbLedger(run);
@@ -1163,17 +1562,18 @@ public sealed class AgenticaRunner
             Report: report,
             Receipts: new ReceiptEnvelope(run.Receipts.ToArray()),
             Details: new DetailEnvelope(
-                Request: run.Request,
+                Request: ExecutionRecordSnapshot.Request(run.Request),
                 PlanVersions: run.PlanVersions.ToArray(),
                 PlanRefinements: run.PlanRefinements.ToArray(),
                 Observations: run.Observations.ToArray(),
                 Artifacts: run.Artifacts.ToArray(),
                 Batches: run.Batches.ToArray(),
-                Events: run.Events.ToArray(),
+                Events: run.Events.ToList().AsReadOnly(),
                 ValidationIssues: validationIssues)
             {
                 ToolSurfaces = run.ToolSurfaces.ToArray(),
                 PlanningFrames = run.PlanningFrames.ToArray(),
+                EventDeliveryFailure = run.EventDeliveryFailure,
                 Breadcrumbs = breadcrumbs,
                 Divergences = divergences,
                 Continuity = continuity
@@ -1429,36 +1829,95 @@ public sealed class AgenticaRunner
         IReadOnlyDictionary<string, object?>? payload = null,
         ExecutionDiagnostics? diagnostics = null)
     {
-        var eventData = data.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
-        var eventPayload = payload ?? new Dictionary<string, object?>(StringComparer.Ordinal);
         var eventType = type.WireName();
-        var userFacingReason = _userFacingReasonProjector.Project(new UserFacingReasonProjectionRequest(
-            EventType: eventType,
-            Source: source,
-            Context: context,
-            Intent: intent,
-            Data: eventData,
-            Payload: eventPayload,
-            Diagnostics: diagnostics));
-
-        var executionEvent = new ExecutionEvent(
-            EventId: AgenticaIds.New("event"),
-            Type: eventType,
-            At: DateTimeOffset.UtcNow,
-            Data: eventData)
+        var eventId = AgenticaIds.New("event");
+        var eventAt = DateTimeOffset.UtcNow;
+        var eventSequence = run.NextEventSequence();
+        ExecutionEvent executionEvent;
+        try
         {
-            Sequence = run.NextEventSequence(),
-            Source = source,
-            Context = context,
-            Intent = intent,
-            UserFacingReason = userFacingReason,
-            EvidenceRefs = evidenceRefs ?? [],
-            Payload = eventPayload,
-            Diagnostics = diagnostics
-        };
+            var eventData = ExecutionEventSnapshot.Data(
+                data.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal));
+            var eventPayload = ExecutionEventSnapshot.Payload(
+                payload ?? new Dictionary<string, object?>(StringComparer.Ordinal));
+            UserFacingReason? userFacingReason;
+            try
+            {
+                userFacingReason = ExecutionEventSnapshot.Reason(
+                    _userFacingReasonProjector.Project(new UserFacingReasonProjectionRequest(
+                        EventType: eventType,
+                        Source: source,
+                        Context: ExecutionEventSnapshot.Context(context),
+                        Intent: ExecutionEventSnapshot.Intent(intent),
+                        Data: ExecutionEventSnapshot.Data(eventData),
+                        Payload: ExecutionEventSnapshot.Payload(eventPayload),
+                        Diagnostics: ExecutionEventSnapshot.Diagnostics(diagnostics))));
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                userFacingReason = null;
+                diagnostics ??= new ExecutionDiagnostics(
+                    "event.reason_projection.failed",
+                    "User-facing event reason projection failed; the canonical event was preserved.",
+                    exception.GetType().Name,
+                    "EventProjectionFailure");
+            }
 
-        run.Events.Add(executionEvent);
-        _eventSink.Emit(executionEvent);
+            executionEvent = ExecutionEventSnapshot.Create(
+                eventId,
+                eventType,
+                eventAt,
+                eventSequence,
+                source,
+                context,
+                intent,
+                userFacingReason,
+                eventData,
+                evidenceRefs ?? [],
+                eventPayload,
+                diagnostics);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            executionEvent = ExecutionEventSnapshot.CreateFailure(
+                eventId,
+                eventType,
+                eventAt,
+                eventSequence,
+                source,
+                context,
+                evidenceRefs,
+                diagnostics,
+                exception);
+        }
+
+        lock (run.EventDeliveryGate)
+        {
+            // The run ledger is authoritative. Sink delivery is best-effort and cannot
+            // invalidate business state or evidence that has already been recorded.
+            run.AddEvent(executionEvent);
+
+            if (run.EventDeliveryFailure is not null)
+            {
+                return;
+            }
+
+            try
+            {
+                _eventSink.Emit(ExecutionEventSnapshot.Clone(executionEvent));
+            }
+            catch (Exception exception)
+            {
+                run.EventDeliveryFailure = new EventDeliveryFailure(
+                    EventId: executionEvent.EventId,
+                    EventType: executionEvent.Type,
+                    EventSequence: executionEvent.Sequence,
+                    SinkType: _eventSink.GetType().FullName ?? _eventSink.GetType().Name,
+                    ExceptionType: exception.GetType().FullName ?? exception.GetType().Name,
+                    Message: "Event delivery failed.",
+                    FailedAt: DateTimeOffset.UtcNow);
+            }
+        }
     }
 
     private PlanningRequest CreatePlanningRequest(RunRequest request, AgenticaRun run)
@@ -1466,12 +1925,36 @@ public sealed class AgenticaRunner
         var planningRequest = _planningRequestFactory.Create(request, run);
         if (planningRequest.ToolSurface is { } toolSurface)
         {
-            run.ToolSurfaces.Add(toolSurface);
+            run.ToolSurfaces.Add(ExecutionRecordSnapshot.ToolSurface(toolSurface));
         }
 
-        run.PlanningFrames.AddRange(planningRequest.ContextFrames);
+        run.PlanningFrames.AddRange(
+            planningRequest.ContextFrames.Select(ExecutionRecordSnapshot.PlanningFrame));
 
         return planningRequest;
+    }
+
+    private IReadOnlyList<string> PlannerSecurityBlockers(AgenticaRun run)
+    {
+        var securityPolicy = _policy.EffectiveSecurityPolicy;
+        if (_planner is IExternalWorkflowPlanner && !securityPolicy.UsesExternalPlanner)
+        {
+            return
+            [
+                "The planner declares an external trust boundary, but no explicit external-planner boundary policy is configured."
+            ];
+        }
+
+        var violations = ToolSecurityEvaluator.PlannerBoundaryViolations(
+            securityPolicy,
+            run.ExposedBoundaries);
+        return violations.Count == 0
+            ? []
+            :
+            [
+                "Planner dispatch was denied because sticky run data exceeds the external-planner boundary policy: " +
+                $"{string.Join(", ", violations)}."
+            ];
     }
 
     private static void RegisterPlanToolSurface(
@@ -1482,12 +1965,18 @@ public sealed class AgenticaRunner
         if (planningRequest.ToolSurface is { } toolSurface)
         {
             run.PlanToolSurfaceIds[plan.PlanId] = toolSurface.SurfaceId;
+            run.PlanToolManifestHashes[plan.PlanId] = toolSurface.ManifestHash;
         }
     }
 
     private static string? ToolSurfaceIdFor(AgenticaRun run, WorkflowPlan plan) =>
         run.PlanToolSurfaceIds.TryGetValue(plan.PlanId, out var toolSurfaceId)
             ? toolSurfaceId
+            : null;
+
+    private static string? ToolManifestHashFor(AgenticaRun run, WorkflowPlan plan) =>
+        run.PlanToolManifestHashes.TryGetValue(plan.PlanId, out var manifestHash)
+            ? manifestHash
             : null;
 
     private static ExecutionEventContext Context(
@@ -1677,5 +2166,6 @@ public sealed class AgenticaRunner
         PlanStep Step,
         ToolResult Result,
         ExecutionDiagnostics? Diagnostics,
-        long DurationMs);
+        long DurationMs,
+        IReadOnlySet<ToolDataBoundary>? ExposedBoundaries = null);
 }

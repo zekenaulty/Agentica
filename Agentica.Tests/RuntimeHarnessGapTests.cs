@@ -15,7 +15,7 @@ public sealed class RuntimeHarnessGapTests
     public async Task Tool_input_schema_rejects_missing_required_input_before_execution()
     {
         var tool = new CountingTool();
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor(
                 "maze.move",
                 "Maze Move",
@@ -39,7 +39,7 @@ public sealed class RuntimeHarnessGapTests
     public async Task Tool_input_schema_rejects_invalid_enum_extra_input_and_range_before_execution()
     {
         var tool = new CountingTool();
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor(
                 "maze.sense_objective",
                 "Maze Sense Objective",
@@ -73,7 +73,7 @@ public sealed class RuntimeHarnessGapTests
     public async Task Default_effect_policy_rejects_destructive_tool_effect_before_execution()
     {
         var tool = new CountingTool();
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("maze.burn_gate", "Burn Gate", ToolKind.Action, ToolEffect.Destructive),
             tool));
         var runner = CreateRunner(new StaticPlanner(Plan(Step(
@@ -90,9 +90,81 @@ public sealed class RuntimeHarnessGapTests
     }
 
     [Fact]
+    public async Task Approval_required_tool_is_default_denied_even_when_its_effect_is_allowed()
+    {
+        var tool = new CountingTool();
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
+            new ToolDescriptor(
+                "workspace.image.generate",
+                "Generate Workspace Image",
+                ToolKind.Action,
+                ToolEffect.ExternalSideEffect,
+                RequiresApproval: true),
+            tool));
+        var runner = CreateRunner(
+            new StaticPlanner(Plan(Step(
+                "step_001",
+                "workspace.image.generate",
+                ToolKind.Action,
+                ToolEffect.ExternalSideEffect))),
+            catalog,
+            policy: new ExecutionPolicy(
+                MaxSteps: 4,
+                MaxRefinements: 0,
+                PlanningMode: PlanningMode.PlanOnly,
+                EffectPolicy: ToolEffectPolicy.AllowKnown));
+
+        var envelope = await runner.RunAsync(Request());
+
+        Assert.Equal(RunOutcomeStatus.PlanInvalid, envelope.Outcome.Status);
+        Assert.Contains(envelope.Details.ValidationIssues, issue => issue.Code == "tool.security.grant_required");
+        Assert.Equal(0, tool.ExecutionCount);
+        Assert.Empty(envelope.Receipts.Items);
+    }
+
+    [Fact]
+    public async Task Default_effect_policy_rejects_external_side_effect_before_execution()
+    {
+        var tool = new CountingTool();
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
+            new ToolDescriptor(
+                "workspace.image.generate",
+                "Generate Workspace Image",
+                ToolKind.Action,
+                ToolEffect.ExternalSideEffect),
+            tool));
+        var runner = CreateRunner(
+            new StaticPlanner(Plan(Step(
+                "step_001",
+                "workspace.image.generate",
+                ToolKind.Action,
+                ToolEffect.ExternalSideEffect))),
+            catalog);
+
+        var envelope = await runner.RunAsync(Request());
+
+        Assert.Equal(RunOutcomeStatus.PlanInvalid, envelope.Outcome.Status);
+        Assert.Contains(envelope.Details.ValidationIssues, issue => issue.Code == "plan.step.effect_not_allowed");
+        Assert.Equal(0, tool.ExecutionCount);
+        Assert.Empty(envelope.Receipts.Items);
+    }
+
+    [Fact]
+    public void Tool_manifest_compilation_rejects_unknown_tool_effect_before_planning()
+    {
+        var tool = new CountingTool();
+        var exception = Assert.Throws<ArgumentException>(() => ToolCatalog.Create(TestToolRegistration.Create(
+            new ToolDescriptor("maze.unknown", "Maze Unknown", ToolKind.Action, ToolEffect.Unknown),
+            tool)));
+
+        Assert.Contains("Effect cannot be Unknown", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, tool.ExecutionCount);
+    }
+
+    [Fact]
     public async Task Completion_evidence_gate_blocks_plan_exhaustion_without_required_artifact()
     {
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("maze.move", "Maze Move", ToolKind.Action, ToolEffect.WritesLocalState),
             new CountingTool()));
         var runner = CreateRunner(
@@ -113,10 +185,10 @@ public sealed class RuntimeHarnessGapTests
     {
         var planner = new ContinuationPlanner();
         var catalog = ToolCatalog.Create(
-            new ToolRegistration(
+            TestToolRegistration.Create(
                 new ToolDescriptor("maze.scan", "Maze Scan", ToolKind.Action, ToolEffect.WritesLocalState),
                 new ObservationTool()),
-            new ToolRegistration(
+            TestToolRegistration.Create(
                 new ToolDescriptor("maze.complete_objective", "Maze Complete Objective", ToolKind.Action, ToolEffect.WritesLocalState),
                 new ArtifactTool("maze.objective_completed")));
         var runner = CreateRunner(
@@ -147,10 +219,10 @@ public sealed class RuntimeHarnessGapTests
         var blockedTool = new CountingBlockedTool("Initial blocker.");
         var completeTool = new ArtifactTool("maze.objective_completed");
         var catalog = ToolCatalog.Create(
-            new ToolRegistration(
+            TestToolRegistration.Create(
                 new ToolDescriptor("maze.probe", "Maze Probe", ToolKind.Query, ToolEffect.ReadOnly),
                 blockedTool),
-            new ToolRegistration(
+            TestToolRegistration.Create(
                 new ToolDescriptor("maze.complete_objective", "Maze Complete Objective", ToolKind.Action, ToolEffect.WritesLocalState),
                 completeTool));
         var runner = CreateRunner(
@@ -183,7 +255,7 @@ public sealed class RuntimeHarnessGapTests
     {
         var planner = new AlwaysProbePlanner();
         var blockedTool = new SequenceBlockedTool("First blocker.", "Second blocker.", "Third blocker.");
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("maze.probe", "Maze Probe", ToolKind.Query, ToolEffect.ReadOnly),
             blockedTool));
         var runner = CreateRunner(planner, catalog);
@@ -207,10 +279,10 @@ public sealed class RuntimeHarnessGapTests
     {
         var gate = new BatchGate(expectedCount: 2);
         var catalog = ToolCatalog.Create(
-            new ToolRegistration(
+            TestToolRegistration.Create(
                 new ToolDescriptor("workbench.check_a", "Check A", ToolKind.Query, ToolEffect.ReadOnly),
                 new GateTool(gate)),
-            new ToolRegistration(
+            TestToolRegistration.Create(
                 new ToolDescriptor("workbench.check_b", "Check B", ToolKind.Query, ToolEffect.ReadOnly),
                 new GateTool(gate)));
         var runner = CreateRunner(
@@ -236,7 +308,7 @@ public sealed class RuntimeHarnessGapTests
     public async Task Plan_validation_rejects_unknown_and_forward_dependencies()
     {
         var tool = new CountingTool();
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("workbench.read", "Workbench Read", ToolKind.Query, ToolEffect.ReadOnly),
             tool));
         var runner = CreateRunner(
@@ -258,7 +330,7 @@ public sealed class RuntimeHarnessGapTests
     public async Task Plan_validation_rejects_mutation_steps_inside_batches()
     {
         var tool = new CountingTool();
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("workbench.patch", "Workbench Patch", ToolKind.Action, ToolEffect.WritesLocalState),
             tool));
         var runner = CreateRunner(
@@ -277,7 +349,7 @@ public sealed class RuntimeHarnessGapTests
     public async Task Plan_validation_rejects_batches_that_exceed_parallelism()
     {
         var tool = new CountingTool();
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("workbench.read", "Workbench Read", ToolKind.Query, ToolEffect.ReadOnly),
             tool));
         var runner = CreateRunner(
@@ -298,7 +370,7 @@ public sealed class RuntimeHarnessGapTests
     public async Task Plan_validation_rejects_batch_internal_dependencies()
     {
         var tool = new CountingTool();
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("workbench.read", "Workbench Read", ToolKind.Query, ToolEffect.ReadOnly),
             tool));
         var runner = CreateRunner(
@@ -322,7 +394,7 @@ public sealed class RuntimeHarnessGapTests
     public async Task Tool_cooldown_refuses_repeated_tool_before_plan_step_cooldown_expires()
     {
         var tool = new CountingTool();
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor(
                 "workbench.read",
                 "Workbench Read",
@@ -361,7 +433,7 @@ public sealed class RuntimeHarnessGapTests
         var cooledTool = new CountingTool();
         var otherTool = new CountingTool();
         var catalog = ToolCatalog.Create(
-            new ToolRegistration(
+            TestToolRegistration.Create(
                 new ToolDescriptor(
                     "workbench.read",
                     "Workbench Read",
@@ -369,7 +441,7 @@ public sealed class RuntimeHarnessGapTests
                     ToolEffect.ReadOnly,
                     Cooldown: new ToolCooldownPolicy(PlanStepCount: 1)),
                 cooledTool),
-            new ToolRegistration(
+            TestToolRegistration.Create(
                 new ToolDescriptor("workbench.other", "Workbench Other", ToolKind.Query, ToolEffect.ReadOnly),
                 otherTool));
         var runner = CreateRunner(
@@ -395,7 +467,7 @@ public sealed class RuntimeHarnessGapTests
     public async Task Tool_cooldown_scope_can_include_selected_input_keys()
     {
         var tool = new CountingTool();
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor(
                 "workbench.lookup",
                 "Workbench Lookup",
@@ -431,7 +503,7 @@ public sealed class RuntimeHarnessGapTests
         var queryTool = new CountingTool();
         var actionTool = new CountingTool();
         var catalog = ToolCatalog.Create(
-            new ToolRegistration(
+            TestToolRegistration.Create(
                 new ToolDescriptor(
                     "workbench.read",
                     "Workbench Read",
@@ -441,7 +513,7 @@ public sealed class RuntimeHarnessGapTests
                         PlanStepCount: 5,
                         ResetOnMutation: true)),
                 queryTool),
-            new ToolRegistration(
+            TestToolRegistration.Create(
                 new ToolDescriptor("workbench.write", "Workbench Write", ToolKind.Action, ToolEffect.WritesLocalState),
                 actionTool));
         var runner = CreateRunner(
@@ -467,7 +539,7 @@ public sealed class RuntimeHarnessGapTests
     public async Task Tool_cooldown_refuses_duplicate_scope_inside_parallel_batch()
     {
         var tool = new CountingTool();
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor(
                 "workbench.read",
                 "Workbench Read",
@@ -505,10 +577,10 @@ public sealed class RuntimeHarnessGapTests
                 DependsOn = ["step_001"]
             }));
         var catalog = ToolCatalog.Create(
-            new ToolRegistration(
+            TestToolRegistration.Create(
                 new ToolDescriptor("hexquest.validate_patch", "HexQuest Validate Patch", ToolKind.Query, ToolEffect.ReadOnly),
                 new ObservationTool()),
-            new ToolRegistration(
+            TestToolRegistration.Create(
                 new ToolDescriptor("hexquest.commit_patch", "HexQuest Commit Patch", ToolKind.Action, ToolEffect.WritesLocalState),
                 new ArtifactTool("hexquest.objective_completed")));
         var runner = CreateRunner(
@@ -535,10 +607,10 @@ public sealed class RuntimeHarnessGapTests
                 DependsOn = ["step_missing"]
             }));
         var catalog = ToolCatalog.Create(
-            new ToolRegistration(
+            TestToolRegistration.Create(
                 new ToolDescriptor("hexquest.validate_patch", "HexQuest Validate Patch", ToolKind.Query, ToolEffect.ReadOnly),
                 new ObservationTool()),
-            new ToolRegistration(
+            TestToolRegistration.Create(
                 new ToolDescriptor("hexquest.commit_patch", "HexQuest Commit Patch", ToolKind.Action, ToolEffect.WritesLocalState),
                 commitTool));
         var runner = CreateRunner(
@@ -560,10 +632,10 @@ public sealed class RuntimeHarnessGapTests
         var planner = new DependencyRefinementPlanner(_ => Plan(
             Step("step_001", "hexquest.commit_patch", ToolKind.Action, ToolEffect.WritesLocalState)));
         var catalog = ToolCatalog.Create(
-            new ToolRegistration(
+            TestToolRegistration.Create(
                 new ToolDescriptor("hexquest.validate_patch", "HexQuest Validate Patch", ToolKind.Query, ToolEffect.ReadOnly),
                 new ObservationTool()),
-            new ToolRegistration(
+            TestToolRegistration.Create(
                 new ToolDescriptor("hexquest.commit_patch", "HexQuest Commit Patch", ToolKind.Action, ToolEffect.WritesLocalState),
                 commitTool));
         var runner = CreateRunner(
@@ -592,7 +664,7 @@ public sealed class RuntimeHarnessGapTests
             new InMemoryEventSink(),
             new DeterministicOutcomeReporter(),
             policy ?? new ExecutionPolicy(MaxSteps: 10, MaxRefinements: 2),
-            completionEvaluator);
+            completionEvaluator ?? PlanExhaustionCompletionEvaluator.Instance);
 
     private static WorkflowPlan Plan(params PlanStep[] steps) =>
         new($"plan_{Guid.NewGuid():N}", 1, steps, "Runtime harness gap test plan.");

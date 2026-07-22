@@ -8,8 +8,6 @@ public enum TaskGraphMutationKind
     AddDependency,
     RemoveDependency,
     ReorderPriority,
-    MarkTaskBlocked,
-    MarkTaskAccepted,
     ReviseAcceptanceCriteria,
     ReviseDefinitionOfDone
 }

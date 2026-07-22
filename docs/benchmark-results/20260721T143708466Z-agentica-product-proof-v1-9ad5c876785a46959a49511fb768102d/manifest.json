@@ -1,0 +1,502 @@
+{
+  "harnessVersion": "agentica-product-proof-harness-v1",
+  "startedAtUtc": "2026-07-21T14:37:08.4667185+00:00",
+  "matrix": {
+    "version": "agentica-product-proof-v1",
+    "cases": [
+      {
+        "caseId": "agentica-product-proof-v1/workbench/broken_check",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "broken_check",
+        "parameters": {
+          "scenario": "broken_check",
+          "suite": "workbench"
+        }
+      },
+      {
+        "caseId": "agentica-product-proof-v1/workbench/missing_mapping",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "missing_mapping",
+        "parameters": {
+          "scenario": "missing_mapping",
+          "suite": "workbench"
+        }
+      },
+      {
+        "caseId": "agentica-product-proof-v1/workbench/structured_doc_merge",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "structured_doc_merge",
+        "parameters": {
+          "scenario": "structured_doc_merge",
+          "suite": "workbench"
+        }
+      },
+      {
+        "caseId": "agentica-product-proof-v1/workbench/word_ladder",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "word_ladder",
+        "parameters": {
+          "scenario": "word_ladder",
+          "suite": "workbench"
+        }
+      },
+      {
+        "caseId": "agentica-product-proof-v1/workbench/release_gate",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "release_gate",
+        "parameters": {
+          "scenario": "release_gate",
+          "suite": "workbench"
+        }
+      },
+      {
+        "caseId": "agentica-product-proof-v1/maze/unlock-seed173-7x7-visibility2",
+        "suite": "GeneralizationHoldout",
+        "scenarioId": "unlock",
+        "parameters": {
+          "questType": "unlock",
+          "seed": "173",
+          "width": "7",
+          "height": "7",
+          "visibility": "2",
+          "suite": "maze"
+        }
+      }
+    ],
+    "runs": [
+      {
+        "runId": "agentica-product-proof-v1/workbench/broken_check/run-01",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/broken_check",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "broken_check",
+        "repetition": 1,
+        "parameters": {
+          "scenario": "broken_check",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/broken_check/run-02",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/broken_check",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "broken_check",
+        "repetition": 2,
+        "parameters": {
+          "scenario": "broken_check",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/broken_check/run-03",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/broken_check",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "broken_check",
+        "repetition": 3,
+        "parameters": {
+          "scenario": "broken_check",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/broken_check/run-04",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/broken_check",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "broken_check",
+        "repetition": 4,
+        "parameters": {
+          "scenario": "broken_check",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/broken_check/run-05",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/broken_check",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "broken_check",
+        "repetition": 5,
+        "parameters": {
+          "scenario": "broken_check",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/missing_mapping/run-01",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/missing_mapping",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "missing_mapping",
+        "repetition": 1,
+        "parameters": {
+          "scenario": "missing_mapping",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/missing_mapping/run-02",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/missing_mapping",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "missing_mapping",
+        "repetition": 2,
+        "parameters": {
+          "scenario": "missing_mapping",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/missing_mapping/run-03",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/missing_mapping",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "missing_mapping",
+        "repetition": 3,
+        "parameters": {
+          "scenario": "missing_mapping",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/missing_mapping/run-04",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/missing_mapping",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "missing_mapping",
+        "repetition": 4,
+        "parameters": {
+          "scenario": "missing_mapping",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/missing_mapping/run-05",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/missing_mapping",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "missing_mapping",
+        "repetition": 5,
+        "parameters": {
+          "scenario": "missing_mapping",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/structured_doc_merge/run-01",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/structured_doc_merge",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "structured_doc_merge",
+        "repetition": 1,
+        "parameters": {
+          "scenario": "structured_doc_merge",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/structured_doc_merge/run-02",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/structured_doc_merge",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "structured_doc_merge",
+        "repetition": 2,
+        "parameters": {
+          "scenario": "structured_doc_merge",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/structured_doc_merge/run-03",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/structured_doc_merge",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "structured_doc_merge",
+        "repetition": 3,
+        "parameters": {
+          "scenario": "structured_doc_merge",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/structured_doc_merge/run-04",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/structured_doc_merge",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "structured_doc_merge",
+        "repetition": 4,
+        "parameters": {
+          "scenario": "structured_doc_merge",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/structured_doc_merge/run-05",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/structured_doc_merge",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "structured_doc_merge",
+        "repetition": 5,
+        "parameters": {
+          "scenario": "structured_doc_merge",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/word_ladder/run-01",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/word_ladder",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "word_ladder",
+        "repetition": 1,
+        "parameters": {
+          "scenario": "word_ladder",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/word_ladder/run-02",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/word_ladder",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "word_ladder",
+        "repetition": 2,
+        "parameters": {
+          "scenario": "word_ladder",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/word_ladder/run-03",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/word_ladder",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "word_ladder",
+        "repetition": 3,
+        "parameters": {
+          "scenario": "word_ladder",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/word_ladder/run-04",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/word_ladder",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "word_ladder",
+        "repetition": 4,
+        "parameters": {
+          "scenario": "word_ladder",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/word_ladder/run-05",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/word_ladder",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "word_ladder",
+        "repetition": 5,
+        "parameters": {
+          "scenario": "word_ladder",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/release_gate/run-01",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/release_gate",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "release_gate",
+        "repetition": 1,
+        "parameters": {
+          "scenario": "release_gate",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/release_gate/run-02",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/release_gate",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "release_gate",
+        "repetition": 2,
+        "parameters": {
+          "scenario": "release_gate",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/release_gate/run-03",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/release_gate",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "release_gate",
+        "repetition": 3,
+        "parameters": {
+          "scenario": "release_gate",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/release_gate/run-04",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/release_gate",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "release_gate",
+        "repetition": 4,
+        "parameters": {
+          "scenario": "release_gate",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/workbench/release_gate/run-05",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/workbench/release_gate",
+        "suite": "PrimaryWorkbench",
+        "scenarioId": "release_gate",
+        "repetition": 5,
+        "parameters": {
+          "scenario": "release_gate",
+          "suite": "workbench"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/maze/unlock-seed173-7x7-visibility2/run-01",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/maze/unlock-seed173-7x7-visibility2",
+        "suite": "GeneralizationHoldout",
+        "scenarioId": "unlock",
+        "repetition": 1,
+        "parameters": {
+          "questType": "unlock",
+          "seed": "173",
+          "width": "7",
+          "height": "7",
+          "visibility": "2",
+          "suite": "maze"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/maze/unlock-seed173-7x7-visibility2/run-02",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/maze/unlock-seed173-7x7-visibility2",
+        "suite": "GeneralizationHoldout",
+        "scenarioId": "unlock",
+        "repetition": 2,
+        "parameters": {
+          "questType": "unlock",
+          "seed": "173",
+          "width": "7",
+          "height": "7",
+          "visibility": "2",
+          "suite": "maze"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/maze/unlock-seed173-7x7-visibility2/run-03",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/maze/unlock-seed173-7x7-visibility2",
+        "suite": "GeneralizationHoldout",
+        "scenarioId": "unlock",
+        "repetition": 3,
+        "parameters": {
+          "questType": "unlock",
+          "seed": "173",
+          "width": "7",
+          "height": "7",
+          "visibility": "2",
+          "suite": "maze"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/maze/unlock-seed173-7x7-visibility2/run-04",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/maze/unlock-seed173-7x7-visibility2",
+        "suite": "GeneralizationHoldout",
+        "scenarioId": "unlock",
+        "repetition": 4,
+        "parameters": {
+          "questType": "unlock",
+          "seed": "173",
+          "width": "7",
+          "height": "7",
+          "visibility": "2",
+          "suite": "maze"
+        }
+      },
+      {
+        "runId": "agentica-product-proof-v1/maze/unlock-seed173-7x7-visibility2/run-05",
+        "matrixVersion": "agentica-product-proof-v1",
+        "caseId": "agentica-product-proof-v1/maze/unlock-seed173-7x7-visibility2",
+        "suite": "GeneralizationHoldout",
+        "scenarioId": "unlock",
+        "repetition": 5,
+        "parameters": {
+          "questType": "unlock",
+          "seed": "173",
+          "width": "7",
+          "height": "7",
+          "visibility": "2",
+          "suite": "maze"
+        }
+      }
+    ]
+  },
+  "cohort": {
+    "cohortId": "20260721T143708466Z-agentica-product-proof-v1-9ad5c876785a46959a49511fb768102d",
+    "matrixVersion": "agentica-product-proof-v1",
+    "providerName": "Gemini",
+    "modelId": "gemini-2.5-flash",
+    "configurationId": "proof-h1-gemini-developer-api-standard-gemini25flash-t0-th0-o12288-stepwise-ip1-rp1-is1-rs1-repair2-pr3-d500-3000-c600-j0-pc8-8-wrr1s24r18c6t180-mrr2s240r240c16t900"
+  },
+  "configuration": {
+    "harnessVersion": "agentica-product-proof-harness-v1",
+    "configurationId": "proof-h1-gemini-developer-api-standard-gemini25flash-t0-th0-o12288-stepwise-ip1-rp1-is1-rs1-repair2-pr3-d500-3000-c600-j0-pc8-8-wrr1s24r18c6t180-mrr2s240r240c16t900",
+    "providerName": "Gemini",
+    "apiSurface": "Gemini Developer API Standard",
+    "modelId": "gemini-2.5-flash",
+    "temperature": 0,
+    "thinkingBudgetTokens": 0,
+    "maxOutputTokens": 12288,
+    "planningMode": "Stepwise",
+    "initialPromptVersion": "workflow-plan-initial-prompt-v1",
+    "refinementPromptVersion": "workflow-plan-refinement-prompt-v1",
+    "initialSchemaVersion": "workflow-plan-initial-schema-v1",
+    "refinementSchemaVersion": "workflow-plan-refinement-schema-v1",
+    "plannerRepairAttempts": 2,
+    "providerMaxAttempts": 3,
+    "providerRetryBaseDelayMilliseconds": 500,
+    "providerRetryMaxDelayMilliseconds": 3000,
+    "providerCallTimeoutSeconds": 600,
+    "providerRetryJitter": false,
+    "planningContextRecentObservations": 8,
+    "planningContextRecentReceipts": 8,
+    "workbenchMaxBlockedRetries": 1,
+    "workbenchMaxSteps": 24,
+    "workbenchMaxRefinements": 18,
+    "workbenchMaxPlanContinuations": 6,
+    "workbenchTimeoutSeconds": 180,
+    "mazeMaxBlockedRetries": 2,
+    "mazeMaxSteps": 240,
+    "mazeMaxRefinements": 240,
+    "mazeMaxPlanContinuations": 16,
+    "mazeTimeoutSeconds": 900,
+    "pricingSnapshotId": "gemini-api-standard-pricing-2026-07-21-v1"
+  },
+  "pricing": {
+    "snapshotId": "gemini-api-standard-pricing-2026-07-21-v1",
+    "reviewedOn": "2026-07-21",
+    "sourceUrl": "https://ai.google.dev/gemini-api/docs/pricing",
+    "models": [
+      {
+        "modelId": "gemini-2.5-flash",
+        "inputUsdPerMillionTokens": 0.30,
+        "outputUsdPerMillionTokens": 2.50
+      }
+    ]
+  }
+}

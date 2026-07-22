@@ -4,5 +4,29 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <PackageId>Agentica</PackageId>
+    <Version>0.1.0-research.1</Version>
+    <Title>Agentica Runtime (Research Preview)</Title>
+    <Authors>Zeke / Zythis</Authors>
+    <Copyright>Copyright (c) 2026 Zeke / Zythis</Copyright>
+    <Description>Internal source-available research preview of the Agentica bounded agentic workflow runtime. This is not a supported public package.</Description>
+    <PackageTags>agentic;workflow;runtime;research-preview;source-available</PackageTags>
+    <PackageProjectUrl>https://github.com/zekenaulty/Agentica</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/zekenaulty/Agentica.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+    <PackageReleaseNotes>Internal research-preview artifact; not licensed or supported for third-party reuse.</PackageReleaseNotes>
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\LICENSE" Pack="true" PackagePath="\" />
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 </Project>

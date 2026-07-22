@@ -14,11 +14,17 @@ public sealed record ExecutionPolicy(
     int MaxBatchSize = 8,
     int MaxParallelism = 8,
     bool AllowReadOnlyParallelBatches = true,
-    bool EvaluateCompletionAfterEachBatch = false)
+    bool EvaluateCompletionAfterEachBatch = false,
+    BlockedRetryPolicy? BlockedRetries = null,
+    ToolSecurityPolicy? SecurityPolicy = null)
 {
     public static ExecutionPolicy Default { get; } = new();
 
     public ToolEffectPolicy EffectiveEffectPolicy => EffectPolicy ?? ToolEffectPolicy.LocalOnly;
 
     public PlanningContextOptions EffectivePlanningContext => PlanningContext ?? PlanningContextOptions.FullHistory;
+
+    public BlockedRetryPolicy EffectiveBlockedRetries => BlockedRetries ?? BlockedRetryPolicy.Default;
+
+    public ToolSecurityPolicy EffectiveSecurityPolicy => SecurityPolicy ?? ToolSecurityPolicy.Local;
 }

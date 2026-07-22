@@ -71,7 +71,7 @@ public sealed class PlanningModeTests
         var envelope = await runner.RunAsync(new RunRequest("Plan only planning mode test"));
 
         Assert.Equal(RunOutcomeStatus.Blocked, envelope.Outcome.Status);
-        Assert.Equal(StopReason.ToolUnavailable, envelope.Outcome.StopReason);
+        Assert.Equal(StopReason.ToolRefused, envelope.Outcome.StopReason);
         Assert.Equal(0, planner.RefinementCount);
         Assert.Empty(envelope.Details.PlanRefinements);
     }
@@ -85,14 +85,15 @@ public sealed class PlanningModeTests
             catalog,
             new InMemoryEventSink(),
             new DeterministicOutcomeReporter(),
-            new ExecutionPolicy(MaxSteps: 10, MaxRefinements: 5, PlanningMode: planningMode));
+            new ExecutionPolicy(MaxSteps: 10, MaxRefinements: 5, PlanningMode: planningMode),
+            PlanExhaustionCompletionEvaluator.Instance);
 
     private static ToolRegistration Register(
         string toolId,
         ToolKind kind,
         ToolEffect effect,
         ITool tool) =>
-        new(new ToolDescriptor(toolId, toolId, kind, effect), tool);
+        TestToolRegistration.Create(new ToolDescriptor(toolId, toolId, kind, effect), tool);
 
     private static WorkflowPlan Plan(string planId, int version, params PlanStep[] steps) =>
         new(planId, version, steps, "Planning mode test plan.");

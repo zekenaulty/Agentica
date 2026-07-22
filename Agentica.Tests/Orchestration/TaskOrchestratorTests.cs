@@ -5,8 +5,10 @@ using Agentica.Orchestration.Context;
 using Agentica.Orchestration.Execution;
 using Agentica.Orchestration.Planning;
 using Agentica.Outcomes;
+using Agentica.Planning;
 using Agentica.Requests;
 using Agentica.Tools;
+using System.Text.Json;
 
 namespace Agentica.Orchestration.Tests;
 
@@ -45,6 +47,431 @@ public sealed class TaskOrchestratorTests
 
         Assert.Throws<TaskGraphValidationException>(() => TaskGraphValidator.Validate(cyclic));
         Assert.Throws<TaskGraphValidationException>(() => TaskGraphValidator.Validate(dangling));
+    }
+
+    [Fact]
+    public void Graph_validator_requires_nonempty_semantically_valid_acceptance_and_definition_of_done()
+    {
+        var emptyAcceptance = Plan([Task("empty") with { AcceptanceRequirements = [] }]);
+        var nullOutcomeStatus = Plan(
+        [
+            Task("invalid") with
+            {
+                AcceptanceRequirements =
+                [
+                    new TaskAcceptanceRequirement(TaskAcceptanceRequirementKind.OutcomeStatus)
+                ]
+            }
+        ]);
+        var emptyDefinitionOfDone = Plan([Task("valid")]) with { DefinitionOfDone = [] };
+
+        Assert.Throws<TaskGraphValidationException>(() => TaskGraphValidator.Validate(emptyAcceptance));
+        Assert.Throws<TaskGraphValidationException>(() => TaskGraphValidator.Validate(nullOutcomeStatus));
+        Assert.Throws<TaskGraphValidationException>(() => TaskGraphValidator.Validate(emptyDefinitionOfDone));
+    }
+
+    [Fact]
+    public async Task Failed_child_with_empty_acceptance_is_never_accepted()
+    {
+        var task = Task("failed") with { AcceptanceRequirements = [] };
+        var state = new OrchestrationState(
+            "orchestration_test",
+            new WorkContextSnapshot("test", null, [], [], [], [], [], [], [], new Dictionary<string, object?>(), DateTimeOffset.UtcNow));
+
+        var result = await new EvidenceTaskAcceptanceEvaluator().EvaluateAsync(
+            task,
+            Envelope("run_failed", RunOutcomeStatus.Failed),
+            new TaskAcceptanceContext(Plan([Task("declared")]), state, state.WorkingContext, new Dictionary<string, object?>()));
+
+        Assert.NotEqual(TaskAcceptanceStatus.Accepted, result.Status);
+        Assert.Contains(result.Reasons, reason => reason.Contains("at least one requirement", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Orchestrator_enforces_declared_acceptance_against_a_permissive_custom_evaluator()
+    {
+        var task = Task("failed");
+        var planner = new ScriptedTaskPlanner(Plan([task]));
+        var executor = new ScriptedRunExecutor([Envelope("run_failed", RunOutcomeStatus.Failed)]);
+        var evaluator = new ScriptedAcceptanceEvaluator(_ =>
+            new TaskAcceptanceResult(
+                TaskAcceptanceStatus.Accepted,
+                [],
+                [new EvidenceRef("artifact", "artifact_run_failed")]));
+
+        var outcome = await CreateOrchestrator(planner, executor, evaluator)
+            .RunAsync(Request("Do not accept a failed child."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.ChildRunFailed, outcome.StopReason);
+        Assert.Empty(outcome.State.CompletedTaskIds);
+        Assert.Single(outcome.RunOutcomes);
+    }
+
+    [Fact]
+    public async Task Orchestrator_rejects_unresolved_acceptance_evidence()
+    {
+        var task = Task("forged");
+        var planner = new ScriptedTaskPlanner(Plan([task]));
+        var executor = new ScriptedRunExecutor([Envelope("run_forged", RunOutcomeStatus.Succeeded)]);
+        var evaluator = new ScriptedAcceptanceEvaluator(_ =>
+            new TaskAcceptanceResult(
+                TaskAcceptanceStatus.Accepted,
+                [],
+                [new EvidenceRef("artifact", "artifact_that_does_not_exist")]));
+
+        var outcome = await CreateOrchestrator(planner, executor, evaluator)
+            .RunAsync(Request("Reject forged proof."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Empty(outcome.State.CompletedTaskIds);
+        Assert.Contains(outcome.WorkingContext.KnownBlockers, reason =>
+            reason.Contains("does not resolve", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Child_claimed_completion_and_nested_evidence_do_not_make_forged_refs_self_resolving()
+    {
+        var task = Task("forged_edges");
+        var child = Envelope("run_forged_edges", RunOutcomeStatus.Succeeded);
+        var completionForgery = new EvidenceRef("artifact", "forged_completion_artifact");
+        var nestedForgery = new EvidenceRef("receipt", "forged_nested_receipt");
+        child = child with
+        {
+            Outcome = child.Outcome with { CompletionEvidence = [completionForgery] },
+            Details = child.Details with
+            {
+                Artifacts =
+                [
+                    child.Details.Artifacts[0] with { Evidence = [nestedForgery] }
+                ]
+            }
+        };
+        var evaluator = new ScriptedAcceptanceEvaluator(_ =>
+            new TaskAcceptanceResult(
+                TaskAcceptanceStatus.Accepted,
+                [],
+                [completionForgery, nestedForgery]));
+        var orchestrator = CreateOrchestrator(
+            new ScriptedTaskPlanner(Plan([task])),
+            new ScriptedRunExecutor([child]),
+            evaluator);
+
+        var outcome = await orchestrator.RunAsync(Request("Reject self-attested proof edges."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Empty(outcome.State.CompletedTaskIds);
+        Assert.Contains(outcome.WorkingContext.KnownBlockers, reason =>
+            reason.Contains("forged_completion_artifact", StringComparison.Ordinal));
+        Assert.Contains(outcome.WorkingContext.KnownBlockers, reason =>
+            reason.Contains("forged_nested_receipt", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Orchestrator_blocks_when_required_tasks_complete_but_definition_of_done_is_unmet()
+    {
+        var task = Task("work");
+        var plan = Plan([task]) with
+        {
+            DefinitionOfDone =
+            [
+                new TaskAcceptanceRequirement(TaskAcceptanceRequirementKind.Artifact, ArtifactKind: "missing.proof")
+            ]
+        };
+        var orchestrator = CreateOrchestrator(
+            new ScriptedTaskPlanner(plan),
+            new ScriptedRunExecutor([Envelope("run_work", RunOutcomeStatus.Succeeded)]),
+            new EvidenceTaskAcceptanceEvaluator());
+
+        var outcome = await orchestrator.RunAsync(Request("Require global proof."));
+
+        Assert.Equal(OrchestrationStatus.Blocked, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.DefinitionOfDoneNotSatisfied, outcome.StopReason);
+        Assert.NotNull(outcome.DefinitionOfDone);
+        Assert.False(outcome.DefinitionOfDone.Satisfied);
+        Assert.Contains(outcome.DefinitionOfDone.Reasons, reason => reason.Contains("missing.proof", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Orchestrator_succeeds_only_with_resolved_definition_of_done_evidence()
+    {
+        var task = Task("work");
+        var plan = Plan([task]) with
+        {
+            DefinitionOfDone =
+            [
+                new TaskAcceptanceRequirement(TaskAcceptanceRequirementKind.Artifact, ArtifactKind: "test.artifact")
+            ]
+        };
+        var orchestrator = CreateOrchestrator(
+            new ScriptedTaskPlanner(plan),
+            new ScriptedRunExecutor([Envelope("run_work", RunOutcomeStatus.Succeeded)]),
+            new EvidenceTaskAcceptanceEvaluator());
+
+        var outcome = await orchestrator.RunAsync(Request("Require global proof."));
+
+        Assert.Equal(OrchestrationStatus.Succeeded, outcome.Status);
+        Assert.True(outcome.DefinitionOfDone?.Satisfied);
+        Assert.Contains(outcome.DefinitionOfDone!.EvidenceRefs, evidence =>
+            evidence == new EvidenceRef("artifact", "artifact_run_work"));
+        Assert.Contains(outcome.EvidenceRefs, evidence =>
+            evidence == new EvidenceRef("artifact", "artifact_run_work"));
+    }
+
+    [Fact]
+    public async Task Orchestrator_rejects_duplicate_child_run_ids_and_preserves_both_outcomes()
+    {
+        var task = Task("work", maxRuns: 2);
+        var plan = Plan([task]) with
+        {
+            DefinitionOfDone =
+            [
+                new TaskAcceptanceRequirement(TaskAcceptanceRequirementKind.Artifact, ArtifactKind: "test.artifact")
+            ]
+        };
+        var refinement = Refinement(new TaskGraphMutation(
+            TaskGraphMutationKind.ReorderPriority,
+            task.TaskId,
+            Priority: 2));
+        var first = Envelope("run_reused", RunOutcomeStatus.Succeeded);
+        var secondWithEvidence = Envelope("run_reused", RunOutcomeStatus.Succeeded);
+        var second = secondWithEvidence with
+        {
+            Details = secondWithEvidence.Details with { Artifacts = [] }
+        };
+        var evaluations = 0;
+        var evaluator = new ScriptedAcceptanceEvaluator(_ =>
+            ++evaluations == 1
+                ? new TaskAcceptanceResult(
+                    TaskAcceptanceStatus.PartiallyAccepted,
+                    ["The first child result is not acceptable."],
+                    [])
+                : new TaskAcceptanceResult(
+                    TaskAcceptanceStatus.Accepted,
+                    [],
+                    [new EvidenceRef("run", "run_reused")]));
+        var orchestrator = CreateOrchestrator(
+            new ScriptedTaskPlanner(plan, [refinement]),
+            new ScriptedRunExecutor([first, second]),
+            evaluator);
+
+        var outcome = await orchestrator.RunAsync(Request("Reject ambiguous child proof."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.ChildRunFailed, outcome.StopReason);
+        Assert.Null(outcome.State.ActiveTaskId);
+        Assert.Empty(outcome.State.CompletedTaskIds);
+        Assert.Equal(2, outcome.RunOutcomes.Count);
+        Assert.Same(first, outcome.RunOutcomes[0]);
+        Assert.Same(second, outcome.RunOutcomes[1]);
+        Assert.Equal(1, evaluations);
+        Assert.Contains(outcome.Diagnostics, diagnostic =>
+            diagnostic.Contains("reused run id 'run_reused'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Orchestrator_rejects_empty_child_run_id_and_preserves_the_outcome()
+    {
+        var child = Envelope(string.Empty, RunOutcomeStatus.Succeeded);
+        var orchestrator = CreateOrchestrator(
+            new ScriptedTaskPlanner(Plan([Task("work")])),
+            new ScriptedRunExecutor([child]),
+            new EvidenceTaskAcceptanceEvaluator());
+
+        var outcome = await orchestrator.RunAsync(Request("Reject empty child identity."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.ChildRunFailed, outcome.StopReason);
+        Assert.Single(outcome.RunOutcomes);
+        Assert.Same(child, outcome.RunOutcomes[0]);
+        Assert.Contains(outcome.Diagnostics, diagnostic =>
+            diagnostic.Contains("empty run id", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Orchestrator_rejects_run_id_reused_across_nested_prior_attempt_trees()
+    {
+        var task = Task("work", maxRuns: 2);
+        var plan = Plan([task]);
+        var refinement = Refinement(new TaskGraphMutation(
+            TaskGraphMutationKind.ReorderPriority,
+            task.TaskId,
+            Priority: 2));
+        var firstPrior = Envelope("run_first_prior", RunOutcomeStatus.Succeeded) with
+        {
+            PriorAttempts = [Envelope("run_shared", RunOutcomeStatus.Succeeded)]
+        };
+        var first = Envelope("run_first", RunOutcomeStatus.Succeeded) with
+        {
+            PriorAttempts = [firstPrior]
+        };
+        var secondPrior = Envelope("run_second_prior", RunOutcomeStatus.Succeeded) with
+        {
+            PriorAttempts = [Envelope("run_shared", RunOutcomeStatus.Succeeded)]
+        };
+        var second = Envelope("run_second", RunOutcomeStatus.Succeeded) with
+        {
+            PriorAttempts = [secondPrior]
+        };
+        var evaluations = 0;
+        var evaluator = new ScriptedAcceptanceEvaluator(_ =>
+        {
+            evaluations++;
+            return new TaskAcceptanceResult(
+                TaskAcceptanceStatus.PartiallyAccepted,
+                ["The child result requires another run."],
+                []);
+        });
+        var orchestrator = CreateOrchestrator(
+            new ScriptedTaskPlanner(plan, [refinement]),
+            new ScriptedRunExecutor([first, second]),
+            evaluator);
+
+        var outcome = await orchestrator.RunAsync(Request("Reject ambiguous retry proof."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.ChildRunFailed, outcome.StopReason);
+        Assert.Null(outcome.State.ActiveTaskId);
+        Assert.Empty(outcome.State.CompletedTaskIds);
+        Assert.Equal(2, outcome.RunOutcomes.Count);
+        Assert.Same(first, outcome.RunOutcomes[0]);
+        Assert.Same(second, outcome.RunOutcomes[1]);
+        Assert.Equal(1, evaluations);
+        Assert.Contains(outcome.Diagnostics, diagnostic =>
+            diagnostic.Contains("prior attempt 1 prior attempt 1 reused run id 'run_shared'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Orchestrator_rejects_empty_run_id_in_nested_prior_attempt_tree()
+    {
+        var prior = Envelope("run_prior", RunOutcomeStatus.Succeeded) with
+        {
+            PriorAttempts = [Envelope(" ", RunOutcomeStatus.Succeeded)]
+        };
+        var child = Envelope("run_child", RunOutcomeStatus.Succeeded) with
+        {
+            PriorAttempts = [prior]
+        };
+        var evaluations = 0;
+        var evaluator = new ScriptedAcceptanceEvaluator(_ =>
+        {
+            evaluations++;
+            return new TaskAcceptanceResult(TaskAcceptanceStatus.Accepted, [], []);
+        });
+        var orchestrator = CreateOrchestrator(
+            new ScriptedTaskPlanner(Plan([Task("work")])),
+            new ScriptedRunExecutor([child]),
+            evaluator);
+
+        var outcome = await orchestrator.RunAsync(Request("Reject empty retry identity."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.ChildRunFailed, outcome.StopReason);
+        Assert.Null(outcome.State.ActiveTaskId);
+        Assert.Empty(outcome.State.CompletedTaskIds);
+        Assert.Single(outcome.RunOutcomes);
+        Assert.Same(child, outcome.RunOutcomes[0]);
+        Assert.Equal(0, evaluations);
+        Assert.Contains(outcome.Diagnostics, diagnostic =>
+            diagnostic.Contains("prior attempt 1 prior attempt 1 has an empty run id", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Definition_of_done_rejects_an_accepted_run_id_that_resolves_to_multiple_child_outcomes()
+    {
+        var task = Task("work");
+        var plan = Plan([task]) with
+        {
+            DefinitionOfDone =
+            [
+                new TaskAcceptanceRequirement(TaskAcceptanceRequirementKind.Artifact, ArtifactKind: "test.artifact")
+            ]
+        };
+        var state = new OrchestrationState(
+            "orchestration_test",
+            new WorkContextSnapshot("test", null, [], [], [], [], [], [], [], new Dictionary<string, object?>(), DateTimeOffset.UtcNow));
+        state.CompletedTaskIds.Add(task.TaskId);
+        state.RunRefs.Add(new RunRef(task.TaskId, "run_reused", RunOutcomeStatus.Succeeded, []));
+
+        var result = DefinitionOfDoneEvaluator.Evaluate(
+            plan,
+            state,
+            [
+                Envelope("run_reused", RunOutcomeStatus.Succeeded),
+                Envelope("run_reused", RunOutcomeStatus.Succeeded)
+            ],
+            new Dictionary<string, object?>());
+
+        Assert.False(result.Satisfied);
+        Assert.Empty(result.EvidenceRefs);
+        Assert.Contains(result.Reasons, reason =>
+            reason.Contains("resolves to 2 child outcomes", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task All_optional_graph_does_not_succeed_without_running_a_task_that_satisfies_definition_of_done()
+    {
+        var optional = Task("optional") with { Optional = true };
+        var executor = new ScriptedRunExecutor([Envelope("run_optional", RunOutcomeStatus.Succeeded)]);
+        var orchestrator = CreateOrchestrator(
+            new ScriptedTaskPlanner(Plan([optional])),
+            executor,
+            new EvidenceTaskAcceptanceEvaluator());
+
+        var outcome = await orchestrator.RunAsync(Request("Avoid vacuous completion."));
+
+        Assert.Equal(OrchestrationStatus.Succeeded, outcome.Status);
+        Assert.Single(executor.Requests);
+        Assert.Equal(["optional"], outcome.State.CompletedTaskIds);
+        Assert.True(outcome.DefinitionOfDone?.Satisfied);
+    }
+
+    [Fact]
+    public async Task Revised_definition_of_done_controls_the_final_completion_decision()
+    {
+        var task = Task("work");
+        var initialPlan = Plan([task]) with
+        {
+            DefinitionOfDone =
+            [
+                new TaskAcceptanceRequirement(TaskAcceptanceRequirementKind.Artifact, ArtifactKind: "missing.proof")
+            ]
+        };
+        var refinement = new TaskGraphRefinement(
+            "replace_unreachable_global_proof",
+            [
+                new TaskGraphMutation(
+                    TaskGraphMutationKind.ReviseDefinitionOfDone,
+                    initialPlan.PlanId,
+                    DefinitionOfDone:
+                    [
+                        new TaskAcceptanceRequirement(
+                            TaskAcceptanceRequirementKind.OutcomeStatus,
+                            RunOutcomeStatus.Succeeded)
+                    ])
+            ],
+            [],
+            RequiresUserInput: false);
+        var planner = new ScriptedTaskPlanner(initialPlan, [refinement]);
+        var evaluator = new ScriptedAcceptanceEvaluator(_ =>
+            new TaskAcceptanceResult(
+                TaskAcceptanceStatus.Accepted,
+                [],
+                [new EvidenceRef("artifact", "artifact_run_work")],
+                RequiresGraphRefinement: true));
+        var orchestrator = CreateOrchestrator(
+            planner,
+            new ScriptedRunExecutor([Envelope("run_work", RunOutcomeStatus.Succeeded)]),
+            evaluator);
+
+        var outcome = await orchestrator.RunAsync(Request("Refine global proof."));
+
+        Assert.Equal(OrchestrationStatus.Succeeded, outcome.Status);
+        Assert.Equal(1, planner.RefineCalls);
+        Assert.Equal(
+            TaskAcceptanceRequirementKind.OutcomeStatus,
+            Assert.Single(outcome.FinalPlan!.DefinitionOfDone).Kind);
+        Assert.True(outcome.DefinitionOfDone?.Satisfied);
     }
 
     [Fact]
@@ -91,7 +518,14 @@ public sealed class TaskOrchestratorTests
             return new TaskAcceptanceResult(
                 TaskAcceptanceStatus.Accepted,
                 [],
-                [new EvidenceRef("artifact", $"artifact_{task.TaskId}")]);
+                [new EvidenceRef(
+                    "artifact",
+                    task.TaskId switch
+                    {
+                        "inspect" => "artifact_run_inspect",
+                        "design_attempts" => "artifact_run_design",
+                        _ => "artifact_run_implement"
+                    })]);
         });
         var orchestrator = CreateOrchestrator(planner, executor, evaluator);
 
@@ -223,6 +657,416 @@ public sealed class TaskOrchestratorTests
     }
 
     [Fact]
+    public void Mutation_applier_supports_the_complete_advertised_set()
+    {
+        var first = Task("first");
+        var second = Task("second", dependsOn: ["first"], priority: 2);
+        var added = Task("added", priority: 3);
+        var replacement = second with { Objective = "Revised second task." };
+        var revisedAcceptance = new TaskAcceptanceRequirement(
+            TaskAcceptanceRequirementKind.Artifact,
+            ArtifactKind: "test.artifact");
+        var revisedDefinitionOfDone = new TaskAcceptanceRequirement(
+            TaskAcceptanceRequirementKind.Receipt,
+            ToolId: "tool.test");
+        var plan = Plan([first, second]);
+        var refinement = new TaskGraphRefinement(
+            "exercise_supported_mutations",
+            [
+                new TaskGraphMutation(TaskGraphMutationKind.AddTask, added.TaskId, Task: added),
+                new TaskGraphMutation(TaskGraphMutationKind.ReplaceTask, second.TaskId, Task: replacement),
+                new TaskGraphMutation(TaskGraphMutationKind.AddDependency, added.TaskId, DependencyTaskId: second.TaskId),
+                new TaskGraphMutation(TaskGraphMutationKind.RemoveDependency, added.TaskId, DependencyTaskId: second.TaskId),
+                new TaskGraphMutation(TaskGraphMutationKind.ReorderPriority, second.TaskId, Priority: 4),
+                new TaskGraphMutation(
+                    TaskGraphMutationKind.ReviseAcceptanceCriteria,
+                    second.TaskId,
+                    AcceptanceRequirements: [revisedAcceptance]),
+                new TaskGraphMutation(
+                    TaskGraphMutationKind.ReviseDefinitionOfDone,
+                    plan.PlanId,
+                    DefinitionOfDone: [revisedDefinitionOfDone]),
+                new TaskGraphMutation(TaskGraphMutationKind.RemoveTask, added.TaskId)
+            ],
+            [],
+            RequiresUserInput: false);
+
+        var result = TaskGraphMutationApplier.Apply(plan, refinement);
+        TaskGraphValidator.Validate(result);
+
+        Assert.Equal(["first", "second"], result.Tasks.Select(task => task.TaskId));
+        Assert.Equal("Revised second task.", result.Tasks[1].Objective);
+        Assert.Equal(4, result.Tasks[1].Priority);
+        Assert.Equal(revisedAcceptance, Assert.Single(result.Tasks[1].AcceptanceRequirements));
+        Assert.Equal(revisedDefinitionOfDone, Assert.Single(result.DefinitionOfDone));
+    }
+
+    [Fact]
+    public void Mutation_applier_rejects_unknown_noop_and_mismatched_mutations_transactionally()
+    {
+        var first = Task("first");
+        var second = Task("second", dependsOn: ["first"], priority: 2);
+        var plan = Plan([first, second]);
+
+        Assert.Throws<TaskGraphValidationException>(() => TaskGraphMutationApplier.Apply(
+            plan,
+            Refinement(new TaskGraphMutation(
+                TaskGraphMutationKind.AddTask,
+                "declared_id",
+                Task: Task("payload_id")))));
+        Assert.Throws<TaskGraphValidationException>(() => TaskGraphMutationApplier.Apply(
+            plan,
+            Refinement(new TaskGraphMutation(
+                TaskGraphMutationKind.AddDependency,
+                second.TaskId,
+                DependencyTaskId: first.TaskId))));
+        Assert.Throws<TaskGraphValidationException>(() => TaskGraphMutationApplier.Apply(
+            plan,
+            Refinement(new TaskGraphMutation(
+                TaskGraphMutationKind.ReorderPriority,
+                second.TaskId,
+                Priority: second.Priority))));
+        Assert.Throws<TaskGraphValidationException>(() => TaskGraphMutationApplier.Apply(
+            plan,
+            Refinement(new TaskGraphMutation(TaskGraphMutationKind.RemoveTask, "unknown"))));
+
+        var transactional = new TaskGraphRefinement(
+            "later_mutation_fails",
+            [
+                new TaskGraphMutation(TaskGraphMutationKind.AddTask, "added", Task: Task("added")),
+                new TaskGraphMutation(TaskGraphMutationKind.RemoveTask, "unknown")
+            ],
+            [],
+            RequiresUserInput: false);
+        Assert.Throws<TaskGraphValidationException>(() => TaskGraphMutationApplier.Apply(plan, transactional));
+        Assert.Equal(["first", "second"], plan.Tasks.Select(task => task.TaskId));
+
+        var state = new OrchestrationState(
+            "orchestration_test",
+            new WorkContextSnapshot("test", null, [], [], [], [], [], [], [], new Dictionary<string, object?>(), DateTimeOffset.UtcNow));
+        state.CompletedTaskIds.Add(first.TaskId);
+        var removedPendingTask = TaskGraphMutationApplier.Apply(
+            plan,
+            Refinement(new TaskGraphMutation(TaskGraphMutationKind.RemoveTask, second.TaskId)));
+        TaskGraphValidator.Validate(removedPendingTask, state, plan);
+        Assert.Equal(["first"], removedPendingTask.Tasks.Select(task => task.TaskId));
+    }
+
+    [Fact]
+    public async Task Orchestrator_normalizes_initial_planner_failures()
+    {
+        var unavailable = CreateOrchestrator(
+            new ThrowingTaskPlanner(new WorkflowPlannerException(
+                WorkflowPlannerFailureKind.Unavailable,
+                "task_planner.unavailable",
+                "Provider unavailable.")),
+            new ScriptedRunExecutor([]),
+            new EvidenceTaskAcceptanceEvaluator());
+        var invalid = CreateOrchestrator(
+            new ThrowingTaskPlanner(new InvalidOperationException("Malformed planner payload.")),
+            new ScriptedRunExecutor([]),
+            new EvidenceTaskAcceptanceEvaluator());
+
+        var unavailableOutcome = await unavailable.RunAsync(Request("Unavailable planner."));
+        var invalidOutcome = await invalid.RunAsync(Request("Invalid planner output."));
+
+        Assert.Equal(OrchestrationStatus.Blocked, unavailableOutcome.Status);
+        Assert.Equal(OrchestrationStopReason.PlannerUnavailable, unavailableOutcome.StopReason);
+        Assert.Null(unavailableOutcome.FinalPlan);
+        Assert.Equal(OrchestrationStatus.PlanInvalid, invalidOutcome.Status);
+        Assert.Equal(OrchestrationStopReason.PlanInvalid, invalidOutcome.StopReason);
+        Assert.Null(invalidOutcome.FinalPlan);
+        Assert.Empty(unavailableOutcome.RunOutcomes);
+        Assert.Empty(invalidOutcome.RunOutcomes);
+    }
+
+    [Fact]
+    public async Task Orchestrator_normalizes_an_initial_invalid_graph_without_starting_a_child_run()
+    {
+        var invalidPlan = Plan([Task("work")]) with { DefinitionOfDone = [] };
+        var executor = new ScriptedRunExecutor([]);
+        var orchestrator = CreateOrchestrator(
+            new ScriptedTaskPlanner(invalidPlan),
+            executor,
+            new EvidenceTaskAcceptanceEvaluator());
+
+        var outcome = await orchestrator.RunAsync(Request("Reject invalid graph."));
+
+        Assert.Equal(OrchestrationStatus.PlanInvalid, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.PlanInvalid, outcome.StopReason);
+        Assert.Same(invalidPlan, outcome.FinalPlan);
+        Assert.Empty(outcome.RunOutcomes);
+        Assert.Empty(executor.Requests);
+        Assert.Contains(outcome.Diagnostics, diagnostic => diagnostic.Contains("definition of done", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Orchestrator_normalizes_refinement_failure_and_preserves_child_proof_and_previous_plan()
+    {
+        var plan = Plan([Task("inspect")]);
+        var planner = new ThrowingTaskPlanner(plan, new InvalidOperationException("Malformed refinement."));
+        var executor = new ScriptedRunExecutor([Envelope("run_inspect", RunOutcomeStatus.Succeeded)]);
+        var evaluator = new ScriptedAcceptanceEvaluator(_ =>
+            new TaskAcceptanceResult(
+                TaskAcceptanceStatus.PartiallyAccepted,
+                ["More work is required."],
+                [new EvidenceRef("artifact", "artifact_run_inspect")],
+                RequiresGraphRefinement: true));
+
+        var outcome = await CreateOrchestrator(planner, executor, evaluator)
+            .RunAsync(Request("Preserve prior proof."));
+
+        Assert.Equal(OrchestrationStatus.PlanInvalid, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.PlanInvalid, outcome.StopReason);
+        Assert.Same(plan, outcome.FinalPlan);
+        Assert.Single(outcome.RunOutcomes);
+        Assert.Equal("run_inspect", outcome.RunOutcomes[0].Outcome.RunId);
+        Assert.Contains(outcome.Diagnostics, diagnostic => diagnostic.Contains("refinement failed", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Orchestrator_rejects_invalid_mutation_and_preserves_previous_plan()
+    {
+        var plan = Plan([Task("inspect")]);
+        var refinement = Refinement(new TaskGraphMutation(TaskGraphMutationKind.RemoveTask, "unknown"));
+        var planner = new ScriptedTaskPlanner(plan, [refinement]);
+        var executor = new ScriptedRunExecutor([Envelope("run_inspect", RunOutcomeStatus.Succeeded)]);
+        var evaluator = new ScriptedAcceptanceEvaluator(_ =>
+            new TaskAcceptanceResult(
+                TaskAcceptanceStatus.PartiallyAccepted,
+                ["Refine."],
+                [new EvidenceRef("artifact", "artifact_run_inspect")],
+                RequiresGraphRefinement: true));
+
+        var outcome = await CreateOrchestrator(planner, executor, evaluator)
+            .RunAsync(Request("Reject invalid mutation."));
+
+        Assert.Equal(OrchestrationStatus.PlanInvalid, outcome.Status);
+        Assert.Same(plan, outcome.FinalPlan);
+        Assert.Single(outcome.RunOutcomes);
+        Assert.Equal(["inspect"], outcome.FinalPlan!.Tasks.Select(task => task.TaskId));
+    }
+
+    [Fact]
+    public async Task Orchestrator_normalizes_cancellation()
+    {
+        var orchestrator = CreateOrchestrator(
+            new ThrowingTaskPlanner(new OperationCanceledException("Cancelled by test.")),
+            new ScriptedRunExecutor([]),
+            new EvidenceTaskAcceptanceEvaluator());
+
+        var outcome = await orchestrator.RunAsync(Request("Cancel safely."));
+
+        Assert.Equal(OrchestrationStatus.Cancelled, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.Cancelled, outcome.StopReason);
+        Assert.Empty(outcome.RunOutcomes);
+    }
+
+    [Fact]
+    public async Task Orchestrator_normalizes_initial_host_projection_failure()
+    {
+        var plan = Plan([Task("work")]);
+        var orchestrator = new TaskOrchestrator(
+            new ScriptedTaskPlanner(plan),
+            new ScriptedRunExecutor([]),
+            new EvidenceTaskAcceptanceEvaluator(),
+            new DeterministicWorkContextCompiler(),
+            () => throw new InvalidOperationException("Host projection failed."));
+
+        var outcome = await orchestrator.RunAsync(Request("Project host state."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.Failed, outcome.StopReason);
+        Assert.Null(outcome.FinalPlan);
+        Assert.Empty(outcome.RunOutcomes);
+        Assert.Contains(outcome.Diagnostics, item =>
+            item.Contains("initial host-state projection", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Orchestrator_normalizes_initial_context_compiler_failure_and_preserves_plan()
+    {
+        var plan = Plan([Task("work")]);
+        var orchestrator = new TaskOrchestrator(
+            new ScriptedTaskPlanner(plan),
+            new ScriptedRunExecutor([]),
+            new EvidenceTaskAcceptanceEvaluator(),
+            new ThrowingWorkContextCompiler(throwOnCall: 1),
+            () => new Dictionary<string, object?>());
+
+        var outcome = await orchestrator.RunAsync(Request("Compile context."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.Failed, outcome.StopReason);
+        Assert.Same(plan, outcome.FinalPlan);
+        Assert.Empty(outcome.RunOutcomes);
+        Assert.Contains(outcome.Diagnostics, item =>
+            item.Contains("initial work-context compilation", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Orchestrator_normalizes_child_executor_failure_and_preserves_prior_child_proof()
+    {
+        var first = Task("first");
+        var second = Task("second", dependsOn: [first.TaskId]);
+        var plan = Plan([first, second]);
+        var executor = new ThrowOnSecondRunExecutor(Envelope("run_first", RunOutcomeStatus.Succeeded));
+        var orchestrator = new TaskOrchestrator(
+            new ScriptedTaskPlanner(plan),
+            executor,
+            new EvidenceTaskAcceptanceEvaluator(),
+            new DeterministicWorkContextCompiler(),
+            () => new Dictionary<string, object?>());
+
+        var outcome = await orchestrator.RunAsync(Request("Preserve the first run."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.Failed, outcome.StopReason);
+        Assert.Same(plan, outcome.FinalPlan);
+        Assert.Equal("run_first", Assert.Single(outcome.RunOutcomes).Outcome.RunId);
+        Assert.Contains(first.TaskId, outcome.State.CompletedTaskIds);
+        Assert.Equal("run_first", Assert.Single(outcome.State.RunRefs).RunId);
+        Assert.Contains(outcome.Diagnostics, item =>
+            item.Contains("child run execution", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Orchestrator_normalizes_acceptance_failure_and_keeps_the_child_envelope()
+    {
+        var plan = Plan([Task("work")]);
+        var orchestrator = new TaskOrchestrator(
+            new ScriptedTaskPlanner(plan),
+            new ScriptedRunExecutor([Envelope("run_work", RunOutcomeStatus.Succeeded)]),
+            new ThrowingAcceptanceEvaluator(new InvalidOperationException("Acceptance failed.")),
+            new DeterministicWorkContextCompiler(),
+            () => new Dictionary<string, object?>());
+
+        var outcome = await orchestrator.RunAsync(Request("Evaluate acceptance."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Equal("run_work", Assert.Single(outcome.RunOutcomes).Outcome.RunId);
+        Assert.Empty(outcome.State.CompletedTaskIds);
+        Assert.Contains(outcome.Diagnostics, item =>
+            item.Contains("task acceptance evaluation", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Orchestrator_normalizes_definition_of_done_evaluation_failure_and_preserves_accepted_proof()
+    {
+        var task = Task("work");
+        var plan = Plan([task]) with
+        {
+            DefinitionOfDone =
+            [
+                new TaskAcceptanceRequirement(
+                    TaskAcceptanceRequirementKind.HostState,
+                    HostStateKey: "hostReady",
+                    HostStateValue: true)
+            ]
+        };
+        var projectionCalls = 0;
+        IReadOnlyDictionary<string, object?> ProjectHostState()
+        {
+            projectionCalls++;
+            return projectionCalls == 3
+                ? new ThrowingLookupDictionary("hostReady", true)
+                : new Dictionary<string, object?> { ["hostReady"] = true };
+        }
+
+        var orchestrator = new TaskOrchestrator(
+            new ScriptedTaskPlanner(plan),
+            new ScriptedRunExecutor([Envelope("run_work", RunOutcomeStatus.Succeeded)]),
+            new EvidenceTaskAcceptanceEvaluator(),
+            new DeterministicWorkContextCompiler(),
+            ProjectHostState);
+
+        var outcome = await orchestrator.RunAsync(Request("Evaluate definition of done."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Equal("run_work", Assert.Single(outcome.RunOutcomes).Outcome.RunId);
+        Assert.Contains(task.TaskId, outcome.State.CompletedTaskIds);
+        Assert.Equal("run_work", Assert.Single(outcome.State.RunRefs).RunId);
+        Assert.Contains(outcome.Diagnostics, item =>
+            item.Contains("definition-of-done evaluation", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Orchestrator_normalizes_final_projection_failure_without_relabeling_proof_as_success()
+    {
+        var task = Task("work");
+        var plan = Plan([task]);
+        var projectionCalls = 0;
+        IReadOnlyDictionary<string, object?> ProjectHostState()
+        {
+            projectionCalls++;
+            return projectionCalls == 4
+                ? throw new InvalidOperationException("Final projection failed.")
+                : new Dictionary<string, object?> { ["hostReady"] = true };
+        }
+
+        var orchestrator = new TaskOrchestrator(
+            new ScriptedTaskPlanner(plan),
+            new ScriptedRunExecutor([Envelope("run_work", RunOutcomeStatus.Succeeded)]),
+            new EvidenceTaskAcceptanceEvaluator(),
+            new DeterministicWorkContextCompiler(),
+            ProjectHostState);
+
+        var outcome = await orchestrator.RunAsync(Request("Project final state."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.Failed, outcome.StopReason);
+        Assert.True(outcome.DefinitionOfDone?.Satisfied);
+        Assert.Equal("run_work", Assert.Single(outcome.RunOutcomes).Outcome.RunId);
+        Assert.Contains(task.TaskId, outcome.State.CompletedTaskIds);
+        Assert.Equal("run_work", Assert.Single(outcome.State.RunRefs).RunId);
+        Assert.Contains(outcome.Diagnostics, item =>
+            item.Contains("final host-state projection", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Orchestrator_normalizes_final_context_compilation_failure_and_preserves_definition_of_done()
+    {
+        var task = Task("work");
+        var plan = Plan([task]);
+        var orchestrator = new TaskOrchestrator(
+            new ScriptedTaskPlanner(plan),
+            new ScriptedRunExecutor([Envelope("run_work", RunOutcomeStatus.Succeeded)]),
+            new EvidenceTaskAcceptanceEvaluator(),
+            new ThrowingWorkContextCompiler(throwOnCall: 3),
+            () => new Dictionary<string, object?> { ["hostReady"] = true });
+
+        var outcome = await orchestrator.RunAsync(Request("Compile final context."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.Failed, outcome.StopReason);
+        Assert.True(outcome.DefinitionOfDone?.Satisfied);
+        Assert.Equal("run_work", Assert.Single(outcome.RunOutcomes).Outcome.RunId);
+        Assert.Contains(task.TaskId, outcome.State.CompletedTaskIds);
+        Assert.Equal("run_work", Assert.Single(outcome.State.RunRefs).RunId);
+        Assert.Contains(outcome.Diagnostics, item =>
+            item.Contains("final work-context compilation", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Orchestrator_does_not_relabel_child_cancellation_as_a_failure()
+    {
+        var plan = Plan([Task("work")]);
+        var orchestrator = new TaskOrchestrator(
+            new ScriptedTaskPlanner(plan),
+            new ThrowingRunExecutor(new OperationCanceledException("Child cancelled.")),
+            new EvidenceTaskAcceptanceEvaluator(),
+            new DeterministicWorkContextCompiler(),
+            () => new Dictionary<string, object?>());
+
+        var outcome = await orchestrator.RunAsync(Request("Cancel child."));
+
+        Assert.Equal(OrchestrationStatus.Cancelled, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.Cancelled, outcome.StopReason);
+        Assert.DoesNotContain(outcome.Diagnostics, item =>
+            item.Contains("child run execution failed", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Graph_validator_rejects_rewriting_completed_tasks()
     {
         var original = Plan([Task("done"), Task("next", dependsOn: ["done"])]);
@@ -230,6 +1074,7 @@ public sealed class TaskOrchestratorTests
             "orchestration_test",
             new WorkContextSnapshot("test", null, [], [], [], [], [], [], [], new Dictionary<string, object?>(), DateTimeOffset.UtcNow));
         state.CompletedTaskIds.Add("done");
+        var semanticallyUnchanged = Plan([Task("done"), Task("next", dependsOn: ["done"])]);
         var rewritten = original with
         {
             Tasks =
@@ -239,6 +1084,7 @@ public sealed class TaskOrchestratorTests
             ]
         };
 
+        TaskGraphValidator.Validate(semanticallyUnchanged, state, original);
         Assert.Throws<TaskGraphValidationException>(() => TaskGraphValidator.Validate(rewritten, state, original));
     }
 
@@ -273,6 +1119,150 @@ public sealed class TaskOrchestratorTests
         Assert.Equal(TaskAcceptanceStatus.Accepted, result.Status);
         Assert.Contains(result.EvidenceRefs, evidence => evidence.Kind == "artifact");
         Assert.Contains(result.EvidenceRefs, evidence => evidence.Kind == "receipt");
+    }
+
+    [Theory]
+    [InlineData(true, "True")]
+    [InlineData(1, "1")]
+    public async Task Evidence_acceptance_rejects_host_values_that_only_match_after_string_conversion(
+        object actual,
+        string expected)
+    {
+        var task = Task("typed-host-state") with
+        {
+            AcceptanceRequirements =
+            [
+                new TaskAcceptanceRequirement(
+                    TaskAcceptanceRequirementKind.HostState,
+                    HostStateKey: "value",
+                    HostStateValue: expected)
+            ]
+        };
+        var state = new OrchestrationState(
+            "orchestration_test",
+            new WorkContextSnapshot("test", null, [], [], [], [], [], [], [], new Dictionary<string, object?>(), DateTimeOffset.UtcNow));
+
+        var result = await new EvidenceTaskAcceptanceEvaluator().EvaluateAsync(
+            task,
+            Envelope("run_typed_host", RunOutcomeStatus.Succeeded),
+            new TaskAcceptanceContext(
+                Plan([task]),
+                state,
+                state.WorkingContext,
+                new Dictionary<string, object?> { ["value"] = actual }));
+
+        Assert.NotEqual(TaskAcceptanceStatus.Accepted, result.Status);
+        Assert.Contains(result.Reasons, reason => reason.Contains("did not satisfy", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(true, "True")]
+    [InlineData(1, "1")]
+    public void Definition_of_done_rejects_host_values_that_only_match_after_string_conversion(
+        object actual,
+        string expected)
+    {
+        var task = Task("typed-host-state");
+        var plan = Plan([task]) with
+        {
+            DefinitionOfDone =
+            [
+                new TaskAcceptanceRequirement(
+                    TaskAcceptanceRequirementKind.HostState,
+                    HostStateKey: "value",
+                    HostStateValue: expected)
+            ]
+        };
+        var state = new OrchestrationState(
+            "orchestration_test",
+            new WorkContextSnapshot("test", null, [], [], [], [], [], [], [], new Dictionary<string, object?>(), DateTimeOffset.UtcNow));
+        state.CompletedTaskIds.Add(task.TaskId);
+        state.RunRefs.Add(new RunRef(task.TaskId, "run_typed_host", RunOutcomeStatus.Succeeded, []));
+
+        var result = DefinitionOfDoneEvaluator.Evaluate(
+            plan,
+            state,
+            [Envelope("run_typed_host", RunOutcomeStatus.Succeeded)],
+            new Dictionary<string, object?> { ["value"] = actual });
+
+        Assert.False(result.Satisfied);
+        Assert.Contains(result.Reasons, reason => reason.Contains("did not satisfy", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Evidence_acceptance_compares_common_json_and_generic_dictionary_values_structurally()
+    {
+        using var document = JsonDocument.Parse("""
+            {
+              "enabled": true,
+              "items": [1, "one"],
+              "labels": { "mode": "safe" }
+            }
+            """);
+        var expected = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["enabled"] = true,
+            ["items"] = new object?[] { 1L, "one" },
+            ["labels"] = new SortedDictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["mode"] = "safe"
+            }
+        };
+        var task = Task("json-host-state") with
+        {
+            AcceptanceRequirements =
+            [
+                new TaskAcceptanceRequirement(
+                    TaskAcceptanceRequirementKind.HostState,
+                    HostStateKey: "value",
+                    HostStateValue: expected)
+            ]
+        };
+        var state = new OrchestrationState(
+            "orchestration_test",
+            new WorkContextSnapshot("test", null, [], [], [], [], [], [], [], new Dictionary<string, object?>(), DateTimeOffset.UtcNow));
+
+        var result = await new EvidenceTaskAcceptanceEvaluator().EvaluateAsync(
+            task,
+            Envelope("run_json_host", RunOutcomeStatus.Succeeded),
+            new TaskAcceptanceContext(
+                Plan([task]),
+                state,
+                state.WorkingContext,
+                new Dictionary<string, object?> { ["value"] = document }));
+
+        Assert.Equal(TaskAcceptanceStatus.Accepted, result.Status);
+    }
+
+    [Fact]
+    public async Task Evidence_acceptance_fails_closed_on_cyclic_host_values()
+    {
+        var cyclic = new Dictionary<string, object?>(StringComparer.Ordinal);
+        cyclic["self"] = cyclic;
+        var task = Task("cyclic-host-state") with
+        {
+            AcceptanceRequirements =
+            [
+                new TaskAcceptanceRequirement(
+                    TaskAcceptanceRequirementKind.HostState,
+                    HostStateKey: "value",
+                    HostStateValue: cyclic)
+            ]
+        };
+        var state = new OrchestrationState(
+            "orchestration_test",
+            new WorkContextSnapshot("test", null, [], [], [], [], [], [], [], new Dictionary<string, object?>(), DateTimeOffset.UtcNow));
+
+        var result = await new EvidenceTaskAcceptanceEvaluator().EvaluateAsync(
+            task,
+            Envelope("run_cyclic_host", RunOutcomeStatus.Succeeded),
+            new TaskAcceptanceContext(
+                Plan([task]),
+                state,
+                state.WorkingContext,
+                new Dictionary<string, object?> { ["value"] = cyclic }));
+
+        Assert.NotEqual(TaskAcceptanceStatus.Accepted, result.Status);
     }
 
     [Fact]
@@ -351,8 +1341,11 @@ public sealed class TaskOrchestratorTests
             "plan_test",
             "Test objective.",
             tasks,
-            [],
+            [new TaskAcceptanceRequirement(TaskAcceptanceRequirementKind.OutcomeStatus, RunOutcomeStatus.Succeeded)],
             DateTimeOffset.UtcNow);
+
+    private static TaskGraphRefinement Refinement(TaskGraphMutation mutation) =>
+        new("test_refinement", [mutation], [], RequiresUserInput: false);
 
     private static TaskNode Task(
         string taskId,
@@ -439,6 +1432,37 @@ public sealed class TaskOrchestratorTests
         }
     }
 
+    private sealed class ThrowingTaskPlanner : ITaskPlanner
+    {
+        private readonly TaskGraphPlan? _plan;
+        private readonly Exception? _createException;
+        private readonly Exception? _refineException;
+
+        public ThrowingTaskPlanner(Exception createException)
+        {
+            _createException = createException;
+        }
+
+        public ThrowingTaskPlanner(TaskGraphPlan plan, Exception refineException)
+        {
+            _plan = plan;
+            _refineException = refineException;
+        }
+
+        public Task<TaskGraphPlan> CreatePlanAsync(
+            TaskPlanningRequest request,
+            CancellationToken cancellationToken = default) =>
+            _createException is not null
+                ? System.Threading.Tasks.Task.FromException<TaskGraphPlan>(_createException)
+                : System.Threading.Tasks.Task.FromResult(_plan!);
+
+        public Task<TaskGraphRefinement> RefinePlanAsync(
+            TaskRefinementRequest request,
+            CancellationToken cancellationToken = default) =>
+            System.Threading.Tasks.Task.FromException<TaskGraphRefinement>(
+                _refineException ?? new InvalidOperationException("No refinement was configured."));
+    }
+
     private sealed class ScriptedRunExecutor : IRunExecutor
     {
         private readonly Queue<OutcomeEnvelope> _outcomes;
@@ -457,6 +1481,122 @@ public sealed class TaskOrchestratorTests
             Requests.Add(request);
             return System.Threading.Tasks.Task.FromResult(_outcomes.Dequeue());
         }
+    }
+
+    private sealed class ThrowOnSecondRunExecutor : IRunExecutor
+    {
+        private readonly OutcomeEnvelope _firstOutcome;
+        private int _calls;
+
+        public ThrowOnSecondRunExecutor(OutcomeEnvelope firstOutcome)
+        {
+            _firstOutcome = firstOutcome;
+        }
+
+        public Task<OutcomeEnvelope> RunAsync(
+            RunRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            _calls++;
+            return _calls == 1
+                ? System.Threading.Tasks.Task.FromResult(_firstOutcome)
+                : System.Threading.Tasks.Task.FromException<OutcomeEnvelope>(
+                    new InvalidOperationException("The second child executor call failed."));
+        }
+    }
+
+    private sealed class ThrowingRunExecutor : IRunExecutor
+    {
+        private readonly Exception _exception;
+
+        public ThrowingRunExecutor(Exception exception)
+        {
+            _exception = exception;
+        }
+
+        public Task<OutcomeEnvelope> RunAsync(
+            RunRequest request,
+            CancellationToken cancellationToken = default) =>
+            System.Threading.Tasks.Task.FromException<OutcomeEnvelope>(_exception);
+    }
+
+    private sealed class ThrowingAcceptanceEvaluator : ITaskAcceptanceEvaluator
+    {
+        private readonly Exception _exception;
+
+        public ThrowingAcceptanceEvaluator(Exception exception)
+        {
+            _exception = exception;
+        }
+
+        public Task<TaskAcceptanceResult> EvaluateAsync(
+            TaskNode task,
+            OutcomeEnvelope outcome,
+            TaskAcceptanceContext context,
+            CancellationToken cancellationToken = default) =>
+            System.Threading.Tasks.Task.FromException<TaskAcceptanceResult>(_exception);
+    }
+
+    private sealed class ThrowingWorkContextCompiler : IWorkContextCompiler
+    {
+        private readonly DeterministicWorkContextCompiler _inner = new();
+        private readonly int _throwOnCall;
+        private int _calls;
+
+        public ThrowingWorkContextCompiler(int throwOnCall)
+        {
+            _throwOnCall = throwOnCall;
+        }
+
+        public WorkContextSnapshot Compile(WorkContextCompilationRequest request)
+        {
+            _calls++;
+            if (_calls == _throwOnCall)
+            {
+                throw new InvalidOperationException("Work-context compilation failed.");
+            }
+
+            return _inner.Compile(request);
+        }
+    }
+
+    private sealed class ThrowingLookupDictionary : IReadOnlyDictionary<string, object?>
+    {
+        private readonly Dictionary<string, object?> _inner;
+        private readonly string _throwingKey;
+
+        public ThrowingLookupDictionary(string throwingKey, object? value)
+        {
+            _throwingKey = throwingKey;
+            _inner = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                [throwingKey] = value
+            };
+        }
+
+        public object? this[string key] => _inner[key];
+
+        public IEnumerable<string> Keys => _inner.Keys;
+
+        public IEnumerable<object?> Values => _inner.Values;
+
+        public int Count => _inner.Count;
+
+        public bool ContainsKey(string key) => _inner.ContainsKey(key);
+
+        public IEnumerator<KeyValuePair<string, object?>> GetEnumerator() => _inner.GetEnumerator();
+
+        public bool TryGetValue(string key, out object? value)
+        {
+            if (string.Equals(key, _throwingKey, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Host-state lookup failed.");
+            }
+
+            return _inner.TryGetValue(key, out value);
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     private sealed class ScriptedAcceptanceEvaluator : ITaskAcceptanceEvaluator

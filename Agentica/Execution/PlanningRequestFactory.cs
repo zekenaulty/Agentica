@@ -30,12 +30,17 @@ internal sealed class PlanningRequestFactory
     public PlanningRequest Create(RunRequest request, AgenticaRun run)
     {
         var context = _policy.EffectivePlanningContext;
-        var observations = Limit(run.Observations, context.MaxRecentObservations);
-        var receipts = Limit(run.Receipts, context.MaxRecentReceipts);
+        var requestSnapshot = ExecutionRecordSnapshot.PlannerRequest(request);
+        var observations = Limit(run.Observations, context.MaxRecentObservations)
+            .Select(ExecutionRecordSnapshot.Observation)
+            .ToArray();
+        var receipts = Limit(run.Receipts, context.MaxRecentReceipts)
+            .Select(ExecutionRecordSnapshot.Receipt)
+            .ToArray();
         var executionContext = CreateExecutionContext(run);
         var toolSurface = CreateToolSurfaceSnapshot(run, observations, receipts, executionContext, context);
         var requestContext = new PlanningRequest(
-            request,
+            requestSnapshot,
             _toolCatalog.Descriptors,
             observations,
             receipts)
@@ -47,7 +52,7 @@ internal sealed class PlanningRequestFactory
         var projectedFrames = _frameProjector?.Project(new PlanningFrameProjectionRequest(
             RunId: run.RunId,
             AttemptNumber: run.AttemptNumber,
-            Request: request,
+            Request: requestSnapshot,
             ExecutionContext: executionContext,
             ToolDescriptors: _toolCatalog.Descriptors,
             Observations: observations,
@@ -76,6 +81,7 @@ internal sealed class PlanningRequestFactory
         PlanningContextOptions context) =>
         new(
             AgenticaIds.New("surface"),
+            _toolCatalog.ManifestHash,
             DateTimeOffset.UtcNow,
             _toolCatalog.Descriptors,
             executionContext,
@@ -159,6 +165,13 @@ internal sealed class PlanningRequestFactory
             ["planContinuationCount"] = continuationCount,
             ["remainingPlanContinuationBudget"] = remainingContinuationBudget,
             ["maxBlockedRetries"] = _policy.MaxBlockedRetries,
+            ["retryableStopReasons"] = _policy.EffectiveBlockedRetries.RetryableStopReasons
+                .Select(reason => reason.ToString())
+                .OrderBy(reason => reason, StringComparer.Ordinal)
+                .ToArray(),
+            ["authorizedMutationRetryToolIds"] = _policy.EffectiveBlockedRetries.AuthorizedMutationToolIds
+                .OrderBy(toolId => toolId, StringComparer.Ordinal)
+                .ToArray(),
             ["maxBatchSize"] = _policy.MaxBatchSize,
             ["maxParallelism"] = _policy.MaxParallelism,
             ["allowReadOnlyParallelBatches"] = _policy.AllowReadOnlyParallelBatches,
@@ -167,6 +180,23 @@ internal sealed class PlanningRequestFactory
             ["allowedEffects"] = _policy.EffectiveEffectPolicy.AllowedEffects
                 .Select(effect => effect.ToString())
                 .ToArray(),
+            ["toolManifestHash"] = _toolCatalog.ManifestHash,
+            ["plannerBoundaryMode"] = _policy.EffectiveSecurityPolicy.UsesExternalPlanner
+                ? "external"
+                : "local",
+            ["initialDataBoundaries"] = _policy.EffectiveSecurityPolicy.InitialBoundaries
+                .Select(boundary => boundary.ToString())
+                .OrderBy(boundary => boundary, StringComparer.Ordinal)
+                .ToArray(),
+            ["exposedDataBoundaries"] = run.ExposedBoundaries
+                .Select(boundary => boundary.ToString())
+                .OrderBy(boundary => boundary, StringComparer.Ordinal)
+                .ToArray(),
+            ["externalPlannerAllowedBoundaries"] = _policy.EffectiveSecurityPolicy.ExternalPlannerAllowedBoundaries?
+                .Select(boundary => boundary.ToString())
+                .OrderBy(boundary => boundary, StringComparer.Ordinal)
+                .ToArray(),
+            ["executionGrantCount"] = _policy.EffectiveSecurityPolicy.ExecutionGrants.Count,
             ["elapsedMs"] = Milliseconds(elapsed),
             ["timeoutMs"] = _policy.Timeout is null ? null : Milliseconds(_policy.Timeout.Value),
             ["remainingTimeoutMs"] = remainingTimeout is null ? null : Milliseconds(remainingTimeout.Value),
@@ -326,11 +356,14 @@ internal sealed class PlanningRequestFactory
             artifact?.ArtifactId);
     }
 
-    internal static IReadOnlyList<T> Limit<T>(IReadOnlyList<T> items, int? maxItems) =>
-        maxItems switch
+    internal static IReadOnlyList<T> Limit<T>(IReadOnlyList<T> items, int? maxItems)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        return Array.AsReadOnly(maxItems switch
         {
-            null => items,
+            null => items.ToArray(),
             <= 0 => [],
             _ => items.TakeLast(maxItems.Value).ToArray()
-        };
+        });
+    }
 }

@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Locked build, proof tests, and package validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CI: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: true
+      NUGET_XMLDOC_MODE: skip
+
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install the pinned .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: '**/Packages.lock.json'
+
+      - name: Verify SDK pin
+        shell: bash
+        run: test "$(dotnet --version)" = "10.0.302"
+
+      - name: Restore the locked dependency graph
+        run: dotnet restore Agentica.slnx --locked-mode --configfile NuGet.config
+
+      - name: Verify lock files stayed unchanged
+        shell: bash
+        run: git diff --exit-code -- Agentica/Packages.lock.json Agentica.Clients/Packages.lock.json Agentica.Lab/Packages.lock.json Agentica.Tests/Packages.lock.json
+
+      - name: Reject vulnerable or deprecated dependencies
+        shell: pwsh
+        run: ./eng/Assert-PackageAudit.ps1
+
+      - name: Verify formatting
+        run: dotnet format Agentica.slnx --verify-no-changes --no-restore
+
+      - name: Build Release with warnings as errors
+        run: dotnet build Agentica.slnx --configuration Release --no-restore
+
+      - name: Run selected security analyzers
+        run: >-
+          dotnet format analyzers Agentica.slnx
+          --verify-no-changes
+          --no-restore
+          --severity warn
+          --diagnostics CA3001 CA3006 CA3075 CA5350 CA5351 CA5386 CA5390 CA5401
+
+      - name: Run Lab subprocess integration tests
+        run: >-
+          dotnet test Agentica.Tests/Agentica.Tests.csproj
+          --configuration Release
+          --no-build
+          --no-restore
+          --filter "FullyQualifiedName~LabSubprocessIntegrationTests"
+
+      - name: Run tests with coverage
+        run: >-
+          dotnet test Agentica.Tests/Agentica.Tests.csproj
+          --configuration Release
+          --no-build
+          --no-restore
+          --settings eng/coverage.runsettings
+          --collect:"XPlat Code Coverage"
+          --results-directory artifacts/TestResults
+
+      - name: Enforce core coverage thresholds
+        shell: pwsh
+        run: ./eng/Assert-Coverage.ps1
+
+      - name: Pack and validate internal research previews
+        shell: pwsh
+        run: ./eng/Verify-Packages.ps1
+
+      - name: Build the pinned Lab container
+        run: docker build --file Agentica.Lab/Dockerfile --tag agentica-lab:ci .
+
+      - name: Smoke-test the pinned Lab container
+        run: docker run --rm agentica-lab:ci quest list
+
+      - name: Scan changed repository history for detected secrets
+        uses: trufflesecurity/trufflehog@27b0417c16317ca9a472a9a8092acce143b49c55 # v3.95.9
+        with:
+          path: ./
+          version: 3.95.9
+          extra_args: --results=verified,unknown,unverified

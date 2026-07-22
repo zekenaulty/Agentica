@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Agentica.Artifacts;
-using Agentica.CLI.Scenarios.Quest;
+using Agentica.Lab.Scenarios.Quest;
 using Agentica.Execution;
 using Agentica.Events;
 using Agentica.Observations;
@@ -161,7 +161,8 @@ public sealed class QuestHarnessTests
             catalog,
             events ?? new InMemoryEventSink(),
             new QuestOutcomeReporter(),
-            new ExecutionPolicy(MaxSteps: 20, MaxRefinements: 12));
+            new ExecutionPolicy(MaxSteps: 20, MaxRefinements: 12),
+            EvidenceCompletionEvaluator.ForArtifactKind("quest.objective_completed"));
 
     private static RunRequest CreateRequest() =>
         new("Recover the sun key and open the north gate.", RequestOrigin.User);

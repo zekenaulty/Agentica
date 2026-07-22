@@ -40,7 +40,8 @@ public enum OrchestrationStopReason
     Cancelled,
     PlanInvalid,
     MaxRunsReached,
-    MaxRefinementsReached
+    MaxRefinementsReached,
+    DefinitionOfDoneNotSatisfied
 }
 
 public sealed class OrchestrationState
@@ -80,13 +81,23 @@ public sealed record RunRef(
     RunOutcomeStatus Status,
     IReadOnlyList<EvidenceRef> EvidenceRefs);
 
+public sealed record DefinitionOfDoneResult(
+    bool Satisfied,
+    IReadOnlyList<string> Reasons,
+    IReadOnlyList<EvidenceRef> EvidenceRefs);
+
 public sealed record OrchestrationOutcomeEnvelope(
     string OrchestrationId,
     OrchestrationStatus Status,
     OrchestrationStopReason StopReason,
     string Objective,
-    TaskGraphPlan FinalPlan,
+    TaskGraphPlan? FinalPlan,
     OrchestrationState State,
     WorkContextSnapshot WorkingContext,
     IReadOnlyList<OutcomeEnvelope> RunOutcomes,
-    IReadOnlyList<EvidenceRef> EvidenceRefs);
+    IReadOnlyList<EvidenceRef> EvidenceRefs)
+{
+    public DefinitionOfDoneResult? DefinitionOfDone { get; init; }
+
+    public IReadOnlyList<string> Diagnostics { get; init; } = [];
+}

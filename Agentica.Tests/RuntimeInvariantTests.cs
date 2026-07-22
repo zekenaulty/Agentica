@@ -17,7 +17,7 @@ public sealed class RuntimeInvariantTests
     public async Task Validation_failure_prevents_all_tool_execution()
     {
         var tool = new CountingTool();
-        var catalog = ToolCatalog.Create(new ToolRegistration(
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
             new ToolDescriptor("known.read", "Known Read", ToolKind.Query, ToolEffect.ReadOnly),
             tool));
         var runner = CreateRunner(new StaticPlanner(Plan(
@@ -71,10 +71,10 @@ public sealed class RuntimeInvariantTests
     public async Task Readonly_batch_failure_does_not_invent_partial_success()
     {
         var catalog = ToolCatalog.Create(
-            new ToolRegistration(
+            TestToolRegistration.Create(
                 new ToolDescriptor("read.good", "Read Good", ToolKind.Query, ToolEffect.ReadOnly),
                 new StatusTool(ReceiptStatus.Succeeded)),
-            new ToolRegistration(
+            TestToolRegistration.Create(
                 new ToolDescriptor("read.bad", "Read Bad", ToolKind.Query, ToolEffect.ReadOnly),
                 new StatusTool(ReceiptStatus.Failed)));
         var runner = CreateRunner(new StaticPlanner(Plan(
@@ -151,6 +151,19 @@ public sealed class RuntimeInvariantTests
         Assert.True(policy.EffectiveEffectPolicy.Allows(ToolEffect.WritesLocalState));
         Assert.False(policy.EffectiveEffectPolicy.Allows(ToolEffect.ExternalSideEffect));
         Assert.False(policy.EffectiveEffectPolicy.Allows(ToolEffect.Destructive));
+        Assert.False(policy.EffectiveEffectPolicy.Allows(ToolEffect.Unknown));
+    }
+
+    [Fact]
+    public void Allow_all_effect_policy_excludes_unknown_unless_explicitly_unsafe()
+    {
+        Assert.True(ToolEffectPolicy.AllowAll.Allows(ToolEffect.ReadOnly));
+        Assert.True(ToolEffectPolicy.AllowAll.Allows(ToolEffect.WritesLocalState));
+        Assert.True(ToolEffectPolicy.AllowAll.Allows(ToolEffect.ExternalSideEffect));
+        Assert.True(ToolEffectPolicy.AllowAll.Allows(ToolEffect.Destructive));
+        Assert.False(ToolEffectPolicy.AllowAll.Allows(ToolEffect.Unknown));
+        Assert.False(ToolEffectPolicy.AllowKnown.Allows(ToolEffect.Unknown));
+        Assert.True(ToolEffectPolicy.UnsafeAllowUnknown.Allows(ToolEffect.Unknown));
     }
 
     private static AgenticaRunner CreateRunner(
@@ -163,7 +176,7 @@ public sealed class RuntimeInvariantTests
             new InMemoryEventSink(),
             new DeterministicOutcomeReporter(),
             new ExecutionPolicy(MaxSteps: 8, MaxRefinements: 0, PlanningMode: PlanningMode.PlanOnly),
-            completionEvaluator);
+            completionEvaluator ?? PlanExhaustionCompletionEvaluator.Instance);
 
     private static WorkflowPlan Plan(params PlanStep[] steps) =>
         new("plan_test", 1, steps, "Runtime invariant test plan.");
@@ -172,7 +185,7 @@ public sealed class RuntimeInvariantTests
         new(stepId, toolId, ToolKind.Query, ToolEffect.ReadOnly, new Dictionary<string, object?>());
 
     private static ToolRegistration Registration(string toolId) =>
-        new(
+        TestToolRegistration.Create(
             new ToolDescriptor(toolId, toolId, ToolKind.Query, ToolEffect.ReadOnly),
             new StatusTool(ReceiptStatus.Succeeded));
 

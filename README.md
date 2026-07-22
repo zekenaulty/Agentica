@@ -1,14 +1,16 @@
 # Agentica
 
-Agentica is a compact .NET package for bounded agentic workflow planning and execution.
+Agentica is a source-available research repository developing a package-shaped .NET runtime for bounded agentic workflow planning and execution.
 
-It is designed to become the reusable reason-and-execute runtime behind applications that need an agent to inspect available tools and state, form a plan, execute tool steps under contract, observe results, refine the plan, and return a receipt-backed outcome.
+It is designed to become a reusable reason-and-execute runtime behind applications that need an agent to inspect available tools and state, form a plan, execute tool steps under contract, observe results, refine the plan, and return a receipt-backed outcome. It is not yet a supported or licensed-for-reuse public package.
 
 Agentica is package-first and in-process-first. It is not MCP-first, storage-first, microservice-first, or project-sprawl-first.
 
 ## Current Status
 
-Agentica now has the first runtime, client, and harness slices needed to test the core idea end-to-end.
+The canonical product status, active slice, completion percentages, project-role decision, and goal-document lifecycle xref live in [Agentica Product Status And Goal Xref](docs/Agentica.ProductStatus.md).
+
+Agentica now has the first runtime, client, and lab slices needed to test the core idea end-to-end.
 
 ```text
 RunRequest
@@ -26,24 +28,28 @@ Implemented reality:
 
 - `Agentica` is the central in-process runtime package.
 - `Agentica.Clients` exists as the provider SDK isolation project.
-- `Agentica.CLI` hosts deterministic proof runs, static quest runs, and MazeQuest runs.
-- `Agentica.Tests` covers runtime contracts, validation, client mapping, retry behavior, and harness boundaries.
+- `Agentica.Lab` is the internal lab executable for deterministic proofs, scenario harnesses, probes, Chat, orchestration experiments, benchmarks, and run inspection. It is not a supported product CLI.
+- `Agentica.Tests` covers runtime contracts, validation, client mapping, retry behavior, harness boundaries, real Lab subprocesses, package consumption, container contracts, and bounded/redacted logging.
 - Deterministic planning remains the regression baseline.
 - Gemini-backed planning exists through `LlmWorkflowPlanner` and `GeminiLlmClient`.
-- Tool input contracts, effect policy, completion evaluation, bounded continuation, blocked retries, provider-call retries, and planner context shaping are implemented.
-- CLI run logging writes structured artifacts under `.agentica/runs`.
+- Tool input contracts, effect policy, explicit completion evaluation, bounded continuation, mutation-safe blocked retries, provider-call retries, full multi-attempt envelopes, and planner context shaping are implemented.
+- Tool registrations compile into one immutable planner/dispatch manifest containing effect, data/output boundaries, approval, retry safety, and provenance. Approval-required and external-output tools are fail-closed without an exact manifest-bound grant, and the current manifest is rechecked immediately before dispatch. Chat issues no grant by default.
+- Disabled live Gemini tests are reported as skipped, and the resolved dependency graph has no known vulnerable packages.
+- Lab run logging writes bounded, recursively redacted structured artifacts under `.agentica/runs` and circuit-breaks safely on storage failure.
 - MazeQuest exists as a host-owned reasoning harness, not Agentica runtime vocabulary.
 - The runtime now supports small validated multi-step plan slices, read-only query batches, and dependency fields on plan steps.
-- Host-side campaign orchestration remains a CLI harness. Generic orchestration contracts are currently incubating under `Agentica/Orchestration` inside the core project after the migration; a future package split remains a boundary decision before public API/durable replay hardening.
+- The bounded orchestration proof contract now rejects empty acceptance, unmet global definition-of-done, unsupported mutations, planner/graph failures, and failed-child false success. Generic orchestration remains Incubating and excluded from product claims pending broader integration and measured reliability.
+- A fixed Gemini 2.5 Flash cohort passed 29/30 overall with zero false successes: WorkbenchQuest 25/25 and the MazeQuest holdout 4/5. This is a versioned product proof, not a general reliability guarantee.
+- The productization gate passes locally and in the no-publish GitHub workflow: 390 tests with 2 explicitly skipped live-provider tests, 84.84% line/67.52% branch coverage, clean vulnerability/deprecation audits, a fresh external package-consumer build, a digest-pinned non-root container build/smoke, and detected-secret scanning.
 
 Runtime contract reference:
 
 - `docs/Agentica.RuntimeContracts.md`
 - `docs/Agentica.DeferredWork.md`
 
-Current reality gap:
+Current active slice:
 
-The runtime and client contracts are in place, but real LLM MazeQuest traversal is still an active smoke-test target. The code can call Gemini, validate model plans, retry transient provider failures, and log the run. The remaining work is to improve planner prompting/strategy and harness pressure until the LLM reliably navigates the maze without host rescue or false success.
+Preserve the green research baseline while selecting the next explicit product slice. The bounded hardening program is complete, but public packaging, a supported CLI, and broad Lab expansion remain deferred; see the [canonical status](docs/Agentica.ProductStatus.md).
 
 ## The Goal
 
@@ -149,7 +155,7 @@ Tool Layer
   MCP tools through adapters later
 
 Optional Boundary Adapters
-  CLI host now
+  Lab host now
   LLM provider clients soon
   MCP host/client adapters later
   event/run recorder later
@@ -164,7 +170,7 @@ Agentica.slnx
   Agentica/          planner/executor runtime package
     Orchestration/   incubating generic task-level orchestration contracts
   Agentica.Clients/  LLM provider SDK isolation
-  Agentica.CLI/      console proof host and host-owned harnesses
+  Agentica.Lab/      console proof host and host-owned harnesses
   Agentica.Tests/    boundary and behavior tests
 ```
 
@@ -187,7 +193,7 @@ Use folders and namespaces inside `Agentica` to carry scope and meaning.
 Run:
 
 ```powershell
-dotnet run --project Agentica.CLI -- run "Create a two-step workflow that queries state and then acts"
+dotnet run --project Agentica.Lab -- run "Create a two-step workflow that queries state and then acts"
 ```
 
 Expected event story:
@@ -206,46 +212,63 @@ outcome.reported
 run.succeeded
 ```
 
-After the event stream, the CLI prints a serialized `OutcomeEnvelope` JSON object.
+After the event stream, the Lab executable prints a serialized `OutcomeEnvelope` JSON object.
 
 That envelope contains:
 
 - `outcome`: terminal status, stop reason, completed steps, blockers, and completion evidence.
 - `report`: deterministic narrative report with evidence-grounded claims.
 - `receipts`: all tool receipts.
-- `details`: request, plan versions, refinements, observations, artifacts, events, and validation issues.
+- `details`: request, plan versions, refinements, observations, artifacts, events, validation issues, attempt summaries, and observer-delivery failure state.
+- `priorAttempts`: every complete earlier attempt envelope in chronological order; the top-level envelope is the final attempt.
 
 ## Build And Test
 
 Prerequisite:
 
-- .NET 10 SDK
+- .NET SDK 10.0.302, exactly as pinned by `global.json`
 
-Build:
+Restore and build:
 
 ```powershell
-dotnet build Agentica.slnx
+dotnet restore Agentica.slnx --locked-mode --configfile NuGet.config
+dotnet build Agentica.slnx --configuration Release --no-restore
 ```
 
 Test:
 
 ```powershell
-dotnet test Agentica.slnx
+dotnet test Agentica.slnx --configuration Release --no-build
 ```
 
 Run proof slice:
 
 ```powershell
-dotnet run --project Agentica.CLI -- run "Create a two-step workflow that queries state and then acts"
+dotnet run --project Agentica.Lab -- run "Create a two-step workflow that queries state and then acts"
 ```
 
 Run the current Gemini MazeQuest smoke profile manually:
 
 ```powershell
-dotnet run --project Agentica.CLI -- mazequest run --planner gemini --planning-mode stepwise --watch --narrator deterministic --turn-json --type unlock --seed 173 --width 7 --height 7 --timeout-seconds 1200 --thinking-budget off --max-blocked-retries 2 --log-run --log-dir .agentica\runs
+dotnet run --project Agentica.Lab -- mazequest run --planner gemini --planning-mode stepwise --watch --narrator deterministic --turn-json --type unlock --seed 173 --width 7 --height 7 --timeout-seconds 1200 --thinking-budget off --max-blocked-retries 2 --log-run --log-dir .agentica\runs
 ```
 
 Visual Studio launch profiles are configured to run the same Gemini MazeQuest smoke with logging. Docker mounts `/app/.agentica/runs` back to the host `.agentica/runs` folder.
+
+Run the guarded fixed LLM product proof only when intentionally spending provider quota:
+
+```powershell
+$env:AGENTICA_RUN_LIVE_LLM_BENCHMARKS = "true"
+dotnet run --project Agentica.Lab --configuration Release -- benchmark product-proof --live
+```
+
+Revalidate an existing cohort without credentials or network calls:
+
+```powershell
+dotnet run --project Agentica.Lab --configuration Release -- benchmark product-proof aggregate <cohort-directory>
+```
+
+The committed [benchmark evidence](docs/benchmark-results/README.md) records the exact matrix, aggregate, immutable run-file hash, and reaggregation receipt. The [container contract](docs/Agentica.Container.md) documents the digest-pinned internal Lab image.
 
 ## Current Test Coverage
 
@@ -257,17 +280,22 @@ The current test suite proves:
 - Unknown tools fail before execution.
 - A query observation can trigger explicit plan refinement.
 - A mutation-capable tool cannot execute without a matching descriptor.
-- Every executed tool invocation emits a receipt.
+- Every dispatched tool invocation emits a runtime-owned terminal receipt, including cancellation after dispatch.
+- Every complete earlier attempt remains reachable from the final envelope.
 - A run can stop blocked without inventing success.
 - Outcome report claims cite evidence.
 - A downstream system can consume the `OutcomeEnvelope` JSON without parsing console text.
 - Tool input schemas reject missing, unknown, invalid enum, invalid type, and out-of-range values before execution.
 - Effect policy blocks destructive or disallowed tools before execution.
+- Frozen compiled registration hashes bind planning to dispatch; a changed or invalid live surface fails closed.
+- Local-only and workspace-boundary policies reject ungranted external output, including reparse-point escapes.
 - Completion evidence gates prevent plan exhaustion from becoming false success.
 - Bounded continuations can request more plan slices when completion is not proven.
 - Blocked retries create fresh `RequestOrigin.Agent` attempts with immediate previous-blocker context.
 - `Agentica.Clients` maps model JSON into Agentica plans without provider SDK types leaking into runtime contracts.
 - `RetryingLlmClient` retries transient provider failures, respects caller cancellation, and surfaces attempt-count metadata on exhaustion.
+- Initial and refinement model requests use explicit, versioned strict JSON schemas; repair requests preserve their schema and prompt identity.
+- The fixed Workbench/Maze benchmark rejects incomplete, duplicated, mixed, tampered, or false-success cohorts.
 - MazeQuest host scenarios exercise fog-of-war state, legal actions, objective artifacts, logging, and watch output without adding maze vocabulary to `Agentica`.
 
 ## Outcome Report Discipline
@@ -360,9 +388,10 @@ Agentica now exposes generic harness seams without importing host vocabulary:
 - `ToolInputSchema` on `ToolDescriptor` describes required inputs, allowed values, examples, and compact type/range constraints.
 - `AgenticaRunner.ValidatePlan` rejects malformed planned inputs before tool execution.
 - `ToolEffectPolicy` blocks disallowed effects such as `Destructive` unless the host explicitly permits them.
-- `ICompletionEvaluator` lets hosts require evidence, such as a completion artifact, before a run can succeed.
+- `RequiresApproval` is enforced before dispatch. An approval-required or external-output registration needs an exact, unexpired grant bound to the compiled manifest hash, tool id, output class, and allowed data boundaries; absent or stale grants fail closed.
+- Every host must explicitly provide an `ICompletionEvaluator`; it receives an immutable `CompletionContext`, and selected completion evidence must resolve inside the attempt. Plan exhaustion is available only as an explicit demo policy.
 - `MaxPlanContinuations` allows bounded continuation planning when a plan is exhausted but completion evidence is missing.
-- `MaxBlockedRetries` allows bounded retry attempts after a blocked outcome. Retry attempts are fresh Agentica run attempts with `RequestOrigin.Agent` and an `agentica.retry` context describing the immediately previous blocker.
+- `MaxBlockedRetries` bounds fresh `RequestOrigin.Agent` attempts. The default frozen retry policy permits only `ToolUnavailable`; mutation retry is disabled unless the registration is `Idempotent` and host policy authorizes that exact tool id.
 - `PlanningContextOptions` lets hosts bound recent observations and receipts passed back to planners while preserving full run details in the envelope.
 - `PlanningRequest.ExecutionContext` exposes compact run-local completed-step context to planners. Refined and continuation plans may use `dependsOn` for earlier same-plan steps or completed step ids from that context; receipts, observations, artifacts, and plan ids are evidence, not dependency ids.
 - `PlanRefinementReasons` keeps extra thinking/planning turns auditable as normal refinement reasons such as `ambiguous_action`, `blocked`, `low_confidence`, `conflicting_signals`, `completion_check`, `continue`, `resource_risk`, or `retry_unblock`.
@@ -371,7 +400,7 @@ These are Agentica concerns because every tool-using host needs them. Maze cells
 
 ### Local LLM Credentials
 
-For local CLI development, put provider keys in a `.env` file at the solution root. The CLI loads this file before creating LLM clients and applies the values to the current process, overriding inherited user/process environment variables for that CLI run.
+For local Lab development, put provider keys in a `.env` file at the solution root. The Lab loads this file before creating LLM clients and applies the values to the current process, overriding inherited user/process environment variables for that run.
 
 Start from [.env.example](.env.example):
 
@@ -379,11 +408,11 @@ Start from [.env.example](.env.example):
 GEMINI_API_KEY=your-local-dev-key
 ```
 
-`.env` is ignored by git and should not be committed. The runtime package does not load `.env` files; this is intentionally a CLI host concern.
+`.env` is ignored by git and should not be committed. The runtime package does not load `.env` files; this is intentionally a Lab host concern.
 
 ### LLM Provider Retries
 
-`Agentica.Clients` has a narrow retry layer around provider generation calls. The CLI wraps Gemini with `RetryingLlmClient` before constructing the LLM planner.
+`Agentica.Clients` has a narrow retry layer around provider generation calls. The Lab wraps Gemini with `RetryingLlmClient` before constructing the LLM planner.
 
 Defaults:
 
@@ -422,11 +451,13 @@ What matches the original goals:
 - The justified extra project, `Agentica.Clients`, exists and isolates provider SDK dependencies from the runtime.
 - Agentica owns contracts and execution truth, not host domain state or storage.
 - The runtime validates tool ids, kinds, effects, policy, and input schemas before execution.
-- Query tools, observations, explicit refinements, action tools, receipts, artifacts, and outcome envelopes are real code.
-- Completion can be evidence-gated so success is not just "no more plan steps."
-- Blocked runs can retry in a bounded way with explicit immediate-blocker context.
+- Query tools, observations, explicit refinements, action tools, canonicalized receipts, artifacts, and complete multi-attempt outcome envelopes are real code.
+- Completion is explicit and evidence-gated, so success is not silently defined as "no more plan steps."
+- Blocked runs can retry only through a bounded stop-reason policy; mutations require declared idempotency plus exact authorization.
+- Tool-returned identity, evidence links, timestamps, and payload structures are normalized at the runtime boundary.
+- Event sinks and report/reason observers cannot erase proof after an effect; the authoritative in-memory ledger survives their failure.
 - LLM provider failures are retried at the client boundary before becoming runtime `PlannerUnavailable`.
-- CLI logging creates inspectable run artifacts instead of relying on console scrollback.
+- Lab logging creates bounded/redacted inspectable run artifacts instead of relying on console scrollback, and logging failures do not change run truth.
 - MazeQuest provides a higher-pressure host harness while keeping maze concepts outside the runtime.
 
 Where the code is ahead of the original first slice:
@@ -434,20 +465,20 @@ Where the code is ahead of the original first slice:
 - `Agentica.Clients` and Gemini planning are already present.
 - Runtime input schemas, effect policy, evidence-gated completion, bounded continuation, blocked retry, and planner context shaping are implemented.
 - Planner-provided step reasons and refinement reason codes are preserved in the normal plan/refinement envelope.
-- CLI run logging and MazeQuest watch/turn envelopes are implemented.
+- Lab run logging and MazeQuest watch/turn envelopes are implemented.
 - Provider-call retry and 10-minute LLM generation call timeouts are implemented.
 
 Where the code is still behind the product goal:
 
-- The LLM planner is present, but real MazeQuest solving is not yet proven as a stable green smoke test.
+- One fixed measured cohort established 25/25 Workbench success and 4/5 Maze holdout success with zero false successes; repeated cohorts and broader scenarios are still needed for a reliability claim.
 - LLM outcome reporting is not yet the primary report path; deterministic/host reporters still carry most proof reporting.
 - Planning decisions are intentionally still `WorkflowPlan`/`PlanRefinement` shaped; richer model decisions such as "already complete", "cannot resume", or "ask for approval" are not first-class structured model outputs yet.
 - Provider retry observability is currently response/exception metadata, not a runtime event stream.
-- The run logger is a CLI adapter, not a general recorder API.
+- The bounded/redacted run logger is a Lab adapter, not a general recorder API; redaction remains best-effort and serialization is not streaming-bounded.
 - MCP remains intentionally unimplemented.
-- Storage, approvals, durable run replay, and host policy plugins are still adapter-level future work.
+- Storage, durable run replay, and host policy plugins are still adapter-level future work; the implemented approval grants are deliberately narrow runtime capabilities, not a human approval service.
 
-The current state is good enough to keep pressing on LLM behavior. The next meaningful proof is not more scaffolding; it is a logged Gemini MazeQuest run where the model uses the tool contracts, observations, retry context, and completion evidence gate to either finish honestly or stop with a useful blocker.
+The immediate next proof is operational: observe the pinned release workflow and container build, preserve their evidence, and keep feature growth behind that result.
 
 ## Non-Goals
 
@@ -466,7 +497,9 @@ The current and near-term package is not:
 
 Those can exist around Agentica later as adapters, hosts, or tools.
 
-## Roadmap
+## Historical Implementation Roadmap
+
+This roadmap records the original implementation sequence. It does not set current priority; use the [canonical product status](docs/Agentica.ProductStatus.md) for active work.
 
 ### Slice 1: Executable Envelope Proof
 
@@ -521,7 +554,7 @@ Status: not yet primary.
 
 ### Slice 6: Recording Adapter
 
-Status: implemented as CLI logging only.
+Status: implemented as Lab logging only.
 
 - `--log-run` writes structured run artifacts under `.agentica/runs`.
 - MazeQuest logs include stage, public snapshot, event JSONL, turn JSONL, and outcome JSON.
@@ -539,11 +572,12 @@ Status: not started.
 
 Important supporting docs:
 
+- [Canonical Product Status And Goal Xref](docs/Agentica.ProductStatus.md)
 - [Agentica Object Graph](docs/Agentica.ObjectGraph.md)
 - [Agentica Design Decisions](docs/Agentica.Design.Decisions.md)
 - [Codex Goal: First Executable Slice](docs/CodexGoal.Agentica.FirstExecutableSlice.md)
 - [Codex Goal: Runtime Harness Gaps](docs/CodexGoal.Agentica.RuntimeHarnessGaps.md)
-- [Goal Status Log](docs/Agentica.GoalStatus.md)
+- [Historical First-Slice Status Log](docs/Agentica.GoalStatus.md)
 - [Original Planning README](Agentica.ReadMe.md)
 
 ## License

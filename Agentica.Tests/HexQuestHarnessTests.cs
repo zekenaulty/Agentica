@@ -1,5 +1,5 @@
 using Agentica.Artifacts;
-using Agentica.CLI.Scenarios.HexQuest;
+using Agentica.Lab.Scenarios.HexQuest;
 using Agentica.Events;
 using Agentica.Execution;
 using Agentica.Outcomes;

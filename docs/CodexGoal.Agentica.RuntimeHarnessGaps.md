@@ -1,5 +1,7 @@
 # Codex Goal: Agentica Runtime Harness Gaps
 
+> Lifecycle: **Implemented** · Completion: **100%** · Canonical status: [Agentica Product Status And Goal Xref](Agentica.ProductStatus.md)
+
 ## Mission
 
 Close the generic runtime gaps needed for richer host-provided test harnesses such as maze-backed quest scenarios.
@@ -41,8 +43,8 @@ Run before completion:
 ```powershell
 dotnet build Agentica.slnx
 dotnet test Agentica.slnx
-dotnet run --project Agentica.CLI -- run "Create a two-step workflow that queries state and then acts"
-dotnet run --project Agentica.CLI -- quest run sun_gate --route blocked --planning-mode stepwise
+dotnet run --project Agentica.Lab -- run "Create a two-step workflow that queries state and then acts"
+dotnet run --project Agentica.Lab -- quest run sun_gate --route blocked --planning-mode stepwise
 ```
 
 ## Completion Condition

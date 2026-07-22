@@ -18,7 +18,7 @@ obj/
 *.VC.VC.opendb
 project.lock.json
 project.fragment.lock.json
-artifacts/
+/artifacts/
 .agentica/
 **/Properties/launchSettings.json
 *.nupkg

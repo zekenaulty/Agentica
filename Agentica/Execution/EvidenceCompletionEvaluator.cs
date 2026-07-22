@@ -1,4 +1,3 @@
-using Agentica.Runs;
 using Agentica.Outcomes;
 
 namespace Agentica.Execution;
@@ -12,7 +11,28 @@ public sealed class EvidenceCompletionEvaluator : ICompletionEvaluator
         IReadOnlyList<CompletionEvidenceRequirement> requirements,
         bool continueWhenMissing = true)
     {
-        _requirements = requirements;
+        ArgumentNullException.ThrowIfNull(requirements);
+        var requirementSnapshot = requirements
+            .Select(requirement => requirement is null ? null! : requirement with { })
+            .ToArray();
+        if (requirementSnapshot.Length == 0)
+        {
+            throw new ArgumentException(
+                "At least one completion evidence requirement is required.",
+                nameof(requirements));
+        }
+
+        if (requirementSnapshot.Any(requirement =>
+                requirement is null ||
+                string.IsNullOrWhiteSpace(requirement.Kind) ||
+                string.IsNullOrWhiteSpace(requirement.Value)))
+        {
+            throw new ArgumentException(
+                "Completion evidence requirements must have nonempty kinds and values.",
+                nameof(requirements));
+        }
+
+        _requirements = Array.AsReadOnly(requirementSnapshot);
         _continueWhenMissing = continueWhenMissing;
     }
 
@@ -21,16 +41,26 @@ public sealed class EvidenceCompletionEvaluator : ICompletionEvaluator
         bool continueWhenMissing = true) =>
         new([CompletionEvidenceRequirement.ArtifactKind(artifactKind)], continueWhenMissing);
 
-    public CompletionEvaluation Evaluate(AgenticaRun run)
+    public CompletionEvaluation Evaluate(CompletionContext context)
     {
-        var missing = _requirements
-            .Where(requirement => !requirement.IsSatisfiedBy(run.Artifacts, run.Receipts))
-            .Select(requirement => $"{requirement.Kind}:{requirement.Value}")
+        var resolved = _requirements
+            .Select(requirement => new
+            {
+                Requirement = requirement,
+                Evidence = requirement.Resolve(context.Artifacts, context.Receipts)
+            })
+            .ToArray();
+        var missing = resolved
+            .Where(item => item.Evidence is null)
+            .Select(item => $"{item.Requirement.Kind}:{item.Requirement.Value}")
             .ToArray();
 
         if (missing.Length == 0)
         {
-            return CompletionEvaluation.Complete();
+            return CompletionEvaluation.Complete(resolved
+                .Select(item => item.Evidence!)
+                .Distinct()
+                .ToArray());
         }
 
         var blockers = missing

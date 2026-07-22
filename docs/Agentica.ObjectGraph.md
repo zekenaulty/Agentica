@@ -48,7 +48,7 @@ Target solution shape:
 ```text
 Agentica.slnx
   Agentica/                  primary planner/executor runtime package
-  Agentica.CLI/              console host
+  Agentica.Lab/              console host
   Agentica.Clients/          provider SDK isolation for LLM integrations
 ```
 

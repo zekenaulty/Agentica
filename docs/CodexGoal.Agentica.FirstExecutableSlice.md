@@ -1,5 +1,7 @@
 # Codex Goal: Agentica First Executable Proof Slice
 
+> Lifecycle: **Implemented** · Completion: **100%** · Canonical status: [Agentica Product Status And Goal Xref](Agentica.ProductStatus.md)
+
 ## Mission
 
 Implement Agentica's first executable proof slice.
@@ -25,7 +27,7 @@ The host application owns domain state, domain tools, policy, approvals, storage
 
 1. Keep the solution small.
 2. The central runtime package remains `Agentica`.
-3. The console host remains `Agentica.CLI`.
+3. The console host remains `Agentica.Lab`.
 4. Do not create `Agentica.Core`, `Agentica.Runtime`, `Agentica.Abstractions`, `Agentica.Storage`, `Agentica.Persistence`, `Agentica.Tools`, or other project-per-concern layers.
 5. You may add exactly one test project, `Agentica.Tests`, only if needed for automated coverage. A test project is acceptable; runtime-layer project sprawl is not.
 6. Do not implement MCP support yet.
@@ -63,7 +65,7 @@ Implement only the first-slice version of these concepts:
 This command must work:
 
 ```powershell
-dotnet run --project Agentica.CLI -- run "Create a two-step workflow that queries state and then acts"
+dotnet run --project Agentica.Lab -- run "Create a two-step workflow that queries state and then acts"
 ```
 
 It must emit an operator-visible event stream with this logical order:
@@ -103,7 +105,7 @@ Run these before considering the goal complete:
 ```powershell
 dotnet build Agentica.slnx
 dotnet test Agentica.slnx
-dotnet run --project Agentica.CLI -- run "Create a two-step workflow that queries state and then acts"
+dotnet run --project Agentica.Lab -- run "Create a two-step workflow that queries state and then acts"
 ```
 
 ## Milestones
@@ -130,7 +132,7 @@ Implement `AgenticaRunner` so it can create a run, emit events, validate plans, 
 
 ### Milestone 4: Console slice
 
-Update `Agentica.CLI` so `run "<objective>"` emits the event stream and full JSON `OutcomeEnvelope`.
+Update `Agentica.Lab` so `run "<objective>"` emits the event stream and full JSON `OutcomeEnvelope`.
 
 ### Milestone 5: Outcome envelope and deterministic report
 

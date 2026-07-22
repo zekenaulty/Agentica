@@ -12,15 +12,33 @@ public static class DemoTools
                     ToolId: DemoToolIds.QueryState,
                     Name: "Query State",
                     Kind: ToolKind.Query,
-                    Effect: ToolEffect.ReadOnly),
-                new QueryStateTool()),
+                    Effect: ToolEffect.ReadOnly,
+                    RetrySafety: ToolRetrySafety.Idempotent),
+                new QueryStateTool(),
+                new ToolSecurityDeclaration(
+                    ToolEffect.ReadOnly,
+                    [ToolDataBoundary.HostState],
+                    [ToolDataBoundary.HostState],
+                    ToolExternalOutputClassification.None,
+                    ToolApprovalRequirement.None,
+                    ToolRetrySafety.Idempotent,
+                    new ToolProvenance(ToolProvenanceKind.BuiltIn, "Agentica.DemoTools"))),
             new ToolRegistration(
                 new ToolDescriptor(
                     ToolId: DemoToolIds.PerformAction,
                     Name: "Perform Action",
                     Kind: ToolKind.Action,
-                    Effect: ToolEffect.WritesLocalState),
-                new PerformActionTool()));
+                    Effect: ToolEffect.WritesLocalState,
+                    RetrySafety: ToolRetrySafety.MutationUnsafe),
+                new PerformActionTool(),
+                new ToolSecurityDeclaration(
+                    ToolEffect.WritesLocalState,
+                    [ToolDataBoundary.HostState],
+                    [ToolDataBoundary.HostState],
+                    ToolExternalOutputClassification.None,
+                    ToolApprovalRequirement.None,
+                    ToolRetrySafety.MutationUnsafe,
+                    new ToolProvenance(ToolProvenanceKind.BuiltIn, "Agentica.DemoTools"))));
 }
 
 public sealed class QueryStateTool : ITool

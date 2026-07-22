@@ -16,14 +16,23 @@ internal sealed class PlanExecutionValidator
     }
 
     public IReadOnlyList<ValidationIssue> Validate(WorkflowPlan plan) =>
-        Validate(plan, Array.Empty<string>());
+        Validate(
+            plan,
+            Array.Empty<string>(),
+            _policy.EffectiveSecurityPolicy.InitialBoundaries
+                .Append(ToolDataBoundary.UserContent)
+                .ToHashSet(),
+            _toolCatalog.ManifestHash);
 
     public IReadOnlyList<ValidationIssue> Validate(
         WorkflowPlan plan,
-        IReadOnlyCollection<string> completedStepIds)
+        IReadOnlyCollection<string> completedStepIds,
+        IReadOnlySet<ToolDataBoundary> exposedBoundaries,
+        string manifestHash)
     {
         var issues = new List<ValidationIssue>();
         var completedStepIdSet = completedStepIds.ToHashSet(StringComparer.Ordinal);
+        var projectedExposedBoundaries = exposedBoundaries.ToHashSet();
 
         if (plan.Steps.Count == 0)
         {
@@ -75,31 +84,60 @@ internal sealed class PlanExecutionValidator
                 continue;
             }
 
-            if (registration.Descriptor.Kind != step.Kind)
+            var descriptor = registration.PlannerProjection;
+            var security = registration.Security;
+
+            if (descriptor.Kind != step.Kind)
             {
                 issues.Add(new ValidationIssue(
                     "plan.step.kind_mismatch",
-                    $"Step '{step.StepId}' kind '{step.Kind}' does not match tool kind '{registration.Descriptor.Kind}'.",
+                    $"Step '{step.StepId}' kind '{step.Kind}' does not match tool kind '{descriptor.Kind}'.",
                     step.StepId));
             }
 
-            if (registration.Descriptor.Effect != step.Effect)
+            if (security.Effect != step.Effect)
             {
                 issues.Add(new ValidationIssue(
                     "plan.step.effect_mismatch",
-                    $"Step '{step.StepId}' effect '{step.Effect}' does not match tool effect '{registration.Descriptor.Effect}'.",
+                    $"Step '{step.StepId}' effect '{step.Effect}' does not match authoritative tool effect '{security.Effect}'.",
                     step.StepId));
             }
 
-            if (!_policy.EffectiveEffectPolicy.Allows(registration.Descriptor.Effect))
+            if (!_policy.EffectiveEffectPolicy.Allows(security.Effect))
             {
                 issues.Add(new ValidationIssue(
                     "plan.step.effect_not_allowed",
-                    $"Step '{step.StepId}' references tool effect '{registration.Descriptor.Effect}' which is not allowed by policy.",
+                    $"Step '{step.StepId}' references tool effect '{security.Effect}' which is not allowed by policy.",
                     step.StepId));
             }
 
-            if (step.Effect != ToolEffect.ReadOnly && step.Kind != ToolKind.Action)
+            var plannerBoundaryViolations = ToolSecurityEvaluator.PlannerBoundaryViolations(
+                _policy.EffectiveSecurityPolicy,
+                security.ExposesToPlanner);
+            if (plannerBoundaryViolations.Count > 0)
+            {
+                issues.Add(new ValidationIssue(
+                    "plan.step.planner_boundary_not_allowed",
+                    $"Step '{step.StepId}' would expose disallowed data boundaries to the external planner: " +
+                    $"{string.Join(", ", plannerBoundaryViolations)}.",
+                    step.StepId));
+            }
+
+            var grant = ToolSecurityEvaluator.EvaluateDispatch(
+                _policy.EffectiveSecurityPolicy,
+                manifestHash,
+                registration,
+                projectedExposedBoundaries,
+                DateTimeOffset.UtcNow);
+            if (!grant.Allowed)
+            {
+                issues.Add(new ValidationIssue(
+                    grant.Code ?? "plan.step.security_grant_required",
+                    grant.Message ?? $"Step '{step.StepId}' is not authorized for dispatch.",
+                    step.StepId));
+            }
+
+            if (security.Effect != ToolEffect.ReadOnly && step.Kind != ToolKind.Action)
             {
                 issues.Add(new ValidationIssue(
                     "plan.step.mutation_hidden",
@@ -107,7 +145,8 @@ internal sealed class PlanExecutionValidator
                     step.StepId));
             }
 
-            issues.AddRange(ToolInputValidator.Validate(step, registration.Descriptor.InputSchema));
+            issues.AddRange(ToolInputValidator.Validate(step, descriptor.InputSchema));
+            projectedExposedBoundaries.UnionWith(security.ExposesToPlanner);
         }
 
         ValidateBatches(plan, issues);
