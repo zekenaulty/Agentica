@@ -11,6 +11,7 @@ using Agentica.Tools;
 
 namespace Agentica.Tests;
 
+[Collection(ConsoleOutputTestCollection.Name)]
 public sealed class AgenticaRunnerTests
 {
     [Fact]

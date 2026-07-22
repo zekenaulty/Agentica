@@ -15,6 +15,7 @@ using Agentica.Tools;
 
 namespace Agentica.Tests;
 
+[Collection(ConsoleOutputTestCollection.Name)]
 public sealed class ChessQuestHarnessTests
 {
     private const string StartFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
