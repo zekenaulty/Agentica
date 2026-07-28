@@ -321,7 +321,15 @@ public sealed class ChatWorkspaceResourceLimitTests
         var tool = new LabWorkspaceFileSearchTool(
             fixture.WorkspaceRoot,
             ErrorFloodProcess(),
-            TestLimits() with { MaxSearchErrorChars = 64 });
+            TestLimits() with
+            {
+                MaxSearchErrorChars = 64,
+                // This proof owns both process termination and the fallback read.
+                // Keep its outer deadline distinct from the five-second
+                // termination-confirmation grace so hosted scheduling cannot
+                // turn a confirmed bounded shutdown into a duration refusal.
+                MaxSearchDuration = TimeSpan.FromSeconds(15)
+            });
         var stopwatch = Stopwatch.StartNew();
 
         var result = await tool.ExecuteAsync(
@@ -523,7 +531,11 @@ public sealed class ChatWorkspaceResourceLimitTests
 
     private static LabWorkspaceSearchProcessSpec ErrorFloodProcess() =>
         OperatingSystem.IsWindows()
-            ? PowerShell("[Console]::Error.Write(('x' * 4096)); Start-Sleep -Seconds 30")
+            ? PowerShell(
+                "$b=[Text.Encoding]::UTF8.GetBytes(('x' * 4096)); " +
+                "$s=[Console]::OpenStandardError(); " +
+                "$s.Write($b,0,$b.Length); $s.Flush(); " +
+                "Start-Sleep -Seconds 30")
             : Shell("head -c 4096 /dev/zero | tr '\\0' x >&2; sleep 30");
 
     private static LabWorkspaceSearchProcessSpec OutputFloodWithTerminationFailureProcess()
