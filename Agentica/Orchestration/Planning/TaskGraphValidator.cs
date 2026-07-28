@@ -6,10 +6,18 @@ public sealed class TaskGraphValidationException : InvalidOperationException
         : base(message)
     {
     }
+
+    public TaskGraphValidationException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
 }
 
 public static class TaskGraphValidator
 {
+    private const int MaximumTasks = 4_096;
+    private const int MaximumDependencyEdges = 16_384;
+
     public static void Validate(
         TaskGraphPlan plan,
         OrchestrationState? state = null,
@@ -32,9 +40,16 @@ public static class TaskGraphValidator
             throw new TaskGraphValidationException("Task graph must contain at least one task.");
         }
 
+        if (plan.Tasks.Count > MaximumTasks)
+        {
+            throw new TaskGraphValidationException(
+                $"Task graph cannot contain more than {MaximumTasks} tasks.");
+        }
+
         ValidateRequirements(plan.DefinitionOfDone, "Task graph definition of done");
 
         var ids = new HashSet<string>(StringComparer.Ordinal);
+        var dependencyEdgeCount = 0;
         foreach (var task in plan.Tasks)
         {
             if (task is null)
@@ -65,6 +80,13 @@ public static class TaskGraphValidator
             if (task.DependsOn is null)
             {
                 throw new TaskGraphValidationException($"Task '{task.TaskId}' dependencies are required.");
+            }
+
+            dependencyEdgeCount = checked(dependencyEdgeCount + task.DependsOn.Count);
+            if (dependencyEdgeCount > MaximumDependencyEdges)
+            {
+                throw new TaskGraphValidationException(
+                    $"Task graph cannot contain more than {MaximumDependencyEdges} dependency edges.");
             }
 
             if (task.ContextProjection is null)
@@ -236,33 +258,45 @@ public static class TaskGraphValidator
     private static void RejectCycles(TaskGraphPlan plan)
     {
         var tasks = plan.Tasks.ToDictionary(task => task.TaskId, StringComparer.Ordinal);
-        var visiting = new HashSet<string>(StringComparer.Ordinal);
-        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var remainingDependencies = tasks.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Value.DependsOn.Count,
+            StringComparer.Ordinal);
+        var dependents = tasks.Keys.ToDictionary(
+            taskId => taskId,
+            _ => new List<string>(),
+            StringComparer.Ordinal);
 
         foreach (var task in plan.Tasks)
         {
-            Visit(task.TaskId);
+            foreach (var dependency in task.DependsOn)
+            {
+                dependents[dependency].Add(task.TaskId);
+            }
         }
 
-        void Visit(string taskId)
+        var ready = new Queue<string>(remainingDependencies
+            .Where(pair => pair.Value == 0)
+            .Select(pair => pair.Key));
+        var visited = 0;
+        while (ready.TryDequeue(out var taskId))
         {
-            if (visited.Contains(taskId))
+            visited++;
+            foreach (var dependent in dependents[taskId])
             {
-                return;
+                remainingDependencies[dependent]--;
+                if (remainingDependencies[dependent] == 0)
+                {
+                    ready.Enqueue(dependent);
+                }
             }
+        }
 
-            if (!visiting.Add(taskId))
-            {
-                throw new TaskGraphValidationException($"Task graph contains a cycle at task '{taskId}'.");
-            }
-
-            foreach (var dependency in tasks[taskId].DependsOn)
-            {
-                Visit(dependency);
-            }
-
-            visiting.Remove(taskId);
-            visited.Add(taskId);
+        if (visited != tasks.Count)
+        {
+            var cycleTask = remainingDependencies.First(pair => pair.Value > 0).Key;
+            throw new TaskGraphValidationException(
+                $"Task graph contains a cycle at task '{cycleTask}'.");
         }
     }
 }

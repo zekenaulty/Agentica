@@ -1,11 +1,29 @@
+/// <summary>
+/// Performs bounded, pre-open pathname validation for a cooperative workspace. It rejects
+/// links and reparse points that are present when a path is checked. This is deliberately not
+/// OS-handle-relative confinement and does not close adversarial TOCTOU path-replacement races.
+/// </summary>
 internal sealed class WorkspacePathBoundary
 {
     private const string BoundaryPrefix = "Workspace boundary refused";
+    private readonly Action<string>? _afterDirectoryCreated;
+
+    internal const string SecurityModel =
+        "Bounded pre-open validation rejects static links and reparse points; it is not " +
+        "OS-handle-relative confinement and does not close adversarial TOCTOU replacement races.";
 
     public WorkspacePathBoundary(string workspaceRoot)
+        : this(workspaceRoot, afterDirectoryCreated: null)
+    {
+    }
+
+    internal WorkspacePathBoundary(
+        string workspaceRoot,
+        Action<string>? afterDirectoryCreated)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workspaceRoot);
         WorkspaceRoot = Path.GetFullPath(workspaceRoot);
+        _afterDirectoryCreated = afterDirectoryCreated;
     }
 
     public string WorkspaceRoot { get; }
@@ -92,8 +110,21 @@ internal sealed class WorkspacePathBoundary
     public bool TryPrepareDirectory(
         string relativePath,
         out string directoryPath,
+        out string error) =>
+        TryPrepareDirectory(
+            relativePath,
+            out directoryPath,
+            out _,
+            out error);
+
+    public bool TryPrepareDirectory(
+        string relativePath,
+        out string directoryPath,
+        out IReadOnlyList<string> createdDirectories,
         out string error)
     {
+        var created = new List<string>();
+        createdDirectories = created;
         if (!TryResolveContainedPath(relativePath, out directoryPath, out error))
         {
             return false;
@@ -130,6 +161,8 @@ internal sealed class WorkspacePathBoundary
             try
             {
                 Directory.CreateDirectory(current);
+                created.Add(current);
+                _afterDirectoryCreated?.Invoke(current);
             }
             catch (Exception exception) when (IsPathException(exception))
             {
@@ -179,10 +212,22 @@ internal sealed class WorkspacePathBoundary
 
     public bool TryEnumerateFiles(
         string searchRoot,
+        int maxEntries,
+        int maxFiles,
+        IReadOnlySet<string> excludedDirectoryNames,
+        CancellationToken cancellationToken,
         out IReadOnlyList<string> files,
+        out int visitedEntries,
+        out bool limitReached,
         out string error)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxEntries, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxFiles, 1);
+        ArgumentNullException.ThrowIfNull(excludedDirectoryNames);
+
         files = Array.Empty<string>();
+        visitedEntries = 0;
+        limitReached = false;
         if (!TryResolveExistingPath(searchRoot, out var resolvedRoot, out error))
         {
             return false;
@@ -191,6 +236,7 @@ internal sealed class WorkspacePathBoundary
         if (File.Exists(resolvedRoot))
         {
             files = [resolvedRoot];
+            visitedEntries = 1;
             return true;
         }
 
@@ -200,16 +246,51 @@ internal sealed class WorkspacePathBoundary
 
         while (pending.Count > 0)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var directory = pending.Pop();
             if (!TryValidateExistingDirectory(directory, out error))
             {
                 return false;
             }
 
-            string[] entries;
             try
             {
-                entries = Directory.GetFileSystemEntries(directory);
+                foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    visitedEntries++;
+                    if (visitedEntries > maxEntries)
+                    {
+                        files = discovered;
+                        limitReached = true;
+                        error = string.Empty;
+                        return true;
+                    }
+
+                    if (!TryResolveExistingPath(entry, out var resolvedEntry, out error))
+                    {
+                        return false;
+                    }
+
+                    if (Directory.Exists(resolvedEntry))
+                    {
+                        if (!excludedDirectoryNames.Contains(Path.GetFileName(resolvedEntry)))
+                        {
+                            pending.Push(resolvedEntry);
+                        }
+                    }
+                    else if (File.Exists(resolvedEntry))
+                    {
+                        discovered.Add(resolvedEntry);
+                        if (discovered.Count >= maxFiles)
+                        {
+                            files = discovered;
+                            limitReached = true;
+                            error = string.Empty;
+                            return true;
+                        }
+                    }
+                }
             }
             catch (Exception exception) when (IsPathException(exception))
             {
@@ -217,22 +298,6 @@ internal sealed class WorkspacePathBoundary
                 return false;
             }
 
-            foreach (var entry in entries)
-            {
-                if (!TryResolveExistingPath(entry, out var resolvedEntry, out error))
-                {
-                    return false;
-                }
-
-                if (Directory.Exists(resolvedEntry))
-                {
-                    pending.Push(resolvedEntry);
-                }
-                else if (File.Exists(resolvedEntry))
-                {
-                    discovered.Add(resolvedEntry);
-                }
-            }
         }
 
         files = discovered;

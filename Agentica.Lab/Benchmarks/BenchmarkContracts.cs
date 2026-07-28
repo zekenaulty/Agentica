@@ -101,6 +101,23 @@ public sealed record BenchmarkCaseReport(
     BenchmarkCaseDefinition Case,
     BenchmarkMetrics Metrics);
 
+public sealed record BenchmarkOriginalManifestIdentity(
+    string HarnessVersion,
+    string MatrixVersion,
+    string CohortId,
+    string ProviderName,
+    string ModelId,
+    string ConfigurationId,
+    string OriginalPricingSnapshotId);
+
+public sealed record BenchmarkReaggregationTrust(
+    string ReceiptVersion,
+    DateTimeOffset ReaggregatedAtUtc,
+    BenchmarkOriginalManifestIdentity OriginalManifest,
+    string RunsSha256,
+    string ExpectedRunsSha256,
+    string TrustAnchorKind);
+
 public sealed record BenchmarkReport(
     string MatrixVersion,
     BenchmarkCohortIdentity Cohort,
@@ -112,7 +129,14 @@ public sealed record BenchmarkReport(
     BenchmarkMetrics Holdout,
     IReadOnlyList<BenchmarkCaseReport> Cases,
     bool GatePassed,
-    IReadOnlyList<string> GateFailures);
+    IReadOnlyList<string> GateFailures)
+{
+    /// <summary>
+    /// Present only when this aggregate was recomputed from an explicitly anchored
+    /// immutable run cohort. This makes aggregate.json independently authoritative.
+    /// </summary>
+    public BenchmarkReaggregationTrust? ReaggregationTrust { get; init; }
+}
 
 public sealed class BenchmarkCohortValidationException : InvalidOperationException
 {

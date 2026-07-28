@@ -15,6 +15,8 @@ public sealed class AgenticaRun
 
     internal object EventDeliveryGate { get; } = new();
 
+    internal object GrantConsumptionGate { get; } = new();
+
     public AgenticaRun(string runId, RunRequest request, int attemptNumber = 1)
         : this(runId, request, attemptNumber, DateTimeOffset.UtcNow)
     {
@@ -65,6 +67,8 @@ public sealed class AgenticaRun
     public List<ToolSurfaceSnapshot> ToolSurfaces { get; } = [];
 
     public List<PlanningFrame> PlanningFrames { get; } = [];
+
+    public List<ToolGrantConsumption> GrantConsumptions { get; } = [];
 
     public Dictionary<string, string> PlanToolSurfaceIds { get; } = new(StringComparer.Ordinal);
 

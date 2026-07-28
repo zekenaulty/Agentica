@@ -1,15 +1,26 @@
 using Agentica;
+using Agentica.Artifacts;
+using Agentica.Execution;
 using Agentica.Orchestration.Acceptance;
 using Agentica.Orchestration.Context;
 using Agentica.Orchestration.Execution;
 using Agentica.Orchestration.Planning;
+using Agentica.Outcomes;
 using Agentica.Planning;
 using Agentica.Requests;
+using Agentica.Validation;
 
 namespace Agentica.Orchestration;
 
 public sealed class TaskOrchestrator
 {
+    private const int MaximumRuns = 64;
+    private const int MaximumRefinements = 64;
+    private const int MaximumGraphMutationsPerRefinement = 64;
+    private const int MaximumDiagnostics = 128;
+    private const int MaximumDiagnosticCharacters = 1_024;
+    private const string InvalidRequestObjective = "Invalid large-task request.";
+
     private readonly ITaskPlanner _taskPlanner;
     private readonly IRunExecutor _runExecutor;
     private readonly ITaskAcceptanceEvaluator _acceptanceEvaluator;
@@ -31,12 +42,40 @@ public sealed class TaskOrchestrator
         _contextCompiler = contextCompiler;
         _hostStateProjection = hostStateProjection;
         _policy = policy ?? new OrchestrationPolicy();
+        ValidatePolicy(_policy);
     }
 
     public async Task<OrchestrationOutcomeEnvelope> RunAsync(
         LargeTaskRequest request,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            request = OrchestrationRecordSnapshot.Request(request);
+        }
+        catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
+        {
+            var fallbackRequest = new LargeTaskRequest(
+                InvalidRequestObjective,
+                request.Origin,
+                new Dictionary<string, object?>(StringComparer.Ordinal));
+            var invalidState = new OrchestrationState(
+                AgenticaIds.New("orchestration"),
+                EmptyContext(fallbackRequest.Objective, fallbackRequest.Context))
+            {
+                Status = OrchestrationStatus.PlanInvalid,
+                StopReason = OrchestrationStopReason.PlanInvalid
+            };
+            return Envelope(
+                fallbackRequest,
+                null,
+                invalidState,
+                [],
+                null,
+                [$"Large task request could not be safely snapshotted ({exception.GetType().Name})."]);
+        }
+
         var orchestrationId = AgenticaIds.New("orchestration");
         var state = new OrchestrationState(
             orchestrationId,
@@ -59,14 +98,19 @@ public sealed class TaskOrchestrator
             try
             {
                 activeBoundary = "initial task planning";
-                plan = await _taskPlanner.CreatePlanAsync(
+                var planned = await _taskPlanner.CreatePlanAsync(
                     new TaskPlanningRequest(request, _policy),
                     cancellationToken).ConfigureAwait(false);
+                plan = planned is null ? null : OrchestrationRecordSnapshot.Plan(planned);
             }
-            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException))
+            catch (Exception exception) when (
+                exception is not OperationCanceledException &&
+                RuntimeExceptionBoundary.IsRecoverable(exception))
             {
                 ApplyPlannerFailure(state, exception);
-                diagnostics.Add($"Initial task planning failed: {exception.Message}");
+                AddDiagnostic(
+                    diagnostics,
+                    $"Initial task planning failed ({exception.GetType().Name}).");
                 return Envelope(request, plan, state, outcomes, definitionOfDone, diagnostics);
             }
 
@@ -74,7 +118,7 @@ public sealed class TaskOrchestrator
             {
                 state.Status = OrchestrationStatus.PlanInvalid;
                 state.StopReason = OrchestrationStopReason.PlanInvalid;
-                diagnostics.Add("Initial task planner returned no task graph.");
+                AddDiagnostic(diagnostics, "Initial task planner returned no task graph.");
                 return Envelope(request, null, state, outcomes, definitionOfDone, diagnostics);
             }
 
@@ -87,7 +131,7 @@ public sealed class TaskOrchestrator
             {
                 state.Status = OrchestrationStatus.PlanInvalid;
                 state.StopReason = OrchestrationStopReason.PlanInvalid;
-                diagnostics.Add($"Initial task graph is invalid: {exception.Message}");
+                AddDiagnostic(diagnostics, $"Initial task graph is invalid: {exception.Message}");
                 return Envelope(request, plan, state, outcomes, definitionOfDone, diagnostics);
             }
 
@@ -117,10 +161,8 @@ public sealed class TaskOrchestrator
                         hostState);
                     if (definitionOfDone.Satisfied)
                     {
-                        activeBoundary = "final host-state projection";
-                        var finalHostState = ProjectHostState();
                         activeBoundary = "final work-context compilation";
-                        Complete(state, plan, outcomes, finalHostState);
+                        Complete(state, plan, outcomes, hostState);
                         return Envelope(request, plan, state, outcomes, definitionOfDone, diagnostics);
                     }
                 }
@@ -176,50 +218,85 @@ public sealed class TaskOrchestrator
 
                 state.ActiveTaskId = task.TaskId;
                 state.TaskRunCounts[task.TaskId] = RunCount(state, task.TaskId) + 1;
-                var runRequest = BuildRunRequest(request, task, state);
+                var childDispatchId = AgenticaIds.New("child_dispatch");
+                var runRequest = ExecutionRecordSnapshot.Request(
+                    BuildRunRequest(request, task, state, childDispatchId));
+                var childOutcomeIndex = outcomes.Count;
+                var pendingChildDispatch = ChildDispatchProofUnavailable(
+                    runRequest,
+                    task,
+                    childDispatchId,
+                    returnedOutcomeReceived: false,
+                    failureType: null);
+                outcomes.Add(pendingChildDispatch);
                 activeBoundary = "child run execution";
-                var outcome = await _runExecutor.RunAsync(runRequest, cancellationToken).ConfigureAwait(false);
-                if (outcome is null)
+                Agentica.Outcomes.OutcomeEnvelope? returnedOutcome = null;
+                Agentica.Outcomes.OutcomeEnvelope outcome;
+                try
                 {
-                    throw new InvalidOperationException("The child run executor returned no outcome envelope.");
+                    returnedOutcome = await _runExecutor.RunAsync(runRequest, cancellationToken).ConfigureAwait(false);
+                    if (returnedOutcome is null)
+                    {
+                        throw new InvalidOperationException("The child run executor returned no outcome envelope.");
+                    }
+
+                    outcome = OrchestrationRecordSnapshot.Outcome(returnedOutcome);
+                    outcomes[childOutcomeIndex] = outcome;
+                }
+                catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
+                {
+                    // The dispatch itself has crossed the effect boundary even when its
+                    // returned proof is missing, malformed, or larger than the bounded
+                    // orchestration contract. Retain an immutable indeterminate record
+                    // before normalizing the orchestration failure; never erase the call.
+                    outcomes[childOutcomeIndex] = ChildDispatchProofUnavailable(
+                        pendingChildDispatch.Details.Request,
+                        task,
+                        childDispatchId,
+                        returnedOutcome is not null,
+                        exception.GetType().Name,
+                        BoundedReturnedRunId(returnedOutcome));
+                    throw;
                 }
 
-                outcomes.Add(outcome);
                 var childRunIdentityFailure = ChildRunIdentityFailure(outcomes);
                 if (childRunIdentityFailure is not null)
                 {
                     state.Status = OrchestrationStatus.Failed;
                     state.StopReason = OrchestrationStopReason.ChildRunFailed;
                     state.ActiveTaskId = null;
-                    diagnostics.Add(childRunIdentityFailure);
+                    AddDiagnostic(diagnostics, childRunIdentityFailure);
                     return Envelope(request, plan, state, outcomes, definitionOfDone, diagnostics);
                 }
 
                 activeBoundary = "acceptance host-state projection";
                 var acceptanceHostState = ProjectHostState();
-                var acceptanceContext = new TaskAcceptanceContext(
+                var acceptanceContext = OrchestrationRecordSnapshot.AcceptanceContext(new TaskAcceptanceContext(
                     plan,
                     state,
                     state.WorkingContext,
-                    acceptanceHostState);
+                    acceptanceHostState));
                 activeBoundary = "task acceptance evaluation";
-                var acceptance = await _acceptanceEvaluator.EvaluateAsync(
+                var returnedAcceptance = await _acceptanceEvaluator.EvaluateAsync(
                     task,
                     outcome,
                     acceptanceContext,
                     cancellationToken).ConfigureAwait(false);
-                if (acceptance is null)
+                if (returnedAcceptance is null)
                 {
                     throw new InvalidOperationException("The task acceptance evaluator returned no result.");
                 }
 
+                var acceptance = OrchestrationRecordSnapshot.Acceptance(returnedAcceptance);
+
                 activeBoundary = "declared acceptance evaluation";
-                acceptance = await EnforceDeclaredAcceptanceAsync(
-                    task,
-                    outcome,
-                    acceptanceContext,
-                    acceptance,
-                    cancellationToken).ConfigureAwait(false);
+                acceptance = OrchestrationRecordSnapshot.Acceptance(
+                    await EnforceDeclaredAcceptanceAsync(
+                        task,
+                        outcome,
+                        acceptanceContext,
+                        acceptance,
+                        cancellationToken).ConfigureAwait(false));
 
                 if (acceptance.Status == TaskAcceptanceStatus.Accepted)
                 {
@@ -270,8 +347,8 @@ public sealed class TaskOrchestrator
                 try
                 {
                     activeBoundary = "task-graph refinement";
-                    refinement = await _taskPlanner.RefinePlanAsync(
-                        new TaskRefinementRequest(
+                    var returnedRefinement = await _taskPlanner.RefinePlanAsync(
+                        OrchestrationRecordSnapshot.RefinementRequest(new TaskRefinementRequest(
                             request,
                             plan,
                             state,
@@ -279,13 +356,20 @@ public sealed class TaskOrchestrator
                             outcome,
                             acceptance,
                             state.WorkingContext,
-                            _policy),
+                            _policy)),
                         cancellationToken).ConfigureAwait(false);
+                    refinement = returnedRefinement is null
+                        ? null!
+                        : OrchestrationRecordSnapshot.Refinement(returnedRefinement);
                 }
-                catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException))
+                catch (Exception exception) when (
+                    exception is not OperationCanceledException &&
+                    RuntimeExceptionBoundary.IsRecoverable(exception))
                 {
                     ApplyPlannerFailure(state, exception);
-                    diagnostics.Add($"Task graph refinement failed after run '{outcome.Outcome.RunId}': {exception.Message}");
+                    AddDiagnostic(
+                        diagnostics,
+                        $"Task graph refinement failed after run '{outcome.Outcome.RunId}' ({exception.GetType().Name}).");
                     return Envelope(request, plan, state, outcomes, definitionOfDone, diagnostics);
                 }
 
@@ -295,7 +379,9 @@ public sealed class TaskOrchestrator
                 {
                     state.Status = OrchestrationStatus.PlanInvalid;
                     state.StopReason = OrchestrationStopReason.PlanInvalid;
-                    diagnostics.Add("Task planner returned an invalid null refinement or mutation list.");
+                    AddDiagnostic(
+                        diagnostics,
+                        "Task planner returned an invalid null refinement or mutation list.");
                     return Envelope(request, plan, state, outcomes, definitionOfDone, diagnostics);
                 }
 
@@ -304,7 +390,7 @@ public sealed class TaskOrchestrator
                     state.BlockedTaskIds.Add(task.TaskId);
                     state.Status = OrchestrationStatus.Blocked;
                     state.StopReason = OrchestrationStopReason.Blocked;
-                    diagnostics.AddRange(refinement.Blockers);
+                    AddDiagnostics(diagnostics, refinement.Blockers);
                     return Envelope(request, plan, state, outcomes, definitionOfDone, diagnostics);
                 }
 
@@ -312,7 +398,8 @@ public sealed class TaskOrchestrator
                 {
                     state.Status = OrchestrationStatus.PlanInvalid;
                     state.StopReason = OrchestrationStopReason.PlanInvalid;
-                    diagnostics.Add(
+                    AddDiagnostic(
+                        diagnostics,
                         $"Refinement proposed {refinement.Mutations.Count} mutations; policy permits {_policy.MaxGraphMutationsPerRefinement}.");
                     return Envelope(request, plan, state, outcomes, definitionOfDone, diagnostics);
                 }
@@ -330,7 +417,7 @@ public sealed class TaskOrchestrator
                 {
                     state.Status = OrchestrationStatus.PlanInvalid;
                     state.StopReason = OrchestrationStopReason.PlanInvalid;
-                    diagnostics.Add($"Task graph mutation failed: {exception.Message}");
+                    AddDiagnostic(diagnostics, $"Task graph mutation failed: {exception.Message}");
                     return Envelope(request, previousPlan, state, outcomes, definitionOfDone, diagnostics);
                 }
             }
@@ -347,10 +434,8 @@ public sealed class TaskOrchestrator
                     hostState);
                 if (definitionOfDone.Satisfied)
                 {
-                    activeBoundary = "final host-state projection";
-                    var finalHostState = ProjectHostState();
                     activeBoundary = "final work-context compilation";
-                    Complete(state, plan, outcomes, finalHostState);
+                    Complete(state, plan, outcomes, hostState);
                     return Envelope(request, plan, state, outcomes, definitionOfDone, diagnostics);
                 }
 
@@ -363,20 +448,25 @@ public sealed class TaskOrchestrator
             state.StopReason = OrchestrationStopReason.MaxRunsReached;
             return Envelope(request, plan, state, outcomes, definitionOfDone, diagnostics);
         }
-        catch (OperationCanceledException exception)
+        catch (OperationCanceledException exception) when (
+            RuntimeExceptionBoundary.IsRecoverable(exception))
         {
             state.Status = OrchestrationStatus.Cancelled;
             state.StopReason = OrchestrationStopReason.Cancelled;
             state.ActiveTaskId = null;
-            diagnostics.Add($"Orchestration cancelled: {exception.Message}");
+            AddDiagnostic(
+                diagnostics,
+                $"Orchestration cancelled ({exception.GetType().Name}).");
             return Envelope(request, plan, state, outcomes, definitionOfDone, diagnostics);
         }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
+        catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
         {
             state.Status = OrchestrationStatus.Failed;
             state.StopReason = OrchestrationStopReason.Failed;
             state.ActiveTaskId = null;
-            diagnostics.Add($"{activeBoundary} failed: {exception.Message}");
+            AddDiagnostic(
+                diagnostics,
+                $"{activeBoundary} failed ({exception.GetType().Name}).");
             return Envelope(request, plan, state, outcomes, definitionOfDone, diagnostics);
         }
     }
@@ -384,7 +474,8 @@ public sealed class TaskOrchestrator
     private static RunRequest BuildRunRequest(
         LargeTaskRequest request,
         TaskNode task,
-        OrchestrationState state)
+        OrchestrationState state,
+        string childDispatchId)
     {
         var context = new Dictionary<string, object?>(request.Context, StringComparer.Ordinal);
         foreach (var pair in task.ContextProjection)
@@ -394,6 +485,7 @@ public sealed class TaskOrchestrator
 
         context["orchestration.id"] = state.OrchestrationId;
         context["orchestration.taskId"] = task.TaskId;
+        context["orchestration.childDispatchId"] = childDispatchId;
         context["orchestration.workingContext"] = state.WorkingContext;
         context["orchestration.completedTaskIds"] = state.CompletedTaskIds.ToArray();
         context["orchestration.taskRunCount"] = RunCount(state, task.TaskId);
@@ -404,6 +496,78 @@ public sealed class TaskOrchestrator
             StringComparer.Ordinal);
 
         return new RunRequest(task.Objective, request.Origin, context);
+    }
+
+    private static Agentica.Outcomes.OutcomeEnvelope ChildDispatchProofUnavailable(
+        RunRequest request,
+        TaskNode task,
+        string childDispatchId,
+        bool returnedOutcomeReceived,
+        string? failureType,
+        string? returnedRunId = null)
+    {
+        var phase = failureType is null ? "pending" : "unavailable";
+        var message = failureType is null
+            ? "Child executor dispatch started; complete returned proof is pending."
+            : $"Child executor dispatch did not yield retainable complete proof ({failureType}); effects may have occurred.";
+        var envelope = new Agentica.Outcomes.OutcomeEnvelope(
+            new RunOutcome(
+                childDispatchId,
+                RunOutcomeStatus.PartiallyComplete,
+                StopReason.Partial,
+                [],
+                [message],
+                []),
+            new OutcomeReport(
+                AgenticaIds.New("report"),
+                message,
+                []),
+            new ReceiptEnvelope(
+            [
+                new Receipt(
+                    AgenticaIds.New("receipt"),
+                    task.TaskId,
+                    "orchestration.child-executor",
+                    ReceiptStatus.Partial,
+                    message,
+                    DateTimeOffset.UtcNow,
+                    new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["childDispatchId"] = childDispatchId,
+                        ["taskId"] = task.TaskId,
+                        ["proofStatus"] = phase,
+                        ["returnedOutcomeReceived"] = returnedOutcomeReceived,
+                        ["returnedRunId"] = returnedRunId,
+                        ["effectMayHaveOccurred"] = true,
+                        ["failureType"] = failureType
+                    })
+            ]),
+            new DetailEnvelope(
+                request,
+                [],
+                [],
+                [],
+                [],
+                [],
+                [],
+                failureType is null
+                    ? []
+                    :
+                    [
+                        new ValidationIssue(
+                            "orchestration.child.proof.unavailable",
+                            message,
+                            task.TaskId)
+                    ]));
+        return OrchestrationRecordSnapshot.Outcome(envelope);
+    }
+
+    private static string? BoundedReturnedRunId(Agentica.Outcomes.OutcomeEnvelope? outcome)
+    {
+        var runId = outcome?.Outcome?.RunId;
+        return !string.IsNullOrWhiteSpace(runId) && runId.Length <= 256
+            ? runId
+            : null;
     }
 
     private static int RunCount(OrchestrationState state, string taskId) =>
@@ -537,12 +701,19 @@ public sealed class TaskOrchestrator
     }
 
     private IReadOnlyDictionary<string, object?> ProjectHostState() =>
-        _hostStateProjection() ??
-        throw new InvalidOperationException("The host-state projection returned no snapshot.");
+        OrchestrationRecordSnapshot.Request(new LargeTaskRequest(
+            "Host-state projection.",
+            RequestOrigin.Agent,
+            _hostStateProjection() ??
+            throw new InvalidOperationException("The host-state projection returned no snapshot."))).Context;
 
-    private WorkContextSnapshot CompileContext(WorkContextCompilationRequest request) =>
-        _contextCompiler.Compile(request) ??
-        throw new InvalidOperationException("The work-context compiler returned no snapshot.");
+    private WorkContextSnapshot CompileContext(WorkContextCompilationRequest request)
+    {
+        var compiled = _contextCompiler.Compile(
+            OrchestrationRecordSnapshot.CompilationRequest(request)) ??
+            throw new InvalidOperationException("The work-context compiler returned no snapshot.");
+        return OrchestrationRecordSnapshot.Context(compiled);
+    }
 
     private static void ApplyPlannerFailure(OrchestrationState state, Exception exception)
     {
@@ -678,28 +849,67 @@ public sealed class TaskOrchestrator
             hostState,
             DateTimeOffset.UtcNow);
 
-    private static OrchestrationOutcomeEnvelope Envelope(
+    private OrchestrationOutcomeEnvelope Envelope(
         LargeTaskRequest request,
         TaskGraphPlan? plan,
         OrchestrationState state,
         IReadOnlyList<Agentica.Outcomes.OutcomeEnvelope> outcomes,
         DefinitionOfDoneResult? definitionOfDone,
         IReadOnlyList<string> diagnostics) =>
-        new(
-            state.OrchestrationId,
-            state.Status,
-            state.StopReason,
-            request.Objective,
+        OrchestrationRecordSnapshot.Envelope(
+            request,
             plan,
             state,
-            state.WorkingContext,
             outcomes,
-            state.WorkingContext.EvidenceRefs
-                .Concat(definitionOfDone?.EvidenceRefs ?? [])
-                .Distinct()
-                .ToArray())
+            definitionOfDone,
+            diagnostics,
+            _policy.MaxRuns);
+
+    private static void ValidatePolicy(OrchestrationPolicy policy)
+    {
+        if (policy.MaxRuns is < 1 or > MaximumRuns)
         {
-            DefinitionOfDone = definitionOfDone,
-            Diagnostics = diagnostics.ToArray()
-        };
+            throw new ArgumentOutOfRangeException(
+                nameof(policy),
+                $"Orchestration MaxRuns must be between 1 and {MaximumRuns}.");
+        }
+
+        if (policy.MaxRefinements is < 0 or > MaximumRefinements)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(policy),
+                $"Orchestration MaxRefinements must be between 0 and {MaximumRefinements}.");
+        }
+
+        if (policy.MaxGraphMutationsPerRefinement is < 0 or > MaximumGraphMutationsPerRefinement)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(policy),
+                "Orchestration MaxGraphMutationsPerRefinement must be between " +
+                $"0 and {MaximumGraphMutationsPerRefinement}.");
+        }
+    }
+
+    private static void AddDiagnostics(List<string> diagnostics, IEnumerable<string> values)
+    {
+        foreach (var value in values)
+        {
+            AddDiagnostic(diagnostics, value);
+        }
+    }
+
+    private static void AddDiagnostic(List<string> diagnostics, string? value)
+    {
+        if (diagnostics.Count >= MaximumDiagnostics)
+        {
+            return;
+        }
+
+        var diagnostic = string.IsNullOrWhiteSpace(value)
+            ? "Orchestration boundary returned an empty diagnostic."
+            : value;
+        diagnostics.Add(diagnostic.Length <= MaximumDiagnosticCharacters
+            ? diagnostic
+            : diagnostic[..(MaximumDiagnosticCharacters - 1)] + "\u2026");
+    }
 }

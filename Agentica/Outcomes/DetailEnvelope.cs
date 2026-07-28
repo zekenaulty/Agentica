@@ -25,6 +25,8 @@ public sealed record DetailEnvelope(
 
     public IReadOnlyList<PlanningFrame> PlanningFrames { get; init; } = [];
 
+    public IReadOnlyList<ToolGrantConsumption> GrantConsumptions { get; init; } = [];
+
     public EventDeliveryFailure? EventDeliveryFailure { get; init; }
 
     public BreadcrumbLedger Breadcrumbs { get; init; } = new([]);

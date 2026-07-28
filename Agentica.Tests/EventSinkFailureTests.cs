@@ -91,6 +91,27 @@ public sealed class EventSinkFailureTests
     }
 
     [Fact]
+    public async Task Dishonest_reason_tag_count_cannot_drive_unbounded_event_enumeration()
+    {
+        var projector = new DishonestTagReasonProjector();
+        var runner = CreateRunner(
+            Plan(Step("step_read", "workspace.read", ToolKind.Query, ToolEffect.ReadOnly)),
+            Registration("workspace.read", ToolKind.Query, ToolEffect.ReadOnly, new ReadTool()),
+            new InMemoryEventSink(),
+            projector);
+
+        var envelope = await runner.RunAsync(new RunRequest("Bound projected event tags."));
+
+        Assert.Equal(RunOutcomeStatus.Succeeded, envelope.Outcome.Status);
+        var planCreated = Assert.Single(
+            envelope.Details.Events,
+            item => item.Type == ExecutionEventType.PlanCreated.WireName());
+        Assert.Null(planCreated.UserFacingReason);
+        Assert.Equal("event.reason_projection.failed", planCreated.Diagnostics?.Code);
+        Assert.InRange(projector.Tags.EnumerationCount, 1, 20);
+    }
+
+    [Fact]
     public async Task Snapshot_limit_retains_a_typed_bounded_event_instead_of_throwing()
     {
         var steps = Enumerable.Range(0, 12)
@@ -108,8 +129,11 @@ public sealed class EventSinkFailureTests
 
         var envelope = await runner.RunAsync(new RunRequest("Return an intentionally oversized plan."));
 
-        Assert.Equal(RunOutcomeStatus.Blocked, envelope.Outcome.Status);
-        Assert.Equal(StopReason.StepLimitReached, envelope.Outcome.StopReason);
+        Assert.Equal(RunOutcomeStatus.PlanInvalid, envelope.Outcome.Status);
+        Assert.Equal(StopReason.PlanInvalid, envelope.Outcome.StopReason);
+        Assert.Contains(
+            envelope.Details.ValidationIssues,
+            issue => issue.Code == "plan.steps.limit");
         var planCreated = Assert.Single(
             envelope.Details.Events,
             item => item.Type == ExecutionEventType.PlanCreated.WireName());
@@ -193,11 +217,67 @@ public sealed class EventSinkFailureTests
             item => item.Type == ExecutionEventType.RunSucceeded.WireName());
     }
 
+    [Fact]
+    public async Task Sink_multi_inner_aggregate_with_fatal_branch_propagates_without_failure_projection()
+    {
+        var sink = new ThrowingExceptionSink(new AggregateException(
+            new InvalidOperationException("Recoverable sibling."),
+            CreateOutOfMemoryException()));
+        var runner = CreateRunner(
+            Plan(Step("step_read", "workspace.read", ToolKind.Query, ToolEffect.ReadOnly)),
+            Registration("workspace.read", ToolKind.Query, ToolEffect.ReadOnly, new ReadTool()),
+            sink);
+
+        var thrown = await Record.ExceptionAsync(
+            () => runner.RunAsync(new RunRequest("Propagate a fatal event-sink branch.")));
+
+        var aggregate = Assert.IsType<AggregateException>(thrown);
+        Assert.Contains(aggregate.InnerExceptions, exception => exception is OutOfMemoryException);
+        Assert.Equal(1, sink.Attempts);
+    }
+
+    [Fact]
+    public async Task Blocking_sink_is_bounded_and_circuit_broken_without_delaying_business_completion()
+    {
+        using var sink = new BlockingSink();
+        var tool = new MutatingTool();
+        var runner = CreateRunner(
+            Plan(Step("step_mutate", "workspace.mutate", ToolKind.Action, ToolEffect.WritesLocalState)),
+            Registration("workspace.mutate", ToolKind.Action, ToolEffect.WritesLocalState, tool),
+            sink,
+            eventSinkDeliveryTimeout: TimeSpan.FromMilliseconds(25));
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        OutcomeEnvelope envelope;
+        try
+        {
+            envelope = await runner.RunAsync(new RunRequest("Complete despite a blocking observer."));
+        }
+        finally
+        {
+            sink.Release();
+        }
+
+        stopwatch.Stop();
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(2), $"Run took {stopwatch.Elapsed}.");
+        Assert.Equal(RunOutcomeStatus.Succeeded, envelope.Outcome.Status);
+        Assert.Equal(1, tool.MutationCount);
+        var failure = Assert.IsType<EventDeliveryFailure>(envelope.Details.EventDeliveryFailure);
+        Assert.Equal(typeof(TimeoutException).FullName, failure.ExceptionType);
+        Assert.Contains("configured 25 ms bound", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(ExecutionEventType.RunCreated.WireName(), failure.EventType);
+        Assert.Contains(
+            envelope.Details.Events,
+            item => item.Type == ExecutionEventType.RunSucceeded.WireName());
+        Assert.Equal(1, sink.Attempts);
+    }
+
     private static AgenticaRunner CreateRunner(
         WorkflowPlan plan,
         ToolRegistration registration,
         IEventSink eventSink,
-        IUserFacingReasonProjector? reasonProjector = null) =>
+        IUserFacingReasonProjector? reasonProjector = null,
+        TimeSpan? eventSinkDeliveryTimeout = null) =>
         new(
             new StaticPlanner(plan),
             ToolCatalog.Create(registration),
@@ -207,7 +287,8 @@ public sealed class EventSinkFailureTests
                 MaxSteps: 4,
                 MaxRefinements: 0,
                 PlanningMode: PlanningMode.PlanOnly,
-                MaxBlockedRetries: 0),
+                MaxBlockedRetries: 0,
+                EventSinkDeliveryTimeout: eventSinkDeliveryTimeout),
             PlanExhaustionCompletionEvaluator.Instance,
             userFacingReasonProjector: reasonProjector);
 
@@ -227,6 +308,12 @@ public sealed class EventSinkFailureTests
         ToolKind kind,
         ToolEffect effect) =>
         new(stepId, toolId, kind, effect, new Dictionary<string, object?>());
+
+    private static OutOfMemoryException CreateOutOfMemoryException() =>
+        (OutOfMemoryException)(Activator.CreateInstance(
+            typeof(OutOfMemoryException),
+            "Forced fatal event-sink failure.") ??
+            throw new InvalidOperationException("Could not create the process-integrity test exception."));
 
     private sealed class StaticPlanner(WorkflowPlan plan) : IWorkflowPlanner
     {
@@ -254,6 +341,35 @@ public sealed class EventSinkFailureTests
                 throw new InvalidOperationException("Event delivery failed.");
             }
         }
+    }
+
+    private sealed class ThrowingExceptionSink(Exception exception) : IEventSink
+    {
+        public int Attempts { get; private set; }
+
+        public void Emit(ExecutionEvent executionEvent)
+        {
+            Attempts++;
+            throw exception;
+        }
+    }
+
+    private sealed class BlockingSink : IEventSink, IDisposable
+    {
+        private readonly ManualResetEventSlim _release = new(false);
+        private int _attempts;
+
+        public int Attempts => Volatile.Read(ref _attempts);
+
+        public void Emit(ExecutionEvent executionEvent)
+        {
+            Interlocked.Increment(ref _attempts);
+            _release.Wait();
+        }
+
+        public void Release() => _release.Set();
+
+        public void Dispose() => _release.Dispose();
     }
 
     private sealed class HostileMutationSink : IEventSink
@@ -362,6 +478,47 @@ public sealed class EventSinkFailureTests
                 return true;
             }
         }
+    }
+
+    private sealed class DishonestTagReasonProjector : IUserFacingReasonProjector
+    {
+        public DishonestReadOnlyList<string> Tags { get; } =
+            new(
+                reportedCount: 1,
+                yieldedCount: 20_000,
+                index => new string((char)('a' + index % 26), 65_536));
+
+        public UserFacingReason Project(UserFacingReasonProjectionRequest request) =>
+            new("Projected reason.")
+            {
+                Tags = request.EventType == ExecutionEventType.PlanCreated.WireName()
+                    ? Tags
+                    : ["projected"]
+            };
+    }
+
+    private sealed class DishonestReadOnlyList<T>(
+        int reportedCount,
+        int yieldedCount,
+        Func<int, T> itemFactory) : IReadOnlyList<T>
+    {
+        public int Count => reportedCount;
+
+        public int EnumerationCount { get; private set; }
+
+        public T this[int index] => itemFactory(index);
+
+        public IEnumerator<T> GetEnumerator()
+        {
+            for (var index = 0; index < yieldedCount; index++)
+            {
+                EnumerationCount++;
+                yield return itemFactory(index);
+            }
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+            GetEnumerator();
     }
 
     private sealed class MutatingTool : ITool

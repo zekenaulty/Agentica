@@ -44,7 +44,7 @@ public static class TaskGraph
         var completed = state.CompletedTaskIds.ToHashSet(StringComparer.Ordinal);
         var blocked = state.BlockedTaskIds.ToHashSet(StringComparer.Ordinal);
 
-        return plan.Tasks
+        return Array.AsReadOnly(plan.Tasks
             .Where(task =>
                 !completed.Contains(task.TaskId) &&
                 !blocked.Contains(task.TaskId) &&
@@ -53,7 +53,7 @@ public static class TaskGraph
             .OrderBy(item => item.Task.Priority)
             .ThenBy(item => item.Index)
             .Select(item => item.Task)
-            .ToArray();
+            .ToArray());
     }
 
     public static bool RequiredTasksComplete(

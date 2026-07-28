@@ -209,7 +209,8 @@ public sealed class AgenticaRunnerTests
         Assert.Equal("low", Assert.IsType<string>(initialSurface.PolicySummary["runPressure"]));
         Assert.Contains(
             "missing public preconditions",
-            Assert.IsType<string[]>(initialSurface.PolicySummary["planningConstraints"])[0],
+            Assert.IsAssignableFrom<IReadOnlyList<string>>(
+                initialSurface.PolicySummary["planningConstraints"])[0],
             StringComparison.OrdinalIgnoreCase);
 
         var refinementSurface = envelope.Details.ToolSurfaces[1];
@@ -445,6 +446,128 @@ public sealed class AgenticaRunnerTests
         AssertEventReferencesResolve(envelope);
     }
 
+    [Theory]
+    [InlineData("out-of-memory")]
+    [InlineData("stack-overflow")]
+    [InlineData("access-violation")]
+    public async Task Process_integrity_failure_after_mutation_dispatch_propagates_without_false_receipt(
+        string failureKind)
+    {
+        var tool = new DispatchRecordingFatalTool(CreateProcessIntegrityException(failureKind));
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
+            new ToolDescriptor(
+                "fatal_mutation",
+                "Fatal Mutation",
+                ToolKind.Action,
+                ToolEffect.WritesLocalState),
+            tool));
+        var events = new InMemoryEventSink();
+        var runner = CreateRunner(new FatalMutationPlanner(), catalog, events);
+
+        var thrown = await Record.ExceptionAsync(
+            () => runner.RunAsync(new RunRequest("Exercise the mutation dispatch integrity boundary.")));
+
+        Assert.NotNull(thrown);
+        Assert.Equal(CreateProcessIntegrityException(failureKind).GetType(), thrown.GetType());
+        Assert.Equal(1, tool.DispatchCount);
+        Assert.Contains(events.Events, executionEvent =>
+            executionEvent.Type == "step.started" &&
+            executionEvent.Context?.StepId == "step_fatal_mutation");
+        Assert.DoesNotContain(events.Events, executionEvent => executionEvent.Type == "receipt.emitted");
+        Assert.DoesNotContain(events.Events, executionEvent => executionEvent.Type == "outcome.reported");
+    }
+
+    [Fact]
+    public async Task Cancellation_wrapping_fatal_failure_after_mutation_dispatch_is_not_projected_as_cancelled()
+    {
+        var cancellation = new OperationCanceledException(
+            "Cancellation wrapper carrying a fatal failure.",
+            CreateProcessIntegrityException("out-of-memory"),
+            CancellationToken.None);
+        var tool = new DispatchRecordingFatalTool(cancellation);
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
+            new ToolDescriptor(
+                "fatal_mutation",
+                "Fatal Mutation",
+                ToolKind.Action,
+                ToolEffect.WritesLocalState),
+            tool));
+        var events = new InMemoryEventSink();
+        var runner = CreateRunner(new FatalMutationPlanner(), catalog, events);
+
+        var thrown = Assert.IsType<OperationCanceledException>(await Record.ExceptionAsync(
+            () => runner.RunAsync(new RunRequest("Exercise a wrapped fatal mutation failure."))));
+
+        Assert.Same(cancellation, thrown);
+        Assert.IsType<OutOfMemoryException>(thrown.InnerException);
+        Assert.Equal(1, tool.DispatchCount);
+        Assert.DoesNotContain(events.Events, executionEvent => executionEvent.Type == "receipt.emitted");
+        Assert.DoesNotContain(events.Events, executionEvent => executionEvent.Type == "outcome.reported");
+    }
+
+    [Fact]
+    public async Task Multi_inner_fatal_failure_after_mutation_dispatch_is_not_projected_as_failed()
+    {
+        var aggregate = new AggregateException(
+            new InvalidOperationException("Recoverable sibling."),
+            CreateProcessIntegrityException("out-of-memory"));
+        var tool = new DispatchRecordingFatalTool(aggregate);
+        var catalog = ToolCatalog.Create(TestToolRegistration.Create(
+            new ToolDescriptor(
+                "fatal_mutation",
+                "Fatal Mutation",
+                ToolKind.Action,
+                ToolEffect.WritesLocalState),
+            tool));
+        var events = new InMemoryEventSink();
+        var runner = CreateRunner(new FatalMutationPlanner(), catalog, events);
+
+        var thrown = await Record.ExceptionAsync(
+            () => runner.RunAsync(new RunRequest("Exercise an aggregate fatal mutation failure.")));
+
+        Assert.Same(aggregate, thrown);
+        Assert.Equal(1, tool.DispatchCount);
+        Assert.DoesNotContain(events.Events, executionEvent => executionEvent.Type == "receipt.emitted");
+        Assert.DoesNotContain(events.Events, executionEvent => executionEvent.Type == "outcome.reported");
+    }
+
+    [Fact]
+    public async Task Planner_out_of_memory_failure_propagates_without_synthetic_outcome()
+    {
+        var events = new InMemoryEventSink();
+        var runner = CreateRunner(
+            new FatalCreationPlanner(CreateProcessIntegrityException("out-of-memory")),
+            DemoTools.CreateCatalog(),
+            events);
+
+        await Assert.ThrowsAsync<OutOfMemoryException>(
+            () => runner.RunAsync(new RunRequest("Exercise the planner integrity boundary.")));
+
+        Assert.Contains(events.Events, executionEvent => executionEvent.Type == "plan.creation.started");
+        Assert.DoesNotContain(events.Events, executionEvent => executionEvent.Type == "outcome.reported");
+        Assert.DoesNotContain(events.Events, executionEvent => executionEvent.Type == "run.stopped");
+    }
+
+    [Fact]
+    public async Task Planner_multi_inner_aggregate_with_fatal_branch_propagates_without_synthetic_outcome()
+    {
+        var aggregate = new AggregateException(
+            new InvalidOperationException("Recoverable sibling."),
+            CreateProcessIntegrityException("out-of-memory"));
+        var events = new InMemoryEventSink();
+        var runner = CreateRunner(
+            new FatalCreationPlanner(aggregate),
+            DemoTools.CreateCatalog(),
+            events);
+
+        var thrown = await Record.ExceptionAsync(
+            () => runner.RunAsync(new RunRequest("Exercise an aggregate planner integrity boundary.")));
+
+        Assert.Same(aggregate, thrown);
+        Assert.Contains(events.Events, executionEvent => executionEvent.Type == "plan.creation.started");
+        Assert.DoesNotContain(events.Events, executionEvent => executionEvent.Type == "outcome.reported");
+    }
+
     [Fact]
     public async Task Outcome_report_claims_are_evidence_grounded()
     {
@@ -524,6 +647,20 @@ public sealed class AgenticaRunnerTests
         };
         options.Converters.Add(new JsonStringEnumConverter());
         return options;
+    }
+
+    private static Exception CreateProcessIntegrityException(string failureKind)
+    {
+        var exceptionType = failureKind switch
+        {
+            "out-of-memory" => typeof(OutOfMemoryException),
+            "stack-overflow" => typeof(StackOverflowException),
+            "access-violation" => typeof(AccessViolationException),
+            _ => throw new ArgumentOutOfRangeException(nameof(failureKind))
+        };
+
+        return (Exception)(Activator.CreateInstance(exceptionType, $"Forced {failureKind} failure.") ??
+            throw new InvalidOperationException("Could not create the process-integrity test exception."));
     }
 
     private static void AssertEventReferencesResolve(OutcomeEnvelope envelope)
@@ -642,6 +779,19 @@ public sealed class AgenticaRunnerTests
             throw new InvalidOperationException("Tool exploded.");
     }
 
+    private sealed class DispatchRecordingFatalTool(Exception exception) : ITool
+    {
+        public int DispatchCount { get; private set; }
+
+        public Task<ToolResult> ExecuteAsync(
+            ToolInvocation invocation,
+            CancellationToken cancellationToken)
+        {
+            DispatchCount++;
+            throw exception;
+        }
+    }
+
     private sealed class UnknownToolPlanner : IWorkflowPlanner
     {
         public Task<WorkflowPlan> CreatePlanAsync(
@@ -733,6 +883,45 @@ public sealed class AgenticaRunnerTests
                     Reason = "Exercise tool failure diagnostics."
                 }
             ], "Throwing tool plan."));
+
+        public Task<WorkflowPlan> RefinePlanAsync(
+            PlanningRequest request,
+            Observation observation,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Refinement should not run.");
+    }
+
+    private sealed class FatalMutationPlanner : IWorkflowPlanner
+    {
+        public Task<WorkflowPlan> CreatePlanAsync(
+            PlanningRequest request,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new WorkflowPlan("plan_fatal_mutation", 1,
+            [
+                new PlanStep(
+                    "step_fatal_mutation",
+                    "fatal_mutation",
+                    ToolKind.Action,
+                    ToolEffect.WritesLocalState,
+                    new Dictionary<string, object?>())
+                {
+                    Reason = "Exercise a dispatched mutation process-integrity failure."
+                }
+            ], "Fatal mutation dispatch plan."));
+
+        public Task<WorkflowPlan> RefinePlanAsync(
+            PlanningRequest request,
+            Observation observation,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Refinement should not run.");
+    }
+
+    private sealed class FatalCreationPlanner(Exception exception) : IWorkflowPlanner
+    {
+        public Task<WorkflowPlan> CreatePlanAsync(
+            PlanningRequest request,
+            CancellationToken cancellationToken = default) =>
+            throw exception;
 
         public Task<WorkflowPlan> RefinePlanAsync(
             PlanningRequest request,

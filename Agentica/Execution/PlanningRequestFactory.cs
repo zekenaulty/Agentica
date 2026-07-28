@@ -30,6 +30,7 @@ internal sealed class PlanningRequestFactory
     public PlanningRequest Create(RunRequest request, AgenticaRun run)
     {
         var context = _policy.EffectivePlanningContext;
+        var toolDescriptors = PlannerVisibleToolDescriptors(run);
         var requestSnapshot = ExecutionRecordSnapshot.PlannerRequest(request);
         var observations = Limit(run.Observations, context.MaxRecentObservations)
             .Select(ExecutionRecordSnapshot.Observation)
@@ -38,10 +39,16 @@ internal sealed class PlanningRequestFactory
             .Select(ExecutionRecordSnapshot.Receipt)
             .ToArray();
         var executionContext = CreateExecutionContext(run);
-        var toolSurface = CreateToolSurfaceSnapshot(run, observations, receipts, executionContext, context);
+        var toolSurface = CreateToolSurfaceSnapshot(
+            run,
+            observations,
+            receipts,
+            executionContext,
+            context,
+            toolDescriptors);
         var requestContext = new PlanningRequest(
             requestSnapshot,
-            _toolCatalog.Descriptors,
+            toolDescriptors,
             observations,
             receipts)
         {
@@ -54,7 +61,7 @@ internal sealed class PlanningRequestFactory
             AttemptNumber: run.AttemptNumber,
             Request: requestSnapshot,
             ExecutionContext: executionContext,
-            ToolDescriptors: _toolCatalog.Descriptors,
+            ToolDescriptors: toolDescriptors,
             Observations: observations,
             Receipts: receipts,
             ToolSurface: toolSurface)) ?? [];
@@ -63,9 +70,8 @@ internal sealed class PlanningRequestFactory
             run,
             executionContext,
             toolSurface);
-        var contextFrames = projectedFrames
-            .Concat([goalSpineFrame])
-            .ToArray();
+        var contextFrames = ExecutionRecordSnapshot.PlanningFrames(
+            projectedFrames.Append(goalSpineFrame));
 
         return requestContext with
         {
@@ -78,12 +84,14 @@ internal sealed class PlanningRequestFactory
         IReadOnlyList<Observation> observations,
         IReadOnlyList<Receipt> receipts,
         PlanningExecutionContext executionContext,
-        PlanningContextOptions context) =>
-        new(
+        PlanningContextOptions context,
+        IReadOnlyList<ToolDescriptor> toolDescriptors)
+    {
+        var surface = new ToolSurfaceSnapshot(
             AgenticaIds.New("surface"),
             _toolCatalog.ManifestHash,
             DateTimeOffset.UtcNow,
-            _toolCatalog.Descriptors,
+            toolDescriptors,
             executionContext,
             observations
                 .Select(observation => new EvidenceRef("observation", observation.ObservationId))
@@ -91,7 +99,59 @@ internal sealed class PlanningRequestFactory
             receipts
                 .Select(receipt => new EvidenceRef("receipt", receipt.ReceiptId))
                 .ToArray(),
-            CreatePolicySummary(run, context));
+            CreatePolicySummary(run, context, toolDescriptors.Count));
+
+        return ExecutionRecordSnapshot.ToolSurface(surface);
+    }
+
+    private IReadOnlyList<ToolDescriptor> PlannerVisibleToolDescriptors(AgenticaRun run)
+    {
+        var securityPolicy = _policy.EffectiveSecurityPolicy;
+        var visible = _toolCatalog.Manifest.Registrations
+            .Where(registration => _policy.EffectiveEffectPolicy.Allows(registration.Security.Effect))
+            .Where(registration => ToolSecurityEvaluator.PlannerBoundaryViolations(
+                    securityPolicy,
+                    run.ExposedBoundaries.Concat(registration.Security.ExposesToPlanner))
+                .Count == 0)
+            .Where(registration => HasPotentialDispatchAuthority(
+                securityPolicy,
+                registration,
+                run,
+                DateTimeOffset.UtcNow))
+            .Select(registration => registration.PlannerProjection)
+            .ToArray();
+
+        return Array.AsReadOnly(visible);
+    }
+
+    private bool HasPotentialDispatchAuthority(
+        ToolSecurityPolicy policy,
+        CompiledToolRegistration registration,
+        AgenticaRun run,
+        DateTimeOffset now)
+    {
+        var security = registration.Security;
+        var requiresGrant = security.Effect == ToolEffect.ExternalSideEffect ||
+            security.ApprovalRequirement != ToolApprovalRequirement.None;
+        if (!requiresGrant)
+        {
+            return true;
+        }
+
+        var requiredBoundaries = run.ExposedBoundaries
+            .Concat(security.Reads)
+            .Distinct()
+            .ToArray();
+        return policy.ExecutionGrants.Any(grant =>
+            !grant.IsConsumed &&
+            grant.ExpiresAt > now &&
+            grant.AttemptNumber == run.AttemptNumber &&
+            string.Equals(grant.AuthorizationScopeId, run.Request.AuthorizationScopeId, StringComparison.Ordinal) &&
+            string.Equals(grant.ManifestHash, _toolCatalog.ManifestHash, StringComparison.Ordinal) &&
+            string.Equals(grant.ToolId, registration.PlannerProjection.ToolId, StringComparison.Ordinal) &&
+            requiredBoundaries.All(grant.AllowedOutboundBoundaries.Contains) &&
+            grant.AllowedExternalOutputs.Contains(security.ExternalOutput));
+    }
 
     private PlanningFrame CreateGoalSpineFrame(
         RunRequest request,
@@ -139,7 +199,8 @@ internal sealed class PlanningRequestFactory
 
     private IReadOnlyDictionary<string, object?> CreatePolicySummary(
         AgenticaRun run,
-        PlanningContextOptions context)
+        PlanningContextOptions context,
+        int visibleToolCount)
     {
         var completedStepCount = run.CompletedSteps.Count;
         var remainingStepBudget = Math.Max(0, _policy.MaxSteps - completedStepCount);
@@ -180,6 +241,8 @@ internal sealed class PlanningRequestFactory
             ["allowedEffects"] = _policy.EffectiveEffectPolicy.AllowedEffects
                 .Select(effect => effect.ToString())
                 .ToArray(),
+            ["visibleToolCount"] = visibleToolCount,
+            ["filteredToolCount"] = _toolCatalog.Descriptors.Count - visibleToolCount,
             ["toolManifestHash"] = _toolCatalog.ManifestHash,
             ["plannerBoundaryMode"] = _policy.EffectiveSecurityPolicy.UsesExternalPlanner
                 ? "external"
@@ -200,6 +263,7 @@ internal sealed class PlanningRequestFactory
             ["elapsedMs"] = Milliseconds(elapsed),
             ["timeoutMs"] = _policy.Timeout is null ? null : Milliseconds(_policy.Timeout.Value),
             ["remainingTimeoutMs"] = remainingTimeout is null ? null : Milliseconds(remainingTimeout.Value),
+            ["eventSinkDeliveryTimeoutMs"] = Milliseconds(_policy.EffectiveEventSinkDeliveryTimeout),
             ["timePressure"] = timePressure,
             ["runPressure"] = runPressure,
             ["recommendedPlanningPosture"] = RecommendedPlanningPosture(runPressure),

@@ -14,6 +14,54 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows-proof:
+    name: Windows locked build and filesystem proof
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      CI: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: true
+      NUGET_XMLDOC_MODE: skip
+
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install the pinned .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: '**/Packages.lock.json'
+
+      - name: Verify SDK pin
+        shell: pwsh
+        run: |
+          $actual = dotnet --version
+          if ($actual -ne '10.0.302') {
+            throw "Expected .NET SDK 10.0.302; found $actual."
+          }
+
+      - name: Restore the locked dependency graph
+        run: dotnet restore Agentica.slnx --locked-mode --configfile NuGet.config
+
+      - name: Verify lock files stayed unchanged
+        run: git diff --exit-code -- Agentica/Packages.lock.json Agentica.Clients/Packages.lock.json Agentica.Lab/Packages.lock.json Agentica.Tests/Packages.lock.json
+
+      - name: Build Release with warnings as errors
+        run: dotnet build Agentica.slnx --configuration Release --no-restore
+
+      - name: Run deterministic tests including Windows junction proof
+        run: >-
+          dotnet test Agentica.Tests/Agentica.Tests.csproj
+          --configuration Release
+          --no-build
+          --no-restore
+
   quality:
     name: Locked build, proof tests, and package validation
     runs-on: ubuntu-24.04

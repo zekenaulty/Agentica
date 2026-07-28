@@ -33,14 +33,16 @@ Implemented reality:
 - Deterministic planning remains the regression baseline.
 - Gemini-backed planning exists through `LlmWorkflowPlanner` and `GeminiLlmClient`.
 - Tool input contracts, effect policy, explicit completion evaluation, bounded continuation, mutation-safe blocked retries, provider-call retries, full multi-attempt envelopes, and planner context shaping are implemented.
-- Tool registrations compile into one immutable planner/dispatch manifest containing effect, data/output boundaries, approval, retry safety, and provenance. Approval-required and external-output tools are fail-closed without an exact manifest-bound grant, and the current manifest is rechecked immediately before dispatch. Chat issues no grant by default.
+- Tool registrations compile into one immutable planner/dispatch manifest containing effect, data/output boundaries, approval, retry safety, and provenance. Approval-required and external-output tools are fail-closed without an exact one-shot grant bound to authorization scope, attempt, step, canonical input, manifest, tool, boundaries, and output class. Consumption is atomic and recorded before dispatch across policy snapshots that share the same in-memory grant state. Reconstructing a grant is a new host issuance; global grant-id uniqueness and durable replay protection remain host responsibilities. Chat issues no grant by default.
+- Planner and orchestration extension objects cross bounded deep-snapshot boundaries; runtime-produced proof envelopes expose detached read-only collection shells rather than caller-owned arrays or live orchestration state.
+- Lab workspace reads/searches are streaming and resource-bounded. Chat freezes and bounds provider responses, conservatively preflights serialized result data plus reserved final-proof/journal overhead, stages every image/prompt/metadata file, verifies staged digests, and records bounded provider/local-effect evidence. Compensation is attempted and journaled after failure. Same-volume publication is atomic per file, not an atomic multi-file or crash-durable transaction. External image registrations remain quarantined by default.
 - Disabled live Gemini tests are reported as skipped, and the resolved dependency graph has no known vulnerable packages.
 - Lab run logging writes bounded, recursively redacted structured artifacts under `.agentica/runs` and circuit-breaks safely on storage failure.
 - MazeQuest exists as a host-owned reasoning harness, not Agentica runtime vocabulary.
 - The runtime now supports small validated multi-step plan slices, read-only query batches, and dependency fields on plan steps.
-- The bounded orchestration proof contract now rejects empty acceptance, unmet global definition-of-done, unsupported mutations, planner/graph failures, and failed-child false success. Generic orchestration remains Incubating and excluded from product claims pending broader integration and measured reliability.
+- The bounded orchestration proof contract now rejects empty acceptance, unmet global definition-of-done, unsupported mutations, planner/graph failures, and failed-child false success. A child-dispatch record is frozen before execution; a missing, throwing, cancelled, malformed, or oversized return becomes explicit partial/indeterminate proof rather than an erased call. Generic orchestration remains Incubating and excluded from product claims pending broader integration and measured reliability.
 - A fixed Gemini 2.5 Flash cohort passed 29/30 overall with zero false successes: WorkbenchQuest 25/25 and the MazeQuest holdout 4/5. This is a versioned product proof, not a general reliability guarantee.
-- The productization gate passes locally and in the no-publish GitHub workflow: 390 tests with 2 explicitly skipped live-provider tests, 84.84% line/67.52% branch coverage, clean vulnerability/deprecation audits, a fresh external package-consumer build, a digest-pinned non-root container build/smoke, and detected-secret scanning.
+- The 2026-07-27 local gate passes: 525 tests passed, 2 live-provider tests were explicitly skipped, and 0 failed; coverage is 85.12% line/70.93% branch; locked restore, vulnerability/deprecation audits, formatting, Release build, selected analyzers, package validation, a fresh external consumer, the Lab subprocess gate, and digest-anchored offline benchmark reaggregation are clean. Docker Engine 27.4.0 also built the digest-pinned non-root image and passed the `quest list` smoke. Hosted [CI run 30329591366](https://github.com/zekenaulty/Agentica/actions/runs/30329591366) passed both the first Windows proof and the independent Linux release job.
 
 Runtime contract reference:
 
@@ -49,7 +51,7 @@ Runtime contract reference:
 
 Current active slice:
 
-Preserve the green research baseline while selecting the next explicit product slice. The bounded hardening program is complete, but public packaging, a supported CLI, and broad Lab expansion remain deferred; see the [canonical status](docs/Agentica.ProductStatus.md).
+The **Effect Truth And Ownership Closure** slice is 100% complete against its bounded exit gates. Local implementation, deterministic proof, and both hosted CI lanes are green. Public packaging, a supported CLI, and broad Lab expansion remain deferred; see the [canonical status](docs/Agentica.ProductStatus.md).
 
 ## The Goal
 
@@ -156,9 +158,9 @@ Tool Layer
 
 Optional Boundary Adapters
   Lab host now
-  LLM provider clients soon
+  LLM provider clients in Agentica.Clients now
   MCP host/client adapters later
-  event/run recorder later
+  Lab event/run recorder now; reusable recorder later
 ```
 
 ## Solution Shape
@@ -219,7 +221,7 @@ That envelope contains:
 - `outcome`: terminal status, stop reason, completed steps, blockers, and completion evidence.
 - `report`: deterministic narrative report with evidence-grounded claims.
 - `receipts`: all tool receipts.
-- `details`: request, plan versions, refinements, observations, artifacts, events, validation issues, attempt summaries, and observer-delivery failure state.
+- `details`: request, plan versions, refinements, observations, artifacts, events, validation issues, attempt summaries, one-shot grant-consumption evidence, and observer-delivery failure state.
 - `priorAttempts`: every complete earlier attempt envelope in chronological order; the top-level envelope is the final attempt.
 
 ## Build And Test
@@ -265,10 +267,10 @@ dotnet run --project Agentica.Lab --configuration Release -- benchmark product-p
 Revalidate an existing cohort without credentials or network calls:
 
 ```powershell
-dotnet run --project Agentica.Lab --configuration Release -- benchmark product-proof aggregate <cohort-directory>
+dotnet run --project Agentica.Lab --configuration Release -- benchmark product-proof aggregate <cohort-directory> --expected-runs-sha256 sha256-v1:<trusted-64-hex-digest>
 ```
 
-The committed [benchmark evidence](docs/benchmark-results/README.md) records the exact matrix, aggregate, immutable run-file hash, and reaggregation receipt. The [container contract](docs/Agentica.Container.md) documents the digest-pinned internal Lab image.
+The committed [benchmark evidence](docs/benchmark-results/README.md) records the exact matrix and version-controlled run-file hash. Its authoritative `aggregate.json` is a self-contained commit marker that embeds matching caller-supplied and observed SHA-256 values plus the reaggregation trust record; `reaggregation.json` is a compatibility receipt, not independent authority. This is structural reaggregation of a trusted cohort, not provider attestation or first-principles oracle replay. The [container contract](docs/Agentica.Container.md) documents the digest-pinned internal Lab image.
 
 ## Current Test Coverage
 
@@ -288,14 +290,14 @@ The current test suite proves:
 - Tool input schemas reject missing, unknown, invalid enum, invalid type, and out-of-range values before execution.
 - Effect policy blocks destructive or disallowed tools before execution.
 - Frozen compiled registration hashes bind planning to dispatch; a changed or invalid live surface fails closed.
-- Local-only and workspace-boundary policies reject ungranted external output, including reparse-point escapes.
+- Local-only and workspace-boundary policies reject ungranted external output. Lab workspace tools reject traversal plus links/reparse points present during bounded pre-open validation; this is a cooperative, non-adversarial guard rather than handle-relative confinement.
 - Completion evidence gates prevent plan exhaustion from becoming false success.
 - Bounded continuations can request more plan slices when completion is not proven.
 - Blocked retries create fresh `RequestOrigin.Agent` attempts with immediate previous-blocker context.
 - `Agentica.Clients` maps model JSON into Agentica plans without provider SDK types leaking into runtime contracts.
 - `RetryingLlmClient` retries transient provider failures, respects caller cancellation, and surfaces attempt-count metadata on exhaustion.
 - Initial and refinement model requests use explicit, versioned strict JSON schemas; repair requests preserve their schema and prompt identity.
-- The fixed Workbench/Maze benchmark rejects incomplete, duplicated, mixed, tampered, or false-success cohorts.
+- The fixed Workbench/Maze benchmark rejects incomplete, duplicated, mixed, structurally inconsistent, false-success, or caller-digest-mismatched cohorts. It structurally reaggregates a trusted version-controlled cohort; it is not provider attestation or offline oracle replay.
 - MazeQuest host scenarios exercise fog-of-war state, legal actions, objective artifacts, logging, and watch output without adding maze vocabulary to `Agentica`.
 
 ## Outcome Report Discipline
@@ -388,7 +390,7 @@ Agentica now exposes generic harness seams without importing host vocabulary:
 - `ToolInputSchema` on `ToolDescriptor` describes required inputs, allowed values, examples, and compact type/range constraints.
 - `AgenticaRunner.ValidatePlan` rejects malformed planned inputs before tool execution.
 - `ToolEffectPolicy` blocks disallowed effects such as `Destructive` unless the host explicitly permits them.
-- `RequiresApproval` is enforced before dispatch. An approval-required or external-output registration needs an exact, unexpired grant bound to the compiled manifest hash, tool id, output class, and allowed data boundaries; absent or stale grants fail closed.
+- `RequiresApproval` is enforced before dispatch. An approval-required or external-output registration needs an exact, unexpired one-shot grant bound to authorization scope, attempt, step id, canonical invocation-input digest, compiled manifest hash, tool id, output class, and allowed data boundaries. Before dispatch, the runtime atomically consumes it and records the issuer, expiry, allowed boundaries, and allowed output classifications with the invocation binding. Replay through policies sharing that in-memory grant state, input drift, scope drift, and retry without a fresh attempt-bound issuance fail closed. Reconstructing a grant creates new host-owned state, so global grant-id uniqueness and durable replay protection are outside this in-process primitive.
 - Every host must explicitly provide an `ICompletionEvaluator`; it receives an immutable `CompletionContext`, and selected completion evidence must resolve inside the attempt. Plan exhaustion is available only as an explicit demo policy.
 - `MaxPlanContinuations` allows bounded continuation planning when a plan is exhausted but completion evidence is missing.
 - `MaxBlockedRetries` bounds fresh `RequestOrigin.Agent` attempts. The default frozen retry policy permits only `ToolUnavailable`; mutation retry is disabled unless the registration is `Idempotent` and host policy authorizes that exact tool id.
@@ -424,7 +426,7 @@ Defaults:
 
 Retried failures include provider-side cancellation when the caller token is not cancelled, HTTP 429, HTTP 500/502/503/504, temporary network/transport failures, and timeouts. Non-transient failures such as bad credentials, bad requests, safety refusals, deterministic plan validation failures, and host tool refusals are not retried.
 
-All retry delays observe the caller cancellation token. If Ctrl+C, run timeout, or policy timeout cancels the token, retries stop immediately. The Visual Studio Gemini MazeQuest profile currently uses a 20-minute run timeout so one slow 10-minute provider call is not cut off before the client-level timeout can classify it.
+All retry delays observe the caller cancellation token and stop promptly when it is cancelled. The 10-minute client deadline also requests cancellation, but an in-flight provider call is bounded only when its adapter or transport honors cancellation or enforces its own deadline. The Visual Studio Gemini MazeQuest profile currently uses a 20-minute run timeout so one slow provider call can reach that client-level classification path.
 
 ## MCP Boundary
 
@@ -455,7 +457,7 @@ What matches the original goals:
 - Completion is explicit and evidence-gated, so success is not silently defined as "no more plan steps."
 - Blocked runs can retry only through a bounded stop-reason policy; mutations require declared idempotency plus exact authorization.
 - Tool-returned identity, evidence links, timestamps, and payload structures are normalized at the runtime boundary.
-- Event sinks and report/reason observers cannot erase proof after an effect; the authoritative in-memory ledger survives their failure.
+- Event sinks and report/reason observers cannot erase proof after an effect; the authoritative in-memory ledger survives their failure. Event-sink waits are bounded and circuit-broken, while reporter/reason-projector execution remains a trusted in-process callback contract.
 - LLM provider failures are retried at the client boundary before becoming runtime `PlannerUnavailable`.
 - Lab logging creates bounded/redacted inspectable run artifacts instead of relying on console scrollback, and logging failures do not change run truth.
 - MazeQuest provides a higher-pressure host harness while keeping maze concepts outside the runtime.
@@ -466,7 +468,7 @@ Where the code is ahead of the original first slice:
 - Runtime input schemas, effect policy, evidence-gated completion, bounded continuation, blocked retry, and planner context shaping are implemented.
 - Planner-provided step reasons and refinement reason codes are preserved in the normal plan/refinement envelope.
 - Lab run logging and MazeQuest watch/turn envelopes are implemented.
-- Provider-call retry and 10-minute LLM generation call timeouts are implemented.
+- Provider-call retry and a cooperative 10-minute LLM generation cancellation deadline are implemented; hard termination remains an adapter/transport responsibility.
 
 Where the code is still behind the product goal:
 
@@ -476,9 +478,9 @@ Where the code is still behind the product goal:
 - Provider retry observability is currently response/exception metadata, not a runtime event stream.
 - The bounded/redacted run logger is a Lab adapter, not a general recorder API; redaction remains best-effort and serialization is not streaming-bounded.
 - MCP remains intentionally unimplemented.
-- Storage, durable run replay, and host policy plugins are still adapter-level future work; the implemented approval grants are deliberately narrow runtime capabilities, not a human approval service.
+- Storage, durable run replay, global grant-id uniqueness, and host policy plugins are still adapter-level future work; the implemented one-shot approval grants are deliberately narrow in-memory runtime capabilities, not a human approval service or durable authorization store.
 
-The immediate next proof is operational: observe the pinned release workflow and container build, preserve their evidence, and keep feature growth behind that result.
+The immediate next step is to preserve both hosted proof lanes while choosing the next explicit product slice. Completion of this bounded closure does not promote the repository beyond Incubating or authorize public package/CLI claims.
 
 ## Non-Goals
 
@@ -541,7 +543,7 @@ Status: partially implemented.
 
 - Observations are fed back into `IWorkflowPlanner.RefinePlanAsync`.
 - `LlmWorkflowPlanner` maps structured refinement output into a refined `WorkflowPlan`.
-- Refinement, continuation, step, retry, and timeout limits are hard runtime policy.
+- Refinement, continuation, step, and retry counts are hard runtime policy. In-process run timeouts cancel cooperatively; a planner or tool that ignores cancellation is not forcibly abandoned because detached mutation work would sever effect proof.
 - Rich model decisions such as stop/ask/already-complete/cannot-resume remain future work.
 
 ### Slice 5: LLM Outcome Reporter

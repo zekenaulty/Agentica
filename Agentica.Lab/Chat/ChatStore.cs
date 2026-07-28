@@ -218,11 +218,46 @@ internal sealed class ChatStore
         string kind,
         string content,
         string? source,
-        string? metadataJson = null)
+        string? metadataJson = null) =>
+        AddContextItemCore(
+            NewId("ctx"),
+            conversationId,
+            kind,
+            content,
+            source,
+            metadataJson,
+            updateConversationTimestamp: true);
+
+    internal string NewContextItemId() => NewId("ctx");
+
+    internal ChatContextItem AddImageContextItem(
+        string contextItemId,
+        string conversationId,
+        string kind,
+        string content,
+        string? source,
+        string? metadataJson) =>
+        AddContextItemCore(
+            contextItemId,
+            conversationId,
+            kind,
+            content,
+            source,
+            metadataJson,
+            updateConversationTimestamp: false);
+
+    private ChatContextItem AddContextItemCore(
+        string contextItemId,
+        string conversationId,
+        string kind,
+        string content,
+        string? source,
+        string? metadataJson,
+        bool updateConversationTimestamp)
     {
         var now = DateTimeOffset.UtcNow;
         var item = new ChatContextItem(
-            NewId("ctx"),
+            contextItemId,
             conversationId,
             kind,
             content,
@@ -232,7 +267,8 @@ internal sealed class ChatStore
 
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
-        command.CommandText =
+        command.CommandText = updateConversationTimestamp
+            ?
             """
             insert into context_items (id, conversation_id, kind, content, source, created_at, metadata_json)
             values ($id, $conversation_id, $kind, $content, $source, $created_at, $metadata_json);
@@ -240,6 +276,11 @@ internal sealed class ChatStore
             update conversations
             set updated_at = $created_at
             where id = $conversation_id;
+            """
+            :
+            """
+            insert into context_items (id, conversation_id, kind, content, source, created_at, metadata_json)
+            values ($id, $conversation_id, $kind, $content, $source, $created_at, $metadata_json);
             """;
         Add(command, "$id", item.ContextItemId);
         Add(command, "$conversation_id", conversationId);
@@ -250,6 +291,15 @@ internal sealed class ChatStore
         Add(command, "$metadata_json", metadataJson);
         command.ExecuteNonQuery();
         return item;
+    }
+
+    internal bool RemoveContextItem(string contextItemId)
+    {
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "delete from context_items where id = $id;";
+        Add(command, "$id", contextItemId);
+        return command.ExecuteNonQuery() > 0;
     }
 
     public void AddRun(

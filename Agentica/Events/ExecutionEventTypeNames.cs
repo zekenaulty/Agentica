@@ -15,6 +15,7 @@ public static class ExecutionEventTypeNames
             ExecutionEventType.BatchStarted => "batch.started",
             ExecutionEventType.BatchCompleted => "batch.completed",
             ExecutionEventType.StepStarted => "step.started",
+            ExecutionEventType.GrantConsumed => "grant.consumed",
             ExecutionEventType.ObservationMade => "observation.made",
             ExecutionEventType.ReceiptEmitted => "receipt.emitted",
             ExecutionEventType.PlanRefinementStarted => "plan.refinement.started",

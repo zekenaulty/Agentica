@@ -15,14 +15,23 @@ ran the complete `agentica-product-proof-v1` matrix:
 - versioned prompt, schema, harness, retry, timeout, and policy configuration.
 
 The original live aggregate failed closed because its v1 price model did not classify the provider's
-automatic implicit-cache token counts. The immutable `runs.jsonl` file was not changed or rerun.
+automatic implicit-cache token counts. The version-controlled `runs.jsonl` file was not changed or rerun.
 After the official cached-input rate was added, the offline command strictly re-read and hashed those
-same records, re-validated the fixed matrix and cohort identities, and wrote:
+same records, required the independently supplied canonical SHA-256, re-validated the fixed matrix and
+cohort identities, and published the compatibility receipt first and the authoritative aggregate last:
 
-- [`aggregate.json`](20260721T143708466Z-agentica-product-proof-v1-9ad5c876785a46959a49511fb768102d/aggregate.json) — current metrics and gate result;
-- [`reaggregation.json`](20260721T143708466Z-agentica-product-proof-v1-9ad5c876785a46959a49511fb768102d/reaggregation.json) — the run-file SHA-256 and pricing-review receipt;
+- [`aggregate.json`](20260721T143708466Z-agentica-product-proof-v1-9ad5c876785a46959a49511fb768102d/aggregate.json) — the authoritative self-contained commit marker, including current metrics, gate result, current pricing review, original-manifest identity, matching expected/observed run-file SHA-256 values, and reaggregation trust record;
+- [`reaggregation.json`](20260721T143708466Z-agentica-product-proof-v1-9ad5c876785a46959a49511fb768102d/reaggregation.json) — a compatibility copy of the reaggregation receipt, not independent authority;
 - [`manifest.json`](20260721T143708466Z-agentica-product-proof-v1-9ad5c876785a46959a49511fb768102d/manifest.json) — the untouched live-run manifest; and
 - [`runs.jsonl`](20260721T143708466Z-agentica-product-proof-v1-9ad5c876785a46959a49511fb768102d/runs.jsonl) — one bounded telemetry record per run.
+
+Consumers should treat `aggregate.json` as authoritative. Because the compatibility receipt is published
+first, it can be newer after an interrupted aggregate publication and should be used only when its trust
+fields match the aggregate. This ordering cannot expose a new authoritative aggregate without its receipt.
+
+This is structural reaggregation of a trusted, version-controlled cohort. The matching expected and
+observed digests prevent silent substitution relative to the caller's trust anchor; they do not attest
+provider origin or replay the scenario oracle from first principles.
 
 Final gate: **passed**. Overall verified success was 29/30 (96.7%), false success was 0/30,
 WorkbenchQuest was 25/25, and the MazeQuest holdout was 4/5. Invalid-plan incidence was 2/30

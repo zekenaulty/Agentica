@@ -1,9 +1,25 @@
+using Agentica.Execution;
+
 namespace Agentica.Orchestration.Planning;
 
 public static class TaskGraphMutationApplier
 {
     public static TaskGraphPlan Apply(TaskGraphPlan plan, TaskGraphRefinement refinement)
     {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(refinement);
+        try
+        {
+            plan = OrchestrationRecordSnapshot.Plan(plan);
+            refinement = OrchestrationRecordSnapshot.Refinement(refinement);
+        }
+        catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
+        {
+            throw new TaskGraphValidationException(
+                $"Task graph mutation inputs could not be safely snapshotted: {exception.Message}",
+                exception);
+        }
+
         if (refinement.Mutations.Count == 0)
         {
             throw new TaskGraphValidationException("Task graph refinement must contain at least one mutation.");
@@ -150,7 +166,16 @@ public static class TaskGraphMutationApplier
             DefinitionOfDone = definitionOfDone
         };
         TaskGraphValidator.Validate(candidate);
-        return candidate;
+        try
+        {
+            return OrchestrationRecordSnapshot.Plan(candidate);
+        }
+        catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
+        {
+            throw new TaskGraphValidationException(
+                $"Task graph mutation result could not be safely snapshotted: {exception.Message}",
+                exception);
+        }
     }
 
     private static TaskNode RequiredTask(TaskGraphMutation mutation) =>

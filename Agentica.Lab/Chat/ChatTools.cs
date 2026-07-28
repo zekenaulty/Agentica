@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using Agentica;
 using Agentica.Artifacts;
@@ -419,6 +421,7 @@ internal sealed class ChatSummarizeTool : ITool
 
 internal sealed class WorkspaceFileReadTool : ITool
 {
+    private const int MaxReadBytes = 256 * 1024;
     private readonly WorkspacePathBoundary _workspaceBoundary;
     private readonly string _workspaceRoot;
 
@@ -437,24 +440,46 @@ internal sealed class WorkspaceFileReadTool : ITool
         }
 
         var maxChars = ChatToolInput.Int(invocation.Input, "maxChars", 12000, 100, 50000);
-        if (!_workspaceBoundary.TryResolveExistingFile(resolvedPath, out resolvedPath, out error))
+        WorkspaceTextPrefix read;
+        try
         {
-            return Refused(invocation, error);
+            read = await WorkspaceTextResourceReader.ReadPrefixAsync(
+                    resolvedPath,
+                    maxChars,
+                    MaxReadBytes,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
-
-        var content = await File.ReadAllTextAsync(resolvedPath, cancellationToken).ConfigureAwait(false);
-        var truncated = content.Length > maxChars;
-        if (truncated)
+        catch (WorkspaceTextResourceException exception)
         {
-            content = content[..maxChars];
+            return Refused(
+                invocation,
+                exception.Message,
+                exception.Code,
+                exception.Reason,
+                "workspace_file");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return Refused(
+                invocation,
+                "Workspace boundary refused: workspace file changed or became unreadable before the bounded read completed.");
         }
 
         var data = new Dictionary<string, object?>
         {
             ["path"] = resolvedPath,
-            ["content"] = content,
-            ["truncated"] = truncated,
-            ["length"] = content.Length
+            ["content"] = read.Content,
+            ["truncated"] = read.Truncated,
+            ["length"] = read.Content.Length,
+            ["bytesRead"] = read.BytesRead,
+            ["maxChars"] = maxChars,
+            ["maxBytes"] = MaxReadBytes,
+            ["limitReason"] = read.CharLimitReached
+                ? "character_limit"
+                : read.ByteLimitReached
+                    ? "byte_limit"
+                    : null
         };
         var receipt = Receipt(invocation, ReceiptStatus.Succeeded, $"Read workspace file: {Relative(_workspaceRoot, resolvedPath)}", data);
         var observation = new Observation(
@@ -475,13 +500,37 @@ internal sealed class WorkspaceFileReadTool : ITool
 
 internal sealed class WorkspaceFileSearchTool : ITool
 {
+    private const int MaxPatternChars = 4096;
+    private static readonly UTF8Encoding StrictUtf8 = new(
+        encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true);
+    private static readonly IReadOnlySet<string> ExcludedDirectoryNames = new HashSet<string>(
+        ["bin", "obj", ".git"],
+        StringComparer.OrdinalIgnoreCase);
+
     private readonly WorkspacePathBoundary _workspaceBoundary;
-    private readonly string _workspaceRoot;
+    private readonly WorkspaceSearchProcessSpec _processSpec;
+    private readonly WorkspaceSearchResourceLimits _limits;
 
     public WorkspaceFileSearchTool(string workspaceRoot)
+        : this(
+            workspaceRoot,
+            WorkspaceSearchProcessSpec.Ripgrep,
+            WorkspaceSearchResourceLimits.Default)
     {
+    }
+
+    internal WorkspaceFileSearchTool(
+        string workspaceRoot,
+        WorkspaceSearchProcessSpec processSpec,
+        WorkspaceSearchResourceLimits limits)
+    {
+        ArgumentNullException.ThrowIfNull(processSpec);
+        ArgumentNullException.ThrowIfNull(limits);
+        limits.Validate();
         _workspaceBoundary = new WorkspacePathBoundary(workspaceRoot);
-        _workspaceRoot = _workspaceBoundary.WorkspaceRoot;
+        _processSpec = processSpec;
+        _limits = limits;
     }
 
     public async Task<ToolResult> ExecuteAsync(ToolInvocation invocation, CancellationToken cancellationToken)
@@ -492,44 +541,133 @@ internal sealed class WorkspaceFileSearchTool : ITool
             return Refused(invocation, "Search pattern is required.");
         }
 
-        var path = ChatToolInput.String(invocation.Input, "path");
+        if (pattern.Length > MaxPatternChars)
+        {
+            return Refused(invocation, $"Search pattern exceeds the {MaxPatternChars}-character limit.");
+        }
+
+        var maxResults = ChatToolInput.Int(invocation.Input, "maxResults", 40, 1, 200);
+        using var durationCancellation = new CancellationTokenSource(_limits.MaxSearchDuration);
+        using var searchCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            durationCancellation.Token);
+        try
+        {
+            return await ExecuteBoundedSearchAsync(
+                    invocation,
+                    pattern,
+                    ChatToolInput.String(invocation.Input, "path"),
+                    maxResults,
+                    searchCancellation.Token)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (
+            durationCancellation.IsCancellationRequested &&
+            !cancellationToken.IsCancellationRequested)
+        {
+            return Refused(
+                invocation,
+                "Workspace search refused: the owned search-duration limit expired.",
+                "workspace.search.duration",
+                "search_duration",
+                "workspace_search");
+        }
+    }
+
+    private async Task<ToolResult> ExecuteBoundedSearchAsync(
+        ToolInvocation invocation,
+        string pattern,
+        string? path,
+        int maxResults,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!_workspaceBoundary.TryResolveExistingPath(path, out var searchRoot, out var error))
         {
             return Refused(invocation, error);
         }
 
-        if (!_workspaceBoundary.TryEnumerateFiles(searchRoot, out var searchFiles, out error))
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_workspaceBoundary.TryEnumerateFiles(
+                searchRoot,
+                _limits.MaxTraversalEntries,
+                _limits.MaxTraversalFiles,
+                ExcludedDirectoryNames,
+                cancellationToken,
+                out var searchFiles,
+                out var traversedEntries,
+                out var traversalLimitReached,
+                out error))
         {
             return Refused(invocation, error);
         }
 
-        var maxResults = ChatToolInput.Int(invocation.Input, "maxResults", 40, 1, 200);
-        var (matches, usedFallback, searchError) = await SearchAsync(
-                _workspaceBoundary,
-                searchRoot,
-                searchFiles,
-                pattern,
-                maxResults,
-                cancellationToken)
-            .ConfigureAwait(false);
-        if (searchError is not null)
+        if (traversalLimitReached)
         {
-            return Refused(invocation, searchError);
+            return Refused(
+                invocation,
+                "Workspace search refused: bounded preflight traversal reached its entry or file limit.");
+        }
+
+        WorkspaceSearchResult search;
+        try
+        {
+            search = await SearchAsync(
+                    _workspaceBoundary,
+                    searchRoot,
+                    searchFiles,
+                    pattern,
+                    maxResults,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (WorkspaceTextResourceException exception)
+        {
+            return Refused(
+                invocation,
+                exception.Message,
+                exception.Code,
+                exception.Reason,
+                "workspace_file");
+        }
+        catch (WorkspaceSearchTerminationException)
+        {
+            return Refused(
+                invocation,
+                "Workspace search refused: search process tree termination could not be confirmed.",
+                "workspace.search.process_termination_unconfirmed",
+                "process_termination_unconfirmed",
+                "workspace_search_process");
+        }
+
+        if (search.Error is not null)
+        {
+            return Refused(invocation, search.Error);
         }
 
         var data = new Dictionary<string, object?>
         {
             ["pattern"] = pattern,
             ["path"] = searchRoot,
-            ["usedFallback"] = usedFallback,
-            ["matches"] = matches
+            ["usedFallback"] = search.UsedFallback,
+            ["matches"] = search.Matches,
+            ["truncated"] = search.Truncated,
+            ["limitReason"] = search.LimitReason,
+            ["traversedEntries"] = traversedEntries,
+            ["scannedFiles"] = search.ScannedFiles,
+            ["bytesRead"] = search.BytesRead,
+            ["outputChars"] = search.OutputChars
         };
-        var receipt = Receipt(invocation, ReceiptStatus.Succeeded, $"Search completed with {matches.Count} result(s).", data);
+        var receipt = Receipt(
+            invocation,
+            ReceiptStatus.Succeeded,
+            $"Search completed with {search.Matches.Count} result(s).",
+            data);
         var observation = new Observation(
             AgenticaIds.New("observation"),
             invocation.StepId,
             ObservationKind.StateQuery,
-            $"Search found {matches.Count} result(s) for '{pattern}'.",
+            $"Search found {search.Matches.Count} result(s) for '{pattern}'.",
             data,
             [new EvidenceRef("receipt", receipt.ReceiptId)]);
         var artifact = new Artifact(
@@ -540,7 +678,7 @@ internal sealed class WorkspaceFileSearchTool : ITool
         return new ToolResult(receipt, observation, artifact);
     }
 
-    private static async Task<(IReadOnlyList<string> Matches, bool UsedFallback, string? Error)> SearchAsync(
+    private async Task<WorkspaceSearchResult> SearchAsync(
         WorkspacePathBoundary workspaceBoundary,
         string searchRoot,
         IReadOnlyList<string> searchFiles,
@@ -550,7 +688,7 @@ internal sealed class WorkspaceFileSearchTool : ITool
     {
         if (!workspaceBoundary.TryResolveExistingPath(searchRoot, out var validatedSearchRoot, out var boundaryError))
         {
-            return (Array.Empty<string>(), UsedFallback: false, boundaryError);
+            return EmptySearch(usedFallback: false, boundaryError);
         }
 
         searchRoot = validatedSearchRoot;
@@ -560,94 +698,492 @@ internal sealed class WorkspaceFileSearchTool : ITool
             using var process = new Process();
             process.StartInfo = new ProcessStartInfo
             {
-                FileName = "rg",
+                FileName = _processSpec.FileName,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
-                CreateNoWindow = true
+                CreateNoWindow = true,
+                StandardOutputEncoding = StrictUtf8,
+                StandardErrorEncoding = StrictUtf8
             };
-            process.StartInfo.ArgumentList.Add("--line-number");
-            process.StartInfo.ArgumentList.Add("--column");
-            process.StartInfo.ArgumentList.Add("--hidden");
-            process.StartInfo.ArgumentList.Add("--no-follow");
-            process.StartInfo.ArgumentList.Add("--glob");
-            process.StartInfo.ArgumentList.Add("!bin");
-            process.StartInfo.ArgumentList.Add("--glob");
-            process.StartInfo.ArgumentList.Add("!obj");
-            process.StartInfo.ArgumentList.Add("--glob");
-            process.StartInfo.ArgumentList.Add("!.git");
-            process.StartInfo.ArgumentList.Add("--");
-            process.StartInfo.ArgumentList.Add(pattern);
-            process.StartInfo.ArgumentList.Add(searchRoot);
+            foreach (var argument in _processSpec.PrefixArguments)
+            {
+                process.StartInfo.ArgumentList.Add(argument);
+            }
+
+            if (_processSpec.AppendRipgrepArguments)
+            {
+                AddRipgrepArguments(
+                    process.StartInfo,
+                    pattern,
+                    searchRoot,
+                    _limits.MaxFallbackFileBytes);
+            }
+
             process.Start();
 
-            var output = await process.StandardOutput.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-            if (process.ExitCode is not 0 and not 1)
+            var limitSignal = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var readerCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var outputTask = ReadBoundedLinesAsync(
+                process.StandardOutput,
+                maxResults,
+                _limits.MaxSearchOutputChars,
+                _limits.MaxSearchLineChars,
+                limitSignal,
+                readerCancellation.Token);
+            var errorTask = ReadBoundedTextAsync(
+                process.StandardError,
+                _limits.MaxSearchErrorChars,
+                limitSignal,
+                readerCancellation.Token);
+            var exitTask = process.WaitForExitAsync(cancellationToken);
+            string? processLimit = null;
+            var processWaitCompleted = false;
+
+            try
+            {
+                var completed = await Task.WhenAny(exitTask, limitSignal.Task).ConfigureAwait(false);
+                if (completed == limitSignal.Task)
+                {
+                    processLimit = await limitSignal.Task.ConfigureAwait(false);
+                    await TerminateProcessTreeAsync(process).ConfigureAwait(false);
+                }
+                else
+                {
+                    await exitTask.ConfigureAwait(false);
+                }
+
+                processWaitCompleted = true;
+            }
+            catch (OperationCanceledException)
+            {
+                await TerminateProcessTreeAsync(process).ConfigureAwait(false);
+                throw;
+            }
+            finally
+            {
+                if (!processWaitCompleted)
+                {
+                    await readerCancellation.CancelAsync().ConfigureAwait(false);
+                    await ObserveDrainTasksAsync(
+                            _limits.ProcessTerminationGrace,
+                            outputTask,
+                            errorTask)
+                        .ConfigureAwait(false);
+                }
+            }
+
+            var output = await outputTask.ConfigureAwait(false);
+            _ = await errorTask.ConfigureAwait(false);
+            if (processLimit is null && limitSignal.Task.IsCompletedSuccessfully)
+            {
+                processLimit = await limitSignal.Task.ConfigureAwait(false);
+            }
+
+            if (string.Equals(processLimit, "binary_content", StringComparison.Ordinal) ||
+                string.Equals(processLimit, "stderr_binary_content", StringComparison.Ordinal))
+            {
+                throw WorkspaceTextResourceException.BinaryContent();
+            }
+
+            if (string.Equals(processLimit, "invalid_utf8", StringComparison.Ordinal) ||
+                string.Equals(processLimit, "stderr_invalid_utf8", StringComparison.Ordinal))
+            {
+                throw WorkspaceTextResourceException.InvalidUtf8(
+                    new DecoderFallbackException("Search process emitted invalid UTF-8."));
+            }
+
+            if (string.Equals(processLimit, "stderr_chars", StringComparison.Ordinal))
+            {
+                return await FallbackSearchAsync(
+                        workspaceBoundary,
+                        searchFiles,
+                        pattern,
+                        maxResults,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            if (processLimit is null && process.ExitCode is not 0 and not 1)
             {
                 throw new InvalidOperationException($"ripgrep exited with code {process.ExitCode}.");
             }
 
-            var lines = output
-                .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
-                .Take(maxResults)
-                .ToArray();
-            return (lines, UsedFallback: false, Error: null);
+            return new WorkspaceSearchResult(
+                output.Lines,
+                UsedFallback: false,
+                Truncated: processLimit is not null,
+                LimitReason: processLimit,
+                ScannedFiles: 0,
+                BytesRead: 0,
+                OutputChars: output.OutputChars,
+                Error: null);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception) when (exception is Win32Exception or IOException or InvalidOperationException)
         {
-            var fallback = FallbackSearch(workspaceBoundary, searchFiles, pattern, maxResults);
-            return (fallback.Matches, UsedFallback: true, fallback.Error);
+            return await FallbackSearchAsync(
+                    workspaceBoundary,
+                    searchFiles,
+                    pattern,
+                    maxResults,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 
-    private static (IReadOnlyList<string> Matches, string? Error) FallbackSearch(
+    private async Task<WorkspaceSearchResult> FallbackSearchAsync(
         WorkspacePathBoundary workspaceBoundary,
         IReadOnlyList<string> searchFiles,
         string pattern,
-        int maxResults)
+        int maxResults,
+        CancellationToken cancellationToken)
     {
         var matches = new List<string>();
+        var scannedFiles = 0;
+        long bytesRead = 0;
+        var outputChars = 0;
+        var truncated = false;
+        string? limitReason = null;
         foreach (var file in searchFiles)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (matches.Count >= maxResults)
             {
+                truncated = true;
+                limitReason = "result_count";
                 break;
             }
 
-            if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ||
-                file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ||
-                file.Contains($"{Path.DirectorySeparatorChar}.git{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            var remainingBytes = _limits.MaxFallbackTotalBytes - bytesRead;
+            var remainingOutputChars = _limits.MaxSearchOutputChars - outputChars;
+            if (remainingBytes <= 0 || remainingOutputChars <= 0)
             {
-                continue;
+                truncated = true;
+                limitReason = remainingBytes <= 0 ? "total_bytes" : "output_chars";
+                break;
             }
 
-            string[] lines;
             if (!workspaceBoundary.TryResolveExistingFile(file, out var resolvedFile, out var error))
             {
-                return (matches, error);
+                return new WorkspaceSearchResult(
+                    matches,
+                    UsedFallback: true,
+                    truncated,
+                    limitReason,
+                    scannedFiles,
+                    bytesRead,
+                    outputChars,
+                    error);
             }
 
+            WorkspaceFileSearchResult fileResult;
             try
             {
-                lines = File.ReadAllLines(resolvedFile);
+                fileResult = await WorkspaceTextResourceReader.SearchFileAsync(
+                        resolvedFile,
+                        pattern,
+                        maxResults - matches.Count,
+                        remainingOutputChars,
+                        _limits.MaxSearchLineChars,
+                        (int)Math.Min(_limits.MaxFallbackFileBytes, remainingBytes),
+                        cancellationToken)
+                    .ConfigureAwait(false);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
-                return (matches, "Workspace boundary refused: workspace file changed or became unreadable during search.");
+                return new WorkspaceSearchResult(
+                    matches,
+                    UsedFallback: true,
+                    truncated,
+                    limitReason,
+                    scannedFiles,
+                    bytesRead,
+                    outputChars,
+                    "Workspace boundary refused: workspace file changed or became unreadable during bounded search.");
             }
 
-            for (var index = 0; index < lines.Length && matches.Count < maxResults; index++)
+            scannedFiles++;
+            bytesRead += fileResult.BytesRead;
+            outputChars += fileResult.OutputChars;
+            matches.AddRange(fileResult.Matches);
+            if (fileResult.Truncated)
             {
-                if (lines[index].Contains(pattern, StringComparison.OrdinalIgnoreCase))
-                {
-                    matches.Add($"{resolvedFile}:{index + 1}:1:{lines[index]}");
-                }
+                truncated = true;
+                limitReason ??= fileResult.LimitReason;
             }
         }
 
-        return (matches, Error: null);
+        return new WorkspaceSearchResult(
+            matches,
+            UsedFallback: true,
+            truncated,
+            limitReason,
+            scannedFiles,
+            bytesRead,
+            outputChars,
+            Error: null);
     }
+
+    private static void AddRipgrepArguments(
+        ProcessStartInfo startInfo,
+        string pattern,
+        string searchRoot,
+        int maxFileBytes)
+    {
+        startInfo.ArgumentList.Add("--line-number");
+        startInfo.ArgumentList.Add("--column");
+        startInfo.ArgumentList.Add("--hidden");
+        startInfo.ArgumentList.Add("--no-follow");
+        startInfo.ArgumentList.Add("--text");
+        startInfo.ArgumentList.Add("--max-filesize");
+        startInfo.ArgumentList.Add(maxFileBytes.ToString());
+        startInfo.ArgumentList.Add("--glob");
+        startInfo.ArgumentList.Add("!bin");
+        startInfo.ArgumentList.Add("--glob");
+        startInfo.ArgumentList.Add("!obj");
+        startInfo.ArgumentList.Add("--glob");
+        startInfo.ArgumentList.Add("!.git");
+        startInfo.ArgumentList.Add("--");
+        startInfo.ArgumentList.Add(pattern);
+        startInfo.ArgumentList.Add(searchRoot);
+    }
+
+    private static async Task<(IReadOnlyList<string> Lines, int OutputChars)> ReadBoundedLinesAsync(
+        StreamReader reader,
+        int maxLines,
+        int maxChars,
+        int maxLineChars,
+        TaskCompletionSource<string> limitSignal,
+        CancellationToken cancellationToken)
+    {
+        var lines = new List<string>();
+        var line = new StringBuilder(Math.Min(maxLineChars, 4096));
+        var buffer = new char[4096];
+        var outputChars = 0;
+
+        bool CompleteLine()
+        {
+            if (line.Length > 0 && line[^1] == '\r')
+            {
+                line.Length--;
+            }
+
+            if (line.Length > 0)
+            {
+                if (line.Length > maxChars - outputChars)
+                {
+                    limitSignal.TrySetResult("output_chars");
+                    return false;
+                }
+
+                lines.Add(line.ToString());
+                outputChars += line.Length;
+                if (lines.Count >= maxLines)
+                {
+                    limitSignal.TrySetResult("result_count");
+                    return false;
+                }
+            }
+
+            line.Clear();
+            return true;
+        }
+
+        try
+        {
+            while (true)
+            {
+                var read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                for (var index = 0; index < read; index++)
+                {
+                    var character = buffer[index];
+                    if (character == '\0')
+                    {
+                        limitSignal.TrySetResult("binary_content");
+                        return (lines, outputChars);
+                    }
+
+                    if (character == '\n')
+                    {
+                        if (!CompleteLine())
+                        {
+                            return (lines, outputChars);
+                        }
+
+                        continue;
+                    }
+
+                    if (line.Length >= maxLineChars)
+                    {
+                        limitSignal.TrySetResult("line_chars");
+                        return (lines, outputChars);
+                    }
+
+                    line.Append(character);
+                }
+            }
+        }
+        catch (DecoderFallbackException)
+        {
+            limitSignal.TrySetResult("invalid_utf8");
+            return (lines, outputChars);
+        }
+
+        if (line.Length > 0)
+        {
+            _ = CompleteLine();
+        }
+
+        return (lines, outputChars);
+    }
+
+    private static async Task<string> ReadBoundedTextAsync(
+        StreamReader reader,
+        int maxChars,
+        TaskCompletionSource<string> limitSignal,
+        CancellationToken cancellationToken)
+    {
+        var text = new StringBuilder(Math.Min(maxChars, 4096));
+        var buffer = new char[4096];
+        try
+        {
+            while (true)
+            {
+                var read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                if (Array.IndexOf(buffer, '\0', 0, read) >= 0)
+                {
+                    limitSignal.TrySetResult("stderr_binary_content");
+                    break;
+                }
+
+                if (read > maxChars - text.Length)
+                {
+                    var retained = Math.Max(0, maxChars - text.Length);
+                    text.Append(buffer, 0, retained);
+                    limitSignal.TrySetResult("stderr_chars");
+                    break;
+                }
+
+                text.Append(buffer, 0, read);
+            }
+        }
+        catch (DecoderFallbackException)
+        {
+            limitSignal.TrySetResult("stderr_invalid_utf8");
+        }
+
+        return text.ToString();
+    }
+
+    private async Task TerminateProcessTreeAsync(Process process)
+    {
+        if (_processSpec.TerminationOverride is not null)
+        {
+            try
+            {
+                await _processSpec.TerminationOverride(process).ConfigureAwait(false);
+                return;
+            }
+            catch (Exception exception) when (
+                exception is not OutOfMemoryException and
+                not StackOverflowException and
+                not AccessViolationException)
+            {
+                throw new WorkspaceSearchTerminationException(
+                    "Search process tree termination could not be confirmed by the process adapter.",
+                    exception);
+            }
+        }
+
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (InvalidOperationException) when (process.HasExited)
+        {
+            return;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception or NotSupportedException)
+        {
+            TryKillProcessTree(process);
+            throw new WorkspaceSearchTerminationException(
+                "Search process tree termination could not be initiated.",
+                exception);
+        }
+
+        try
+        {
+            await process.WaitForExitAsync(CancellationToken.None)
+                .WaitAsync(_limits.ProcessTerminationGrace)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (
+            exception is TimeoutException or InvalidOperationException or Win32Exception or NotSupportedException)
+        {
+            TryKillProcessTree(process);
+            throw new WorkspaceSearchTerminationException(
+                "Search process tree termination could not be confirmed within the bounded grace period.",
+                exception);
+        }
+    }
+
+    private static void TryKillProcessTree(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or Win32Exception or NotSupportedException)
+        {
+            // This is a final best-effort re-kill. The caller reports an explicit fail-closed result.
+        }
+    }
+
+    private static async Task ObserveDrainTasksAsync(TimeSpan grace, params Task[] tasks)
+    {
+        var aggregate = Task.WhenAll(tasks);
+        try
+        {
+            await aggregate.WaitAsync(grace).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            _ = aggregate.ContinueWith(
+                static task => _ = task.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+        catch (Exception exception) when (
+            exception is IOException or
+            OperationCanceledException or
+            ObjectDisposedException or
+            DecoderFallbackException)
+        {
+            // Reader cancellation and process disposal close redirected streams. The originating
+            // termination failure remains the authoritative error.
+        }
+    }
+
+    private static WorkspaceSearchResult EmptySearch(bool usedFallback, string error) =>
+        new([], usedFallback, false, null, 0, 0, 0, error);
 }
 
 internal sealed class WorkspaceImageCreateTool : ITool
@@ -659,6 +1195,7 @@ internal sealed class WorkspaceImageCreateTool : ITool
     private readonly string _workspaceRoot;
     private readonly ChatArtistPromptComposer _composer;
     private readonly IImageGenerationClient _imageClient;
+    private readonly IChatImageStagingWriter _stagingWriter;
 
     public WorkspaceImageCreateTool(
         ChatStore store,
@@ -667,6 +1204,25 @@ internal sealed class WorkspaceImageCreateTool : ITool
         string workspaceRoot,
         ChatArtistPromptComposer composer,
         IImageGenerationClient imageClient)
+        : this(
+            store,
+            conversation,
+            persona,
+            workspaceRoot,
+            composer,
+            imageClient,
+            ChatImageStagingWriter.Instance)
+    {
+    }
+
+    internal WorkspaceImageCreateTool(
+        ChatStore store,
+        ChatConversation conversation,
+        ChatPersona persona,
+        string workspaceRoot,
+        ChatArtistPromptComposer composer,
+        IImageGenerationClient imageClient,
+        IChatImageStagingWriter stagingWriter)
     {
         _store = store;
         _conversation = conversation;
@@ -675,6 +1231,7 @@ internal sealed class WorkspaceImageCreateTool : ITool
         _workspaceRoot = _workspaceBoundary.WorkspaceRoot;
         _composer = composer;
         _imageClient = imageClient;
+        _stagingWriter = stagingWriter;
     }
 
     public async Task<ToolResult> ExecuteAsync(ToolInvocation invocation, CancellationToken cancellationToken)
@@ -704,7 +1261,7 @@ internal sealed class WorkspaceImageCreateTool : ITool
             return Refused(invocation, error);
         }
 
-        if (!_workspaceBoundary.TryPrepareDirectory(
+        if (!_workspaceBoundary.TryResolveContainedPath(
                 Path.Combine("images", "prompts"),
                 out _,
                 out error))
@@ -712,6 +1269,10 @@ internal sealed class WorkspaceImageCreateTool : ITool
             return Refused(invocation, error);
         }
 
+        var effectJournal = new ChatImageEffectJournal();
+        var promptFileEffects = new List<(string EffectName, string Path, string RelativePath)>();
+        var promptDirectoryEffects = new List<(string EffectName, string Path, string RelativePath)>();
+        string? promptContextItemId = null;
         var composerModelId = ChatImageToolSupport.EmptyToNull(ChatToolInput.String(invocation.Input, "composerModel"))
             ?? GeminiModelId.Flash25;
         var styleRecipe = ChatToolInput.String(invocation.Input, "styleRecipe");
@@ -719,6 +1280,7 @@ internal sealed class WorkspaceImageCreateTool : ITool
         var contextItems = _store.GetContextItems(_conversation.ConversationId, 40);
 
         ChatArtistPromptComposition composition;
+        effectJournal.ProviderDispatchAttempted("artist_prompt_composer", composerModelId);
         try
         {
             composition = await _composer.ComposeAsync(
@@ -734,10 +1296,42 @@ internal sealed class WorkspaceImageCreateTool : ITool
                     cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch (LlmClientException exception)
+        catch (ChatProviderResponseValidationException exception)
         {
-            return Refused(invocation, $"Image artist prompt composition failed: {exception.Message}");
+            effectJournal.ProviderResponseReceived(
+                "artist_prompt_composer",
+                exception.ProviderName,
+                exception.ModelId,
+                exception.ProviderRequestId);
+            return ChatImageEffectReceipts.Failure(
+                invocation,
+                "Image artist prompt provider returned an invalid bounded response.",
+                effectJournal);
         }
+        catch (OperationCanceledException exception) when (
+            ChatImageToolSupport.IsRecoverableFailure(exception))
+        {
+            effectJournal.ProviderDispatchFailed("artist_prompt_composer", exception, cancelled: true);
+            return ChatImageEffectReceipts.Failure(
+                invocation,
+                "Image artist prompt provider dispatch was cancelled; its remote outcome is indeterminate.",
+                effectJournal,
+                cancelled: true);
+        }
+        catch (Exception exception) when (ChatImageToolSupport.IsRecoverableFailure(exception))
+        {
+            effectJournal.ProviderDispatchFailed("artist_prompt_composer", exception, cancelled: false);
+            return ChatImageEffectReceipts.Failure(
+                invocation,
+                $"Image artist prompt provider dispatch failed after it was attempted: {exception.GetType().Name}.",
+                effectJournal);
+        }
+
+        effectJournal.ProviderResponseReceived(
+            "artist_prompt_composer",
+            composition.ProviderName,
+            composition.ModelId,
+            composition.ProviderRequestId);
 
         var promptPlanData = new Dictionary<string, object?>
         {
@@ -758,24 +1352,83 @@ internal sealed class WorkspaceImageCreateTool : ITool
         string promptPlanPath;
         try
         {
-            promptPlanPath = await SavePromptPlanAsync(promptPlanData, cancellationToken).ConfigureAwait(false);
+            promptPlanPath = await SavePromptPlanAsync(
+                    promptPlanData,
+                    effectJournal,
+                    promptFileEffects,
+                    promptDirectoryEffects,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
-        catch (InvalidOperationException exception)
+        catch (OperationCanceledException exception) when (
+            ChatImageToolSupport.IsRecoverableFailure(exception))
         {
-            return Refused(invocation, exception.Message);
+            ChatImageToolSupport.CleanupLocalEffects(
+                _store,
+                promptContextItemId,
+                "artist_prompt_context_item",
+                promptFileEffects,
+                promptDirectoryEffects,
+                _workspaceBoundary,
+                effectJournal);
+            return ChatImageEffectReceipts.Failure(
+                invocation,
+                "Image prompt-plan persistence was cancelled after provider dispatch.",
+                effectJournal,
+                cancelled: true);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (ChatImageToolSupport.IsRecoverableFailure(exception))
         {
-            return Refused(invocation, "Workspace boundary refused: prompt plan could not be written safely.");
+            ChatImageToolSupport.CleanupLocalEffects(
+                _store,
+                promptContextItemId,
+                "artist_prompt_context_item",
+                promptFileEffects,
+                promptDirectoryEffects,
+                _workspaceBoundary,
+                effectJournal);
+            return ChatImageEffectReceipts.Failure(
+                invocation,
+                $"Image prompt-plan persistence failed after provider dispatch: {exception.GetType().Name}.",
+                effectJournal);
         }
 
         promptPlanData["promptPlanPath"] = promptPlanPath;
-        var promptItem = _store.AddContextItem(
-            _conversation.ConversationId,
-            "image_prompt",
-            composition.Plan.FinalPrompt,
-            ChatToolIds.WorkspaceImageCreate,
-            JsonSerializer.Serialize(promptPlanData, JsonOptions.Create()));
+        ChatContextItem promptItem;
+        promptContextItemId = _store.NewContextItemId();
+        effectJournal.MutationAttempted("artist_prompt_context_item", "persist artist prompt context item");
+        try
+        {
+            promptItem = _store.AddImageContextItem(
+                promptContextItemId,
+                _conversation.ConversationId,
+                "image_prompt",
+                composition.Plan.FinalPrompt,
+                ChatToolIds.WorkspaceImageCreate,
+                JsonSerializer.Serialize(promptPlanData, JsonOptions.Create()));
+            effectJournal.MutationCompleted(
+                "artist_prompt_context_item",
+                "artist prompt context item persisted");
+        }
+        catch (Exception exception) when (ChatImageToolSupport.IsRecoverableFailure(exception))
+        {
+            effectJournal.MutationFailed(
+                "artist_prompt_context_item",
+                exception.GetType().Name,
+                outcomeIndeterminate: true);
+            ChatImageToolSupport.CleanupLocalEffects(
+                _store,
+                promptContextItemId,
+                "artist_prompt_context_item",
+                promptFileEffects,
+                promptDirectoryEffects,
+                _workspaceBoundary,
+                effectJournal);
+            return ChatImageEffectReceipts.Failure(
+                invocation,
+                $"Image prompt context persistence failed after provider dispatch: {exception.GetType().Name}.",
+                effectJournal);
+        }
 
         ChatSavedWorkspaceImages saved;
         try
@@ -802,20 +1455,58 @@ internal sealed class WorkspaceImageCreateTool : ITool
                             ["metadata"] = composition.Metadata
                         }
                     },
+                    _stagingWriter,
+                    effectJournal,
                     cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch (LlmClientException exception)
+        catch (ChatImageEffectException exception)
         {
-            return Refused(invocation, $"Image prompt composed, but generation failed: {exception.Message}");
+            ChatImageToolSupport.CleanupLocalEffects(
+                _store,
+                promptContextItemId,
+                "artist_prompt_context_item",
+                promptFileEffects,
+                promptDirectoryEffects,
+                _workspaceBoundary,
+                effectJournal);
+            return ChatImageEffectReceipts.Failure(
+                invocation,
+                exception.Message,
+                exception.Journal,
+                exception.Cancelled);
         }
-        catch (InvalidOperationException exception)
+        catch (OperationCanceledException exception) when (
+            ChatImageToolSupport.IsRecoverableFailure(exception))
         {
-            return Refused(invocation, $"Image prompt composed, but generation failed: {exception.Message}");
+            ChatImageToolSupport.CleanupLocalEffects(
+                _store,
+                promptContextItemId,
+                "artist_prompt_context_item",
+                promptFileEffects,
+                promptDirectoryEffects,
+                _workspaceBoundary,
+                effectJournal);
+            return ChatImageEffectReceipts.Failure(
+                invocation,
+                "Image generation was cancelled after prompt composition and local mutations.",
+                effectJournal,
+                cancelled: true);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (ChatImageToolSupport.IsRecoverableFailure(exception))
         {
-            return Refused(invocation, "Image prompt composed, but workspace output could not be written safely.");
+            ChatImageToolSupport.CleanupLocalEffects(
+                _store,
+                promptContextItemId,
+                "artist_prompt_context_item",
+                promptFileEffects,
+                promptDirectoryEffects,
+                _workspaceBoundary,
+                effectJournal);
+            return ChatImageEffectReceipts.Failure(
+                invocation,
+                $"Image creation failed after prompt composition: {exception.GetType().Name}.",
+                effectJournal);
         }
 
         var receipt = Receipt(
@@ -840,12 +1531,33 @@ internal sealed class WorkspaceImageCreateTool : ITool
 
     private async Task<string> SavePromptPlanAsync(
         IReadOnlyDictionary<string, object?> promptPlanData,
+        ChatImageEffectJournal effectJournal,
+        ICollection<(string EffectName, string Path, string RelativePath)> fileEffects,
+        ICollection<(string EffectName, string Path, string RelativePath)> directoryEffects,
         CancellationToken cancellationToken)
     {
-        if (!_workspaceBoundary.TryPrepareDirectory(
-                Path.Combine("images", "prompts"),
+        var imagesRelativePath = "images";
+        if (!ChatImageToolSupport.TryPrepareOwnedDirectory(
+                _workspaceBoundary,
+                imagesRelativePath,
+                "artist_prompt_images_directory",
+                directoryEffects,
+                effectJournal,
                 out _,
                 out var error))
+        {
+            throw new InvalidOperationException(error);
+        }
+
+        var promptsRelativePath = Path.Combine("images", "prompts");
+        if (!ChatImageToolSupport.TryPrepareOwnedDirectory(
+                _workspaceBoundary,
+                promptsRelativePath,
+                "artist_prompt_directory",
+                directoryEffects,
+                effectJournal,
+                out _,
+                out error))
         {
             throw new InvalidOperationException(error);
         }
@@ -858,18 +1570,58 @@ internal sealed class WorkspaceImageCreateTool : ITool
             throw new InvalidOperationException(error);
         }
 
-        await using var stream = new FileStream(
-            path,
-            FileMode.CreateNew,
-            FileAccess.Write,
-            FileShare.None,
-            bufferSize: 4096,
-            useAsync: true);
-        await using var writer = new StreamWriter(stream);
-        await writer.WriteAsync(
-                JsonSerializer.Serialize(promptPlanData, JsonOptions.Create()).AsMemory(),
+        var stagingRelativePath = Path.Combine(
+            promptsRelativePath,
+            $".agentica-staging-{Guid.NewGuid():N}");
+        if (!ChatImageToolSupport.TryPrepareOwnedDirectory(
+                _workspaceBoundary,
+                stagingRelativePath,
+                "artist_prompt_staging_directory",
+                directoryEffects,
+                effectJournal,
+                out var stagingDirectory,
+                out error))
+        {
+            throw new InvalidOperationException(error);
+        }
+
+        var stagedRelativePath = Path.Combine(stagingRelativePath, $"{baseName}.artist.json");
+        if (!_workspaceBoundary.TryResolveNewFile(stagedRelativePath, out var stagedPath, out error))
+        {
+            throw new InvalidOperationException(error);
+        }
+
+        var content = JsonSerializer.SerializeToUtf8Bytes(promptPlanData, JsonOptions.Create());
+        const string stagedPromptPlanEffectName = "staged_artist_prompt_plan_file";
+        const string promptPlanEffectName = "artist_prompt_plan_file";
+        fileEffects.Add((stagedPromptPlanEffectName, stagedPath, stagedRelativePath));
+        await ChatImageToolSupport.WriteStagedFileAsync(
+                _workspaceBoundary,
+                _stagingWriter,
+                stagedPromptPlanEffectName,
+                stagedPath,
+                stagedRelativePath,
+                content,
+                effectJournal,
                 cancellationToken)
             .ConfigureAwait(false);
+        ChatImageToolSupport.PublishStagedFile(
+            _workspaceBoundary,
+            new ChatImagePublishFile(
+                stagedPromptPlanEffectName,
+                stagedPath,
+                stagedRelativePath,
+                promptPlanEffectName,
+                path,
+                relativePath),
+            fileEffects,
+            effectJournal);
+        ChatImageToolSupport.RemoveStagingDirectory(
+            _workspaceBoundary,
+            stagingDirectory,
+            stagingRelativePath,
+            "artist_prompt_staging_directory",
+            effectJournal);
         return path;
     }
 }
@@ -880,17 +1632,34 @@ internal sealed class WorkspaceImageGenerateTool : ITool
     private readonly ChatConversation _conversation;
     private readonly WorkspacePathBoundary _workspaceBoundary;
     private readonly IImageGenerationClient _imageClient;
+    private readonly IChatImageStagingWriter _stagingWriter;
 
     public WorkspaceImageGenerateTool(
         ChatStore store,
         ChatConversation conversation,
         string workspaceRoot,
         IImageGenerationClient imageClient)
+        : this(
+            store,
+            conversation,
+            workspaceRoot,
+            imageClient,
+            ChatImageStagingWriter.Instance)
+    {
+    }
+
+    internal WorkspaceImageGenerateTool(
+        ChatStore store,
+        ChatConversation conversation,
+        string workspaceRoot,
+        IImageGenerationClient imageClient,
+        IChatImageStagingWriter stagingWriter)
     {
         _store = store;
         _conversation = conversation;
         _workspaceBoundary = new WorkspacePathBoundary(workspaceRoot);
         _imageClient = imageClient;
+        _stagingWriter = stagingWriter;
     }
 
     public async Task<ToolResult> ExecuteAsync(ToolInvocation invocation, CancellationToken cancellationToken)
@@ -906,6 +1675,7 @@ internal sealed class WorkspaceImageGenerateTool : ITool
             return Refused(invocation, error);
         }
 
+        var effectJournal = new ChatImageEffectJournal();
         ChatSavedWorkspaceImages saved;
         try
         {
@@ -918,20 +1688,40 @@ internal sealed class WorkspaceImageGenerateTool : ITool
                     imageOptions,
                     ChatToolIds.WorkspaceImageGenerate,
                     additionalData: null,
+                    _stagingWriter,
+                    effectJournal,
                     cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch (LlmClientException exception)
+        catch (ChatImageEffectException exception)
+        {
+            return ChatImageEffectReceipts.Failure(
+                invocation,
+                exception.Message,
+                exception.Journal,
+                exception.Cancelled);
+        }
+        catch (InvalidOperationException exception) when (!effectJournal.EffectsStarted)
         {
             return Refused(invocation, exception.Message);
         }
-        catch (InvalidOperationException exception)
+        catch (OperationCanceledException exception) when (
+            effectJournal.EffectsStarted &&
+            ChatImageToolSupport.IsRecoverableFailure(exception))
         {
-            return Refused(invocation, exception.Message);
+            return ChatImageEffectReceipts.Failure(
+                invocation,
+                "Image generation was cancelled after an effect began; final effect state is indeterminate.",
+                effectJournal,
+                cancelled: true);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (
+            effectJournal.EffectsStarted && ChatImageToolSupport.IsRecoverableFailure(exception))
         {
-            return Refused(invocation, "Workspace boundary refused: image output could not be written safely.");
+            return ChatImageEffectReceipts.Failure(
+                invocation,
+                $"Image generation failed after an effect began: {exception.GetType().Name}.",
+                effectJournal);
         }
 
         var receipt = Receipt(
@@ -996,15 +1786,39 @@ internal static class ChatToolHelpers
             data);
 
     public static ToolResult Refused(ToolInvocation invocation, string message)
+        => Refused(invocation, message, code: null, reason: null);
+
+    public static ToolResult Refused(
+        ToolInvocation invocation,
+        string message,
+        string? code,
+        string? reason,
+        string? resource = null)
     {
+        var data = new Dictionary<string, object?>
+        {
+            ["refusal"] = message
+        };
+        if (!string.IsNullOrWhiteSpace(code))
+        {
+            data["code"] = code;
+        }
+
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            data["reason"] = reason;
+        }
+
+        if (!string.IsNullOrWhiteSpace(resource))
+        {
+            data["resource"] = resource;
+        }
+
         var receipt = Receipt(
             invocation,
             ReceiptStatus.Refused,
             message,
-            new Dictionary<string, object?>
-            {
-                ["refusal"] = message
-            });
+            data);
         return new ToolResult(receipt);
     }
 

@@ -122,7 +122,7 @@ public sealed class ProductProofBenchmarkCommandTests
             var credentialsChecked = false;
 
             var exitCode = await BenchmarkCommand.RunAsync(
-                ["product-proof", "aggregate", root],
+                ReaggregateArgs(root),
                 () =>
                 {
                     credentialsChecked = true;
@@ -140,6 +140,18 @@ public sealed class ProductProofBenchmarkCommandTests
                 aggregate.RootElement.GetProperty("pricingSnapshotId").GetString());
             Assert.True(aggregate.RootElement.GetProperty("gatePassed").GetBoolean());
             Assert.True(aggregate.RootElement.GetProperty("overall").GetProperty("costAvailable").GetBoolean());
+            var aggregateTrust = aggregate.RootElement.GetProperty("reaggregationTrust");
+            Assert.Equal(expectedRunsHash, aggregateTrust.GetProperty("runsSha256").GetString());
+            Assert.Equal(expectedRunsHash, aggregateTrust.GetProperty("expectedRunsSha256").GetString());
+            Assert.Equal(
+                "explicit-command-line-sha256",
+                aggregateTrust.GetProperty("trustAnchorKind").GetString());
+            Assert.Equal(
+                LabBenchmarks.ProductProofBenchmarkFixedConfiguration.ConfigurationId,
+                aggregateTrust
+                    .GetProperty("originalManifest")
+                    .GetProperty("configurationId")
+                    .GetString());
 
             using var receipt = JsonDocument.Parse(
                 File.ReadAllText(Path.Combine(root, "reaggregation.json")));
@@ -150,6 +162,10 @@ public sealed class ProductProofBenchmarkCommandTests
                 LabBenchmarks.ProductProofBenchmarkMatrix.Current.Runs.Count,
                 receipt.RootElement.GetProperty("runCount").GetInt32());
             Assert.Equal(expectedRunsHash, receipt.RootElement.GetProperty("runsSha256").GetString());
+            Assert.Equal(expectedRunsHash, receipt.RootElement.GetProperty("expectedRunsSha256").GetString());
+            Assert.Equal(
+                "explicit-command-line-sha256",
+                receipt.RootElement.GetProperty("trustAnchorKind").GetString());
             Assert.Equal(
                 LabBenchmarks.ProductProofBenchmarkFixedConfiguration.ConfigurationId,
                 receipt.RootElement
@@ -182,7 +198,7 @@ public sealed class ProductProofBenchmarkCommandTests
             var aggregateBefore = File.ReadAllBytes(aggregatePath);
 
             var exitCode = await BenchmarkCommand.RunAsync(
-                ["product-proof", "aggregate", root],
+                ReaggregateArgs(root),
                 () => throw new InvalidOperationException("Credentials must not be checked."));
 
             Assert.Equal(2, exitCode);
@@ -204,7 +220,7 @@ public sealed class ProductProofBenchmarkCommandTests
         {
             var driftAggregate = File.ReadAllBytes(Path.Combine(driftRoot, "aggregate.json"));
             var driftExit = await BenchmarkCommand.RunAsync(
-                ["product-proof", "aggregate", driftRoot],
+                ReaggregateArgs(driftRoot),
                 () => throw new InvalidOperationException("Credentials must not be checked."));
             Assert.Equal(2, driftExit);
             Assert.Equal(driftAggregate, File.ReadAllBytes(Path.Combine(driftRoot, "aggregate.json")));
@@ -215,7 +231,7 @@ public sealed class ProductProofBenchmarkCommandTests
             File.WriteAllLines(invalidRuns, lines);
             var invalidAggregate = File.ReadAllBytes(Path.Combine(invalidJsonRoot, "aggregate.json"));
             var invalidExit = await BenchmarkCommand.RunAsync(
-                ["product-proof", "aggregate", invalidJsonRoot],
+                ReaggregateArgs(invalidJsonRoot),
                 () => throw new InvalidOperationException("Credentials must not be checked."));
             Assert.Equal(2, invalidExit);
             Assert.Equal(invalidAggregate, File.ReadAllBytes(Path.Combine(invalidJsonRoot, "aggregate.json")));
@@ -223,7 +239,7 @@ public sealed class ProductProofBenchmarkCommandTests
             lines[0] = "{";
             File.WriteAllLines(invalidRuns, lines);
             var malformedExit = await BenchmarkCommand.RunAsync(
-                ["product-proof", "aggregate", invalidJsonRoot],
+                ReaggregateArgs(invalidJsonRoot),
                 () => throw new InvalidOperationException("Credentials must not be checked."));
             Assert.Equal(2, malformedExit);
             Assert.Equal(invalidAggregate, File.ReadAllBytes(Path.Combine(invalidJsonRoot, "aggregate.json")));
@@ -233,6 +249,88 @@ public sealed class ProductProofBenchmarkCommandTests
             Directory.Delete(driftRoot, recursive: true);
             Directory.Delete(invalidJsonRoot, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task Offline_reaggregation_requires_the_explicit_trusted_runs_hash()
+    {
+        var root = CreateOldPricingCohort();
+        try
+        {
+            var aggregatePath = Path.Combine(root, "aggregate.json");
+            var aggregateBefore = File.ReadAllBytes(aggregatePath);
+            var missingAnchor = await BenchmarkCommand.RunAsync(
+                ["product-proof", "aggregate", root],
+                () => throw new InvalidOperationException("Credentials must not be checked."));
+            var wrongAnchor = await BenchmarkCommand.RunAsync(
+                [
+                    "product-proof",
+                    "aggregate",
+                    root,
+                    "--expected-runs-sha256",
+                    $"sha256-v1:{new string('0', 64)}"
+                ],
+                () => throw new InvalidOperationException("Credentials must not be checked."));
+
+            Assert.Equal(2, missingAnchor);
+            Assert.Equal(2, wrongAnchor);
+            Assert.Equal(aggregateBefore, File.ReadAllBytes(aggregatePath));
+            Assert.False(File.Exists(Path.Combine(root, "reaggregation.json")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Offline_reaggregation_second_publication_failure_preserves_the_existing_aggregate_commit_marker()
+    {
+        var root = CreateOldPricingCohort();
+        var aggregatePath = Path.Combine(root, "aggregate.json");
+        try
+        {
+            var aggregateBefore = File.ReadAllBytes(aggregatePath);
+            File.SetAttributes(
+                aggregatePath,
+                File.GetAttributes(aggregatePath) | FileAttributes.ReadOnly);
+
+            var exitCode = await BenchmarkCommand.RunAsync(
+                ReaggregateArgs(root),
+                () => throw new InvalidOperationException("Credentials must not be checked."));
+
+            Assert.Equal(1, exitCode);
+            Assert.Equal(aggregateBefore, File.ReadAllBytes(aggregatePath));
+            Assert.True(File.Exists(Path.Combine(root, "reaggregation.json")));
+            using var aggregate = JsonDocument.Parse(File.ReadAllText(aggregatePath));
+            Assert.True(aggregate.RootElement.GetProperty("original").GetBoolean());
+            Assert.False(aggregate.RootElement.TryGetProperty("reaggregationTrust", out _));
+        }
+        finally
+        {
+            if (File.Exists(aggregatePath))
+            {
+                File.SetAttributes(
+                    aggregatePath,
+                    File.GetAttributes(aggregatePath) & ~FileAttributes.ReadOnly);
+            }
+
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static string[] ReaggregateArgs(string root)
+    {
+        var expectedRunsHash = $"sha256-v1:{Convert.ToHexStringLower(SHA256.HashData(
+            File.ReadAllBytes(Path.Combine(root, "runs.jsonl"))))}";
+        return
+        [
+            "product-proof",
+            "aggregate",
+            root,
+            "--expected-runs-sha256",
+            expectedRunsHash
+        ];
     }
 
     private static string CreateOldPricingCohort(string? matrixVersionOverride = null)

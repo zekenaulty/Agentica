@@ -1,6 +1,6 @@
 # Agentica Product Status And Goal Xref
 
-Canonical status date: 2026-07-21
+Canonical status date: 2026-07-27
 
 Lifecycle: Incubating
 
@@ -16,7 +16,7 @@ North star:
 Models propose.
 Agentica validates and authorizes.
 Tools execute.
-Receipts preserve every effect across every attempt.
+Receipts preserve every known effect across every attempt and explicitly mark indeterminate effects.
 Outcomes claim only what evidence proves.
 ```
 
@@ -27,7 +27,7 @@ The repository has two distinct identities that must not be conflated:
 
 The lab's growth was productive: it exposed real planning, continuity, completion, and safety failures while keeping most domain vocabulary out of the runtime. The drift was primarily role, naming, and status-authority drift rather than valueless experimentation.
 
-The hardening gates now support internal research artifacts, not a public release. Public distribution remains deliberately deferred: the current source-available license does not permit reuse, the packages are marked research preview, no supported CLI exists, and one green no-publish CI run does not establish supported-product readiness.
+The hardening gates now support internal research artifacts, not a public release. Public distribution remains deliberately deferred: the current source-available license does not permit reuse, the packages are marked research preview, no supported CLI exists, and green no-publish CI evidence does not establish supported-product readiness.
 
 ## Project Role And Naming Decision
 
@@ -92,11 +92,37 @@ T0-T6 are complete against their bounded gates. The no-publish GitHub workflow p
 | T3 | Implement a minimal security vertical slice | 20% | 10% | 100% | Complete | Frozen compiled registrations include planner projection, effect/data/output/approval/retry/provenance declarations; one canonical hash binds planning and dispatch; exact grants and immediate recompile/recheck fail closed; all five Chat/path proofs pass | Keep the slice narrow; defer the broader taint and multi-hash architecture |
 | T4 | Fix or quarantine orchestration | 10% | 35% | 100% | Bounded gate complete; component still Incubating | Nonempty valid acceptance, globally unique identities across child and prior-attempt envelopes, global definition-of-done, concrete evidence, type-safe bounded host-state comparison, supported mutation vocabulary, normalized boundary failures, and failed-child regressions are enforced | Broader host integration and measured orchestration reliability are still required before product claims |
 | T5 | Create a measured LLM product proof | 10% | 15% | 100% | Complete for `agentica-product-proof-v1` | Versioned strict schemas/prompts, fixed matrix, durable telemetry, strict offline reaggregation, and zero-false-success gates landed; the measured cohort passed 29/30 overall, 25/25 primary, and 4/5 holdout | Repeat on intentional model/prompt/schema changes; do not generalize from this single fixed cohort |
-| T6 | Productize after the gates | 10% | 20% | 100% | Bounded research-repository productization gate complete | Exact SDK and lock files, SHA-pinned no-publish CI, clean audits, clean Release/analyzer gates, 390 passing tests with 2 honest live skips, 84.84% line/67.52% branch coverage, real Lab process tests, package validation plus an external consumer, research metadata/license, a digest-pinned non-root container build/smoke, bounded/redacted resilient Lab logs, and one complete green Linux CI run | No remaining gate in this bounded program; keep CI green while public publishing and a supported CLI remain deferred |
+| T6 | Productize after the gates | 10% | 20% | 100% | Bounded research-repository productization gate complete | The dated 2026-07-21 baseline established exact SDK and lock files, SHA-pinned no-publish CI, clean audits, clean Release/analyzer gates, 390 passing tests with 2 honest live skips, 84.84% line/67.52% branch coverage, real Lab process tests, package validation plus an external consumer, research metadata/license, a digest-pinned non-root container build/smoke, bounded/redacted resilient Lab logs, and one complete green Linux CI run | No remaining gate in this bounded program; keep CI green while public publishing and a supported CLI remain deferred |
 
-## Active Slice: Preserve The Green Research Baseline
+## Active Slice: Effect Truth And Ownership Closure
 
-The agreed hardening/product-truth program is complete. Until a successor slice is explicitly selected, active work is to keep the no-publish CI gate green, reconcile regressions against this page, and preserve the research-repository boundary. Do not infer public-package, supported-CLI, or production readiness from 100% completion of this bounded program. New harness families, routers, MCP adapters, learning systems, and broad tool taxonomies remain deferred.
+The 2026-07-22 outside review correctly reopened ownership, Chat effect truth, and grant semantics that the first bounded program had overstated. This successor slice closed those findings without changing product identity: Agentica remains an Incubating source-available research repository, orchestration remains experimental, and external Chat image tools remain quarantined by default.
+
+Weighted successor completion:
+
+```text
+(20*100 + 20*100 + 15*100 + 10*100 + 10*100 + 10*100 + 5*100 + 10*100) / 100
+= 100.00%
+```
+
+**Current effect-truth/ownership slice: 100% complete.** Local implementation and deterministic proof are complete, and the first hosted Windows proof passed alongside the independent Linux release gate.
+
+| ID | Successor workstream | Weight | Completion | Current reality | Remaining exit gate |
+| --- | --- | ---: | ---: | --- | --- |
+| E1 | Runtime-owned request, plan, proof, and orchestration graphs | 20% | 100% | Requests and planner/task graphs cross bounded deep snapshot boundaries; cycles/oversize data fail closed; exact JSON-number lexemes survive validation, grant hashing, events, receipts, and returned proof; final runtime and orchestration envelopes use detached read-only shells; mutable orchestration state no longer escapes | Maintain aggregate graph budgets and post-return mutation regressions |
+| E2 | Truthful Chat image effects | 20% | 100% | Provider image/composer responses cross a bounded detached compiler; valid request IDs remain exact bounded failure evidence and oversized IDs are marked explicitly; serialized result data plus reserved final-proof/journal overhead is conservatively preflighted; image, prompt-plan, and metadata files stage and pass digest validation before same-volume per-file publication; compensation for files, owned directories, and SQLite context items is attempted and journaled; post-dispatch failures return `Failed`, residual/indeterminate local effects return `Partial`, cancellation records provider uncertainty, and nested process-integrity failures are never projected as ordinary receipts | Publication is per-file rather than set-atomic/crash-durable; keep both external image registrations quarantined until a real approval host exists |
+| E3 | One-shot invocation authorization | 15% | 100% | Grants bind grant id, authorization scope, attempt, step, canonical input digest, manifest, tool, boundaries, output class, expiry, and issuer; policies snapshotted from the same in-memory grant share atomic consumption state. `ToolGrantConsumption` records the full issued authority and invocation binding before dispatch | A human approval service, destination identity, signatures, global grant-id uniqueness, and durable replay storage remain deferred host breadth |
+| E4 | Bounded workspace I/O and honest path threat model | 10% | 100% | File reads and fallback scanning decode strictly, while the normal `rg --text` path rejects invalid UTF-8 or NUL in process output; byte/character/line/output/traversal caps apply and one owned duration spans preflight, child process, and fallback; output/error drain concurrently even on termination failure; incomplete preflight coverage refuses | Handle-relative adversarial confinement remains explicitly deferred |
+| E5 | Honest deadline and observer behavior | 10% | 100% | In-process run timeout is documented as cooperative so mutation work is never abandoned outside proof; event-sink waits are finite, typed on timeout, and circuit-broken without changing business truth; fatal process-integrity exceptions propagate through bounded nested-wrapper inspection instead of becoming fallback proof | Worker-process isolation is required before claiming hard adversarial deadlines |
+| E6 | Benchmark trust anchor | 10% | 100% | Offline reaggregation requires an independently supplied expected `runs.jsonl` SHA-256. The authoritative `aggregate.json` embeds matching expected/observed digests and its complete reaggregation trust record; `reaggregation.json` is compatibility-only. Claims are narrowed to structural reaggregation of a trusted version-controlled cohort | Provider attestation and first-principles oracle replay remain deferred |
+| E7 | Windows proof lane | 5% | 100% | SHA-pinned Windows Server 2022 CI performs locked restore, lock drift check, Release build, and the full deterministic suite including the real junction branch; [CI run 30329591366](https://github.com/zekenaulty/Agentica/actions/runs/30329591366) is the first green hosted Windows proof and passed alongside the independent Linux gate | Keep both hosted jobs green |
+| E8 | Validator and planner-surface truth | 10% | 100% | Compilation rejects blank, oversized, or canonically duplicate identities plus invalid bounds; registrations, fields, allowed values, public validation graphs, issue output, and validation work are explicitly capped; schema indexes and allowed-value sets compile once; an aggregate per-attempt budget bounds mandatory manifest recompilation; numeric validation remains exact and type-preserving; planners no longer see tools categorically denied by effect, boundary, or grant availability | Maintain these checks as schema/tool breadth changes |
+
+Successor exit condition: caller/planner mutation cannot rewrite accepted or returned proof; every post-provider image path reports or compensates its effects; one host-issued in-memory grant lineage cannot authorize more than one bound dispatch; workspace operations remain resource-bounded; and documentation distinguishes cooperative/static guards from hard isolation. Every named local condition is enforced, and both hosted proof lanes are green.
+
+The 2026-07-27 local successor gate used SDK 10.0.302: locked restore, vulnerability/deprecation audits, formatting, the Release warnings-as-errors build, selected analyzers, package validation, a fresh external consumer, the Lab subprocess gate, and digest-anchored offline benchmark reaggregation were clean; 525 tests passed, 2 opt-in live-provider tests were explicitly skipped, and 0 failed; fresh coverage was 85.12% line and 70.93% branch. Docker Engine 27.4.0 built the digest-pinned non-root image and passed the `quest list` smoke. Hosted [CI run 30329591366](https://github.com/zekenaulty/Agentica/actions/runs/30329591366) then passed both the Windows proof and the independent Linux release job.
+
+## Closed Baseline Details
 
 ### T1: Immediate Blockers
 
@@ -104,7 +130,7 @@ The agreed hardening/product-truth program is complete. Until a successor slice 
 | --- | ---: | --- | --- |
 | Resolve the SQLite advisory | 100% | `Microsoft.Data.Sqlite` 10.0.10 plus an explicit `SQLitePCLRaw.bundle_e_sqlite3` 3.0.4 override resolves `SourceGear.sqlite3` 3.53.3; the vulnerable 2.1.11 native graph is absent | Solution-wide transitive vulnerability audit reports no vulnerable packages; Release build and SQLite Chat smoke pass |
 | Classify or disable Chat external tools | 100% | Both Gemini image tools are `ExternalSideEffect` and approval-required; LocalOnly rejects them, planner guidance describes the boundary, and Chat no longer auto-selects Gemini from ambient credentials | Actual-catalog and fake-provider tests pin the classifications and deny ungranted transmission |
-| Default-deny approval-required execution | 100% | Approval-required registrations cannot dispatch without an exact, unexpired grant bound to manifest hash, tool id, output class, and approved data boundaries; Chat issues no grant by default | Tests prove zero calls without a grant and successful dispatch only for the exact authorized surface |
+| Default-deny approval-required execution | 100% | Approval-required registrations cannot dispatch without an exact, unexpired one-shot grant bound to authorization scope, attempt, step, canonical input, manifest hash, tool id, output class, and approved data boundaries; Chat issues no grant by default | Tests prove zero calls without a grant, atomic single consumption across shared in-memory grant snapshots, replay/input/scope refusal, and successful dispatch only for the exact authorized invocation |
 | Report disabled live tests honestly | 100% | Opt-in Gemini facts carry a discovery-time skip reason unless `AGENTICA_RUN_LIVE_LLM_TESTS=true` | Targeted run reports two skipped tests; the full deterministic suite reports skips rather than false passes |
 
 ### T2: Proof Spine
@@ -119,9 +145,9 @@ Exit condition: every real invocation across every attempt remains reachable fro
 | Validate and normalize tool results | 100% | Runtime-owned IDs, invocation identity, timestamps, canonical evidence links, and source-token aliasing replace raw tool claims; receipt, observation, artifact, and aliases share one depth/node/byte budget and retain only immutable JSON-safe values; malformed/undefined/partial results cannot become success | `ToolResultContractTests` cover forged/duplicate IDs, post-return mutation, identity round trips, deep/large JSON, binary and unknown DTOs, aggregate budgets, cycles, null and invalid results, and incomplete statuses |
 | Require explicit completion policy | 100% | `AgenticaRunner` and in-process orchestration require an evaluator; evaluators receive immutable `CompletionContext`; empty evidence definitions are rejected; selected evidence must resolve; evaluator exceptions return a proof-preserving failed envelope | Constructor, evidence-link, exact-evidence, and post-mutation failure tests enforce the contract; plan exhaustion remains an explicit demo opt-in only |
 | Increase identifier entropy | 100% | Runtime IDs use a full lowercase UUID-v4 `N` suffix, approximately 122 random bits, rather than eight hex characters | Format and 10,000-ID uniqueness tests pass |
-| Define event-sink failure behavior | 100% | The in-memory ledger is authoritative and stores a deep-frozen, 1 MiB-bounded event snapshot; reason projectors and sinks receive separate immutable snapshots. The first observer exception records typed `EventDeliveryFailure`, circuit-breaks that sink for the attempt, and does not alter the business outcome; snapshot-limit, reporter, and projector failures retain bounded proof instead of erasing it | Hostile nested mutation, oversize snapshot, mutation and batch sink failures, throwing reporter/projector, and terminal event regressions pass |
+| Define event-sink failure behavior | 100% | The in-memory ledger is authoritative and stores a deep-frozen, 1 MiB-bounded event snapshot; reason projectors and sinks receive separate immutable snapshots. The first observer exception or bounded-delivery timeout records typed `EventDeliveryFailure`, circuit-breaks that sink for the attempt, and does not alter the business outcome; snapshot-limit, reporter, and projector failures retain bounded proof instead of erasing it | Hostile nested mutation, oversize snapshot, blocking/throwing sink, mutation and batch sink failures, throwing reporter/projector, and terminal event regressions pass |
 
-T2 verification remains part of the solution-wide Release gate. The final local verification count is recorded under T6 after all later security, benchmark, logging, package, and process tests are included.
+T2 verification remains part of the solution-wide Release gate. The dated baseline is recorded under T6; the current successor verification is recorded above.
 
 ### T3: Minimal Security Vertical
 
@@ -131,15 +157,15 @@ This deliberately narrow slice is complete:
 - The declaration includes effect, read and planner-exposure boundaries, external-output classification, approval requirement, retry safety, and provenance.
 - One canonical `sha256-v1` manifest hash binds the planner projection and dispatch authority.
 - The catalog is recompiled immediately before each dispatch; an invalid, missing, or changed surface is refused.
-- Grants are exact, time-bounded capabilities rather than ambient approval.
+- Grants are exact, time-bounded, one-shot invocation authorities rather than ambient approval. They bind authorization scope, attempt, step, canonical input digest, manifest, tool, data, output class, expiry, and issuer; consumption is atomic across policy snapshots sharing the same in-memory grant state. The complete issued authority and invocation binding become envelope evidence before dispatch. Reconstructing a grant is a new host issuance, so global grant-id uniqueness and durable replay prevention remain host-owned.
 
-Fake-provider and path-boundary tests prove all five required cases: LocalOnly rejects image generation; external transmission needs an exact grant; workspace content cannot cross an unapproved boundary; changed registrations fail closed; and junction/symlink/reparse escapes are refused.
+Fake-provider and path-boundary tests prove all five required cases: LocalOnly rejects image generation; external transmission needs an exact grant; workspace content cannot cross an unapproved boundary; changed registrations fail closed; and static junction/symlink/reparse escapes are refused. The path claim is deliberately limited to bounded pre-open checks in a cooperative, non-adversarial Lab workspace.
 
 ## Closed Gates And Remaining Boundary
 
 ### T4: Orchestration
 
-The bounded T4 exit gate is complete. Executable tasks require nonempty valid acceptance; run IDs must be nonblank and globally unique across every top-level child envelope and every nested prior-attempt envelope; success requires concrete child evidence plus the global definition-of-done; and host-state proof uses bounded type-preserving structural comparison rather than string conversion. Unsupported advertised mutations were removed. Host projection, context compilation, child execution, acceptance, definition-of-done, planner, graph, and refinement failures normalize to truthful proof-preserving outcomes. Invalid child proof identity terminates as `Failed` / `ChildRunFailed`; duplicate/empty-run-ID regressions fail closed while preserving every returned top-level child outcome.
+The bounded T4 exit gate is complete. Executable tasks require nonempty valid acceptance; run IDs must be nonblank and globally unique across every retained top-level child envelope and every nested prior-attempt envelope; success requires concrete child evidence plus the global definition-of-done; and host-state proof uses bounded type-preserving structural comparison rather than string conversion. Unsupported advertised mutations were removed. Host projection, context compilation, child execution, acceptance, definition-of-done, planner, graph, and refinement failures normalize to truthful proof-preserving outcomes. A frozen child-dispatch record is inserted before calling the executor and replaced only after the complete returned envelope crosses the bounded snapshot boundary. Throwing, null, cancelled, malformed, or oversized returns therefore retain an explicit `Partial`/indeterminate dispatch record with bounded returned-run identity when available instead of erasing the call. Valid child proof-identity failures terminate as `Failed` / `ChildRunFailed` while preserving every already-retained child outcome.
 
 That does not promote orchestration to a product claim. The broader adaptive supervisor remains Incubating and experimental pending host integration, durable replay/public-contract decisions, and measured reliability evidence.
 
@@ -158,7 +184,7 @@ The 2026-07-21 Gemini 2.5 Flash cohort passed:
 | Tokens | 19,529,994 | 1,506,452 | 18,023,542 |
 | Estimated paid-standard cost | $5.80573728 | $0.47625259 | $5.32948469 |
 
-Across 210 logical model calls there was one JSON repair, zero provider retries, and zero runtime retries. Invalid-plan incidence is a run-level union: the repaired holdout run and the separate terminal `PlanInvalid` holdout run each count once. The immutable run records hash to `sha256-v1:cdc254965780f542c65cddf4e8bfb140cc5e7314b55afd06d6138cc101da9efd`. The first cost aggregation failed closed on implicit cached-token telemetry; strict offline reaggregation over the unchanged records added the reviewed cache-aware price model and passed. See [benchmark evidence](benchmark-results/README.md) and the [aggregate](benchmark-results/20260721T143708466Z-agentica-product-proof-v1-9ad5c876785a46959a49511fb768102d/aggregate.json).
+Across 210 logical model calls there was one JSON repair, zero provider retries, and zero runtime retries. Invalid-plan incidence is a run-level union: the repaired holdout run and the separate terminal `PlanInvalid` holdout run each count once. The version-controlled run records hash to `sha256-v1:cdc254965780f542c65cddf4e8bfb140cc5e7314b55afd06d6138cc101da9efd`. The first cost aggregation failed closed on implicit cached-token telemetry; strict offline reaggregation over the unchanged records added the reviewed cache-aware price model and passed only when the caller supplied that expected digest. The authoritative aggregate now embeds the matching expected and observed digest plus the complete reaggregation trust record; the separate receipt is compatibility evidence only. This is structural validation of a trusted cohort, not provider attestation or first-principles oracle replay. See [benchmark evidence](benchmark-results/README.md) and the [aggregate](benchmark-results/20260721T143708466Z-agentica-product-proof-v1-9ad5c876785a46959a49511fb768102d/aggregate.json).
 
 This is one fixed measured cohort, not a general reliability guarantee.
 
@@ -184,7 +210,7 @@ Completion below measures each document's own acceptance criteria. A 100% founda
 | [Agentica Goal Status](Agentica.GoalStatus.md) | Historical | 100% | Closed evidence log for the first executable slice; it is not a live product status page |
 | [Original Planning README](../Agentica.ReadMe.md) | Historical | 100% | Original development plan retained for rationale; this page and the primary README replace its status claims |
 | [Agentic Harness Host](CodexGoal.Agentica.AgenticHarnessHost.md) | Incubating | 90% | Maze/Chess/Workbench prove the host pattern and the fixed product cohort exercises it; a reusable external host and broader secure promotion remain |
-| [ChessQuest Hardening Backlog](CodexGoal.Agentica.Lab.ChessQuestHardeningBacklog.md) | Incubating | 75% | Many honesty, probe, threat, continuity, and opponent passes landed; defer remaining lab expansion behind external release-gate evidence |
+| [ChessQuest Hardening Backlog](CodexGoal.Agentica.Lab.ChessQuestHardeningBacklog.md) | Incubating | 75% | Many honesty, probe, threat, continuity, and opponent passes landed; defer remaining lab expansion until selected as a future explicit slice |
 | [ChessQuest Harness](CodexGoal.Agentica.Lab.ChessQuestHarness.md) | Incubating | 80% | Referee, probes, strategy, phases, replay, and orchestration exist; measured reliability remains incomplete |
 | [MazeQuest Harness](CodexGoal.Agentica.Lab.MazeQuestHarness.md) | Implemented | 95% | Harness criteria substantially landed and the fixed T5 holdout measured 4/5 truthful completions; broader scenario reliability is not claimed |
 | [WorkbenchQuest Harness](CodexGoal.Agentica.Lab.WorkbenchQuestHarness.md) | Implemented | 100% | All named harness criteria landed; the fixed T5 primary matrix measured 25/25 truthful completions |
@@ -200,7 +226,7 @@ Completion below measures each document's own acceptance criteria. A 100% founda
 | [Runtime Harness Gaps](CodexGoal.Agentica.RuntimeHarnessGaps.md) | Implemented | 100% | Input schemas, completion seams, continuation, effects, context shaping, and tests landed |
 | [Secure Evolving Harness Tool System](CodexGoal.Agentica.SecureEvolvingHarnessToolSystem.md) | Incubating | 40% | The minimal compiled-registration, grant, manifest-recheck, boundary, provenance, and path-security vertical is implemented; broader taint, promotion, registry, and multi-hash architecture remains deferred |
 | [Workflow Routing Ontology](CodexGoal.Agentica.WorkflowRoutingOntology.md) | Draft | 15% | Partial substrate only; split or defer rather than running it as a parallel active slice |
-| [MazeQuest Item Usage, Puzzle Bindings, And Energy Plan](MazeQuest.ItemUsagePuzzleAndEnergyPlan.md) | Incubating | 50% | Energy and part of the affordance substrate exist; the broader control and puzzle slice remains deferred behind external release-gate evidence |
+| [MazeQuest Item Usage, Puzzle Bindings, And Energy Plan](MazeQuest.ItemUsagePuzzleAndEnergyPlan.md) | Incubating | 50% | Energy and part of the affordance substrate exist; the broader control and puzzle slice remains deferred until selected as a future explicit slice |
 
 Lifecycle totals:
 
@@ -221,6 +247,10 @@ The following are intentionally outside the active slice:
 - full multi-agent orchestration;
 - self-training, skill mining, prompt evolution, or automatic policy promotion;
 - the full multi-hash, taint, generated-tool, registry, and automatic-promotion architecture beyond the minimal T3 vertical slice;
+- a human approval service, signed/destination-specific grants, global grant-id uniqueness, and durable authorization/replay storage;
+- worker-process isolation for hard adversarial deadlines;
+- OS-handle-relative workspace confinement against concurrent path replacement;
+- provider-attested benchmark provenance and first-principles offline oracle replay;
 - LLM outcome narration as a primary product surface;
 - public package/tool/container release; and
 - a supported thin `Agentica.Cli`.

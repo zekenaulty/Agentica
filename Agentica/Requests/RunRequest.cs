@@ -5,7 +5,8 @@ namespace Agentica.Requests;
 public sealed record RunRequest(
     string Objective,
     RequestOrigin Origin = RequestOrigin.User,
-    IReadOnlyDictionary<string, object?>? Context = null)
+    IReadOnlyDictionary<string, object?>? Context = null,
+    [property: JsonIgnore] string? AuthorizationScopeId = null)
 {
     [JsonIgnore]
     public bool IsValid => !string.IsNullOrWhiteSpace(Objective);

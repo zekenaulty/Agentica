@@ -1,4 +1,5 @@
 using Agentica.Artifacts;
+using Agentica.Events;
 using Agentica.Observations;
 using Agentica.Orchestration.Acceptance;
 using Agentica.Orchestration.Context;
@@ -50,6 +51,44 @@ public sealed class TaskOrchestratorTests
     }
 
     [Fact]
+    public void Graph_validator_accepts_the_maximum_bounded_dependency_chain_without_recursion()
+    {
+        var tasks = Enumerable.Range(0, 4_096)
+            .Select(index => Task(
+                $"task_{index}",
+                dependsOn: index == 0 ? [] : [$"task_{index - 1}"]))
+            .ToArray();
+
+        TaskGraphValidator.Validate(Plan(tasks));
+    }
+
+    [Fact]
+    public void Orchestrator_rejects_policy_values_outside_the_bounded_runtime_contract()
+    {
+        static TaskOrchestrator Create(OrchestrationPolicy policy) =>
+            new(
+                new ScriptedTaskPlanner(Plan([Task("work")])),
+                new ScriptedRunExecutor([]),
+                new EvidenceTaskAcceptanceEvaluator(),
+                new DeterministicWorkContextCompiler(),
+                () => new Dictionary<string, object?>(),
+                policy);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            Create(new OrchestrationPolicy(MaxRuns: 0)));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            Create(new OrchestrationPolicy(MaxRuns: 65)));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            Create(new OrchestrationPolicy(MaxRefinements: -1)));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            Create(new OrchestrationPolicy(MaxRefinements: 65)));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            Create(new OrchestrationPolicy(MaxGraphMutationsPerRefinement: -1)));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            Create(new OrchestrationPolicy(MaxGraphMutationsPerRefinement: 65)));
+    }
+
+    [Fact]
     public void Graph_validator_requires_nonempty_semantically_valid_acceptance_and_definition_of_done()
     {
         var emptyAcceptance = Plan([Task("empty") with { AcceptanceRequirements = [] }]);
@@ -68,6 +107,584 @@ public sealed class TaskOrchestratorTests
         Assert.Throws<TaskGraphValidationException>(() => TaskGraphValidator.Validate(emptyAcceptance));
         Assert.Throws<TaskGraphValidationException>(() => TaskGraphValidator.Validate(nullOutcomeStatus));
         Assert.Throws<TaskGraphValidationException>(() => TaskGraphValidator.Validate(emptyDefinitionOfDone));
+    }
+
+    [Fact]
+    public async Task Orchestrator_detaches_request_plan_state_and_child_proof_while_the_run_is_active()
+    {
+        var requestValues = new List<string> { "request-before" };
+        var requestContext = new Dictionary<string, object?>
+        {
+            ["requestValues"] = requestValues
+        };
+        var taskValues = new List<string> { "task-before" };
+        var taskContext = new Dictionary<string, object?>
+        {
+            ["taskValues"] = taskValues
+        };
+        var task = Task("work") with { ContextProjection = taskContext };
+        var tasks = new List<TaskNode> { task };
+        var plan = Plan(tasks);
+        var receiptValues = new List<string> { "receipt-before" };
+        var receiptData = new Dictionary<string, object?>
+        {
+            ["receiptValues"] = receiptValues
+        };
+        var childReceipts = new List<Receipt>
+        {
+            Receipt("run_work") with { Data = receiptData }
+        };
+        var child = Envelope("run_work", RunOutcomeStatus.Succeeded) with
+        {
+            Receipts = new ReceiptEnvelope(childReceipts)
+        };
+        var executor = new CoordinatedRunExecutor();
+        var evaluator = new CoordinatedAcceptanceEvaluator();
+        var orchestrator = CreateOrchestrator(
+            new ScriptedTaskPlanner(plan),
+            executor,
+            evaluator);
+
+        var running = orchestrator.RunAsync(new LargeTaskRequest(
+            "Keep caller mutations outside the run.",
+            RequestOrigin.User,
+            requestContext));
+        await executor.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        requestValues.Add("request-after");
+        requestContext["lateRequestKey"] = true;
+        taskValues.Add("task-after");
+        taskContext["lateTaskKey"] = true;
+        tasks.Clear();
+        executor.Complete(child);
+
+        await evaluator.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        receiptValues.Add("receipt-after");
+        receiptData["lateReceiptKey"] = true;
+        childReceipts.Clear();
+        evaluator.Complete(new TaskAcceptanceResult(
+            TaskAcceptanceStatus.Accepted,
+            [],
+            [new EvidenceRef("artifact", "artifact_run_work")]));
+
+        var outcome = await running.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(OrchestrationStatus.Succeeded, outcome.Status);
+        Assert.DoesNotContain("forged-by-evaluator", outcome.State.CompletedTaskIds);
+        Assert.Equal(["work"], outcome.State.CompletedTaskIds);
+        Assert.Equal(["work"], outcome.FinalPlan!.Tasks.Select(item => item.TaskId));
+        Assert.Equal(
+            ["request-before"],
+            Assert.IsAssignableFrom<IReadOnlyList<string>>(
+                executor.Request!.Context!["requestValues"]));
+        Assert.False(executor.Request.Context.ContainsKey("lateRequestKey"));
+        Assert.Equal(
+            ["task-before"],
+            Assert.IsAssignableFrom<IReadOnlyList<string>>(
+                executor.Request.Context["taskValues"]));
+        Assert.False(executor.Request.Context.ContainsKey("lateTaskKey"));
+        Assert.Equal(
+            ["receipt-before"],
+            Assert.IsAssignableFrom<IReadOnlyList<string>>(
+                evaluator.Outcome!.Receipts.Items[0].Data["receiptValues"]));
+        Assert.False(evaluator.Outcome.Receipts.Items[0].Data.ContainsKey("lateReceiptKey"));
+        Assert.Single(outcome.RunOutcomes[0].Receipts.Items);
+    }
+
+    [Fact]
+    public async Task Returned_orchestration_envelope_is_deeply_detached_and_read_only()
+    {
+        var taskValues = new List<string> { "before" };
+        var context = new Dictionary<string, object?>
+        {
+            ["taskValues"] = taskValues
+        };
+        var tasks = new List<TaskNode>
+        {
+            Task("work") with { ContextProjection = context }
+        };
+        var child = Envelope("run_work", RunOutcomeStatus.Succeeded);
+        var outcome = await CreateOrchestrator(
+                new ScriptedTaskPlanner(Plan(tasks)),
+                new ScriptedRunExecutor([child]),
+                new EvidenceTaskAcceptanceEvaluator())
+            .RunAsync(Request("Return immutable proof."));
+
+        taskValues.Add("after");
+        context["late"] = true;
+        tasks.Clear();
+
+        Assert.Equal(["work"], outcome.FinalPlan!.Tasks.Select(item => item.TaskId));
+        Assert.Equal(
+            ["before"],
+            Assert.IsAssignableFrom<IReadOnlyList<string>>(
+                outcome.FinalPlan.Tasks[0].ContextProjection["taskValues"]));
+        Assert.False(outcome.FinalPlan.Tasks[0].ContextProjection.ContainsKey("late"));
+
+        AssertReadOnly(outcome.FinalPlan.Tasks, Task("late"));
+        AssertReadOnly(outcome.FinalPlan.DefinitionOfDone,
+            new TaskAcceptanceRequirement(TaskAcceptanceRequirementKind.OutcomeStatus, RunOutcomeStatus.Failed));
+        AssertReadOnly(outcome.State.CompletedTaskIds, "late");
+        AssertReadOnly(outcome.State.RunRefs,
+            new RunRef("late", "run_late", RunOutcomeStatus.Succeeded, []));
+        AssertReadOnlyDictionary(outcome.State.TaskRunCounts, "late", 1);
+        AssertReadOnly(outcome.WorkingContext.CompletedTaskIds, "late");
+        AssertReadOnlyDictionary(outcome.WorkingContext.HostStateProjection, "late", true);
+        AssertReadOnly(outcome.RunOutcomes, Envelope("run_late", RunOutcomeStatus.Succeeded));
+        AssertReadOnly(outcome.RunOutcomes[0].Receipts.Items, Receipt("run_late"));
+        AssertReadOnlyDictionary(outcome.RunOutcomes[0].Receipts.Items[0].Data, "late", true);
+        AssertReadOnly(outcome.EvidenceRefs, new EvidenceRef("artifact", "late"));
+        AssertReadOnly(outcome.Diagnostics, "late");
+        AssertReadOnly(outcome.DefinitionOfDone!.Reasons, "late");
+        AssertReadOnly(outcome.DefinitionOfDone.EvidenceRefs, new EvidenceRef("artifact", "late"));
+    }
+
+    [Fact]
+    public async Task Cyclic_and_oversized_request_data_fail_closed_before_planning()
+    {
+        var planner = new CountingTaskPlanner(Plan([Task("work")]));
+        var executor = new ScriptedRunExecutor([]);
+        var orchestrator = CreateOrchestrator(
+            planner,
+            executor,
+            new EvidenceTaskAcceptanceEvaluator());
+        var cyclicContext = new Dictionary<string, object?>();
+        cyclicContext["self"] = cyclicContext;
+        var oversizedValues = Enumerable.Range(0, 16_385).ToList();
+
+        var cyclic = await orchestrator.RunAsync(new LargeTaskRequest(
+            "Reject a cycle.",
+            RequestOrigin.User,
+            cyclicContext));
+        var oversized = await orchestrator.RunAsync(new LargeTaskRequest(
+            "Reject oversized data.",
+            RequestOrigin.User,
+            new Dictionary<string, object?> { ["values"] = oversizedValues }));
+
+        Assert.Equal(OrchestrationStatus.PlanInvalid, cyclic.Status);
+        Assert.Equal(OrchestrationStatus.PlanInvalid, oversized.Status);
+        Assert.Null(cyclic.FinalPlan);
+        Assert.Null(oversized.FinalPlan);
+        Assert.Equal(0, planner.CreateCalls);
+        Assert.Empty(executor.Requests);
+        Assert.Contains(cyclic.Diagnostics, item =>
+            item.Contains("safely snapshotted", StringComparison.Ordinal));
+        Assert.Contains(oversized.Diagnostics, item =>
+            item.Contains("safely snapshotted", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Oversized_objective_is_normalized_to_a_bounded_redacted_terminal_envelope()
+    {
+        var planner = new CountingTaskPlanner(Plan([Task("work")]));
+        var executor = new ScriptedRunExecutor([]);
+
+        var outcome = await CreateOrchestrator(
+                planner,
+                executor,
+                new EvidenceTaskAcceptanceEvaluator())
+            .RunAsync(new LargeTaskRequest(
+                new string('x', 1_100_000),
+                RequestOrigin.User,
+                new Dictionary<string, object?>()));
+
+        Assert.Equal(OrchestrationStatus.PlanInvalid, outcome.Status);
+        Assert.Equal("Invalid large-task request.", outcome.Objective);
+        Assert.Equal(0, planner.CreateCalls);
+        Assert.Empty(executor.Requests);
+        Assert.All(outcome.Diagnostics, diagnostic => Assert.True(diagnostic.Length <= 1_024));
+        Assert.DoesNotContain(outcome.Diagnostics, diagnostic =>
+            diagnostic.Contains(new string('x', 128), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Oversized_planner_exception_message_is_reduced_to_type_only_diagnostics()
+    {
+        var outcome = await CreateOrchestrator(
+                new ThrowingTaskPlanner(new InvalidOperationException(new string('x', 1_100_000))),
+                new ScriptedRunExecutor([]),
+                new EvidenceTaskAcceptanceEvaluator())
+            .RunAsync(Request("Normalize a hostile planner exception."));
+
+        Assert.Equal(OrchestrationStatus.PlanInvalid, outcome.Status);
+        Assert.Contains(outcome.Diagnostics, diagnostic =>
+            diagnostic.Contains(nameof(InvalidOperationException), StringComparison.Ordinal));
+        Assert.All(outcome.Diagnostics, diagnostic => Assert.True(diagnostic.Length <= 1_024));
+        Assert.DoesNotContain(outcome.Diagnostics, diagnostic =>
+            diagnostic.Contains(new string('x', 128), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Cyclic_planner_task_data_is_normalized_as_an_invalid_plan()
+    {
+        var taskContext = new Dictionary<string, object?>();
+        taskContext["self"] = taskContext;
+        var planner = new CountingTaskPlanner(Plan(
+        [
+            Task("work") with { ContextProjection = taskContext }
+        ]));
+        var executor = new ScriptedRunExecutor([]);
+
+        var outcome = await CreateOrchestrator(
+                planner,
+                executor,
+                new EvidenceTaskAcceptanceEvaluator())
+            .RunAsync(Request("Reject a cyclic task projection."));
+
+        Assert.Equal(OrchestrationStatus.PlanInvalid, outcome.Status);
+        Assert.Null(outcome.FinalPlan);
+        Assert.Equal(1, planner.CreateCalls);
+        Assert.Empty(executor.Requests);
+        Assert.Contains(outcome.Diagnostics, item =>
+            item.Contains("initial task planning failed", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Plan_snapshot_enforces_aggregate_node_and_byte_budgets_across_task_contexts()
+    {
+        var nodeTasks = Enumerable.Range(0, 64)
+            .Select(index => Task($"node_{index}") with
+            {
+                ContextProjection = new Dictionary<string, object?>
+                {
+                    ["values"] = Enumerable.Range(0, 256).ToArray()
+                }
+            })
+            .ToArray();
+        var byteTasks = Enumerable.Range(0, 8)
+            .Select(index => Task($"bytes_{index}") with
+            {
+                ContextProjection = new Dictionary<string, object?>
+                {
+                    ["payload"] = new string((char)('a' + index), 140_000)
+                }
+            })
+            .ToArray();
+        var nodeExecutor = new ScriptedRunExecutor([]);
+        var byteExecutor = new ScriptedRunExecutor([]);
+
+        var nodeOutcome = await CreateOrchestrator(
+                new CountingTaskPlanner(Plan(nodeTasks)),
+                nodeExecutor,
+                new EvidenceTaskAcceptanceEvaluator())
+            .RunAsync(Request("Bound aggregate context nodes."));
+        var byteOutcome = await CreateOrchestrator(
+                new CountingTaskPlanner(Plan(byteTasks)),
+                byteExecutor,
+                new EvidenceTaskAcceptanceEvaluator())
+            .RunAsync(Request("Bound aggregate context bytes."));
+
+        Assert.Equal(OrchestrationStatus.PlanInvalid, nodeOutcome.Status);
+        Assert.Equal(OrchestrationStatus.PlanInvalid, byteOutcome.Status);
+        Assert.Empty(nodeExecutor.Requests);
+        Assert.Empty(byteExecutor.Requests);
+        Assert.Contains(nodeOutcome.Diagnostics, item =>
+            item.Contains("initial task planning failed", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(byteOutcome.Diagnostics, item =>
+            item.Contains("initial task planning failed", StringComparison.OrdinalIgnoreCase));
+        Assert.All(nodeOutcome.Diagnostics, diagnostic => Assert.True(diagnostic.Length <= 1_024));
+        Assert.All(byteOutcome.Diagnostics, diagnostic => Assert.True(diagnostic.Length <= 1_024));
+    }
+
+    [Fact]
+    public async Task Dishonest_task_count_cannot_drive_unbounded_orchestration_enumeration()
+    {
+        var tasks = new DishonestReadOnlyList<TaskNode>(
+            reportedCount: 1,
+            yieldedCount: 20_000,
+            index => Task($"task_{index}"));
+        var executor = new ScriptedRunExecutor([]);
+
+        var outcome = await CreateOrchestrator(
+                new ScriptedTaskPlanner(Plan(tasks)),
+                executor,
+                new EvidenceTaskAcceptanceEvaluator())
+            .RunAsync(Request("Bound dishonest task enumeration."));
+
+        Assert.Equal(OrchestrationStatus.PlanInvalid, outcome.Status);
+        Assert.Empty(executor.Requests);
+        Assert.InRange(tasks.EnumerationCount, 1, 16_385);
+    }
+
+    [Fact]
+    public async Task Child_outcome_snapshot_retains_complete_proof_above_one_megabyte()
+    {
+        var receipts = Enumerable.Range(0, 8)
+            .Select(index => Receipt("run_work") with
+            {
+                ReceiptId = $"receipt_{index}",
+                Data = new Dictionary<string, object?>
+                {
+                    ["payload"] = new string((char)('a' + index), 140_000)
+                }
+            })
+            .ToArray();
+        var child = Envelope("run_work", RunOutcomeStatus.Succeeded) with
+        {
+            Receipts = new ReceiptEnvelope(receipts)
+        };
+
+        var outcome = await CreateOrchestrator(
+                new ScriptedTaskPlanner(Plan([Task("work")])),
+                new ScriptedRunExecutor([child]),
+                new EvidenceTaskAcceptanceEvaluator())
+            .RunAsync(Request("Bound aggregate child proof."));
+
+        Assert.Equal(OrchestrationStatus.Succeeded, outcome.Status);
+        var retained = Assert.Single(outcome.RunOutcomes);
+        Assert.Equal(8, retained.Receipts.Items.Count);
+        Assert.Equal(
+            8 * 140_000,
+            retained.Receipts.Items.Sum(receipt =>
+                Assert.IsType<string>(receipt.Data["payload"]).Length));
+        Assert.NotSame(child, retained);
+    }
+
+    [Fact]
+    public async Task Oversized_child_proof_fails_closed_but_retains_an_indeterminate_dispatch_record()
+    {
+        var receipts = Enumerable.Range(0, 120)
+            .Select(index => Receipt("run_oversized") with
+            {
+                ReceiptId = $"receipt_{index}",
+                Data = new Dictionary<string, object?>
+                {
+                    ["payload"] = new string((char)('a' + index % 26), 140_000)
+                }
+            })
+            .ToArray();
+        var child = Envelope("run_oversized", RunOutcomeStatus.Succeeded) with
+        {
+            Receipts = new ReceiptEnvelope(receipts)
+        };
+
+        var outcome = await CreateOrchestrator(
+                new ScriptedTaskPlanner(Plan([Task("work")])),
+                new ScriptedRunExecutor([child]),
+                new EvidenceTaskAcceptanceEvaluator())
+            .RunAsync(Request("Fail closed on oversized returned proof."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.Failed, outcome.StopReason);
+        var retained = Assert.Single(outcome.RunOutcomes);
+        Assert.Equal(RunOutcomeStatus.PartiallyComplete, retained.Outcome.Status);
+        Assert.Equal(StopReason.Partial, retained.Outcome.StopReason);
+        Assert.StartsWith("child_dispatch_", retained.Outcome.RunId, StringComparison.Ordinal);
+        var receipt = Assert.Single(retained.Receipts.Items);
+        Assert.Equal(ReceiptStatus.Partial, receipt.Status);
+        Assert.Equal(true, receipt.Data["returnedOutcomeReceived"]);
+        Assert.Equal(true, receipt.Data["effectMayHaveOccurred"]);
+        Assert.Equal("run_oversized", receipt.Data["returnedRunId"]);
+        Assert.Equal("unavailable", receipt.Data["proofStatus"]);
+        Assert.Contains(retained.Details.ValidationIssues, issue =>
+            issue.Code == "orchestration.child.proof.unavailable");
+        Assert.Contains(outcome.Diagnostics, item =>
+            item.Contains("child run execution", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Oversized_child_event_json_fails_closed_without_erasing_the_dispatch()
+    {
+        using var oversized = JsonDocument.Parse($"\"{new string('x', 1_100_000)}\"");
+        var child = Envelope("run_event_oversized", RunOutcomeStatus.Succeeded);
+        child = child with
+        {
+            Details = child.Details with
+            {
+                Events =
+                [
+                    new ExecutionEvent(
+                        "event_oversized",
+                        "child.returned",
+                        DateTimeOffset.UtcNow,
+                        new Dictionary<string, string>(StringComparer.Ordinal))
+                    {
+                        Payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+                        {
+                            ["oversized"] = oversized
+                        }
+                    }
+                ]
+            }
+        };
+
+        var outcome = await CreateOrchestrator(
+                new ScriptedTaskPlanner(Plan([Task("work")])),
+                new ScriptedRunExecutor([child]),
+                new EvidenceTaskAcceptanceEvaluator())
+            .RunAsync(Request("Bound child event JSON."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        var retained = Assert.Single(outcome.RunOutcomes);
+        Assert.Equal(RunOutcomeStatus.PartiallyComplete, retained.Outcome.Status);
+        var receipt = Assert.Single(retained.Receipts.Items);
+        Assert.Equal(true, receipt.Data["returnedOutcomeReceived"]);
+        Assert.Equal("run_event_oversized", receipt.Data["returnedRunId"]);
+        Assert.Equal(true, receipt.Data["effectMayHaveOccurred"]);
+    }
+
+    [Fact]
+    public async Task Child_event_proof_preserves_exact_json_number_after_source_disposal()
+    {
+        const string rawNumber = "0.100000000000000000000000000006";
+        OrchestrationOutcomeEnvelope outcome;
+
+        using (var number = JsonDocument.Parse(rawNumber))
+        {
+            var child = Envelope("run_event_number", RunOutcomeStatus.Succeeded);
+            child = child with
+            {
+                Details = child.Details with
+                {
+                    Events =
+                    [
+                        new ExecutionEvent(
+                            "event_number",
+                            "child.returned",
+                            DateTimeOffset.UtcNow,
+                            new Dictionary<string, string>(StringComparer.Ordinal))
+                        {
+                            Payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+                            {
+                                ["value"] = number.RootElement
+                            }
+                        }
+                    ]
+                }
+            };
+
+            outcome = await CreateOrchestrator(
+                    new ScriptedTaskPlanner(Plan([Task("work")])),
+                    new ScriptedRunExecutor([child]),
+                    new EvidenceTaskAcceptanceEvaluator())
+                .RunAsync(Request("Retain exact child event proof."));
+        }
+
+        var executionEvent = Assert.Single(Assert.Single(outcome.RunOutcomes).Details.Events);
+        Assert.Equal(
+            rawNumber,
+            Assert.IsType<JsonElement>(executionEvent.Payload["value"]).GetRawText());
+        using var serialized = JsonDocument.Parse(JsonSerializer.Serialize(executionEvent.Payload));
+        Assert.Equal(rawNumber, serialized.RootElement.GetProperty("value").GetRawText());
+    }
+
+    [Fact]
+    public async Task Final_envelope_retains_each_individually_bounded_child_proof_above_one_megabyte_total()
+    {
+        const int segmentLength = 200_000;
+        const int payloadLength = segmentLength * 3;
+        var first = Envelope("run_first", RunOutcomeStatus.Succeeded) with
+        {
+            Receipts = new ReceiptEnvelope(
+            [
+                Receipt("run_first") with
+                {
+                    Data = new Dictionary<string, object?>
+                    {
+                        ["payload1"] = new string('a', segmentLength),
+                        ["payload2"] = new string('b', segmentLength),
+                        ["payload3"] = new string('c', segmentLength)
+                    }
+                }
+            ])
+        };
+        var second = Envelope("run_second", RunOutcomeStatus.Succeeded) with
+        {
+            Receipts = new ReceiptEnvelope(
+            [
+                Receipt("run_second") with
+                {
+                    Data = new Dictionary<string, object?>
+                    {
+                        ["payload1"] = new string('d', segmentLength),
+                        ["payload2"] = new string('e', segmentLength),
+                        ["payload3"] = new string('f', segmentLength)
+                    }
+                }
+            ])
+        };
+        var plan = Plan(
+        [
+            Task("first"),
+            Task("second", dependsOn: ["first"])
+        ]);
+
+        var outcome = await CreateOrchestrator(
+                new ScriptedTaskPlanner(plan),
+                new ScriptedRunExecutor([first, second]),
+                new EvidenceTaskAcceptanceEvaluator())
+            .RunAsync(Request("Retain all bounded child proof."));
+
+        Assert.True(
+            outcome.Status == OrchestrationStatus.Succeeded,
+            $"Expected success, but got {outcome.Status}/{outcome.StopReason}: {string.Join(" | ", outcome.Diagnostics)}");
+        Assert.Equal(2, outcome.RunOutcomes.Count);
+        Assert.Equal(
+            payloadLength,
+            outcome.RunOutcomes[0].Receipts.Items[0].Data.Values
+                .Cast<string>()
+                .Sum(value => value.Length));
+        Assert.Equal(
+            payloadLength,
+            outcome.RunOutcomes[1].Receipts.Items[0].Data.Values
+                .Cast<string>()
+                .Sum(value => value.Length));
+        Assert.NotSame(first, outcome.RunOutcomes[0]);
+        Assert.NotSame(second, outcome.RunOutcomes[1]);
+        AssertReadOnly(outcome.RunOutcomes, Envelope("run_late", RunOutcomeStatus.Succeeded));
+    }
+
+    [Fact]
+    public void Mutation_applier_snapshots_refinement_values_and_returns_an_immutable_plan()
+    {
+        var originalTasks = new List<TaskNode> { Task("first") };
+        var plan = Plan(originalTasks);
+        var addedValues = new List<string> { "before" };
+        var addedContext = new Dictionary<string, object?>
+        {
+            ["values"] = addedValues
+        };
+        var added = Task("second", dependsOn: ["first"]) with
+        {
+            ContextProjection = addedContext
+        };
+        var mutations = new List<TaskGraphMutation>
+        {
+            new(TaskGraphMutationKind.AddTask, "second", Task: added)
+        };
+        var refinement = new TaskGraphRefinement("add second", mutations, [], false);
+
+        var result = TaskGraphMutationApplier.Apply(plan, refinement);
+
+        originalTasks.Clear();
+        addedValues.Add("after");
+        addedContext["late"] = true;
+        mutations.Clear();
+
+        Assert.Equal(["first", "second"], result.Tasks.Select(item => item.TaskId));
+        Assert.Equal(
+            ["before"],
+            Assert.IsAssignableFrom<IReadOnlyList<string>>(
+                result.Tasks[1].ContextProjection["values"]));
+        Assert.False(result.Tasks[1].ContextProjection.ContainsKey("late"));
+        AssertReadOnly(result.Tasks, Task("late"));
+        AssertReadOnly(result.Tasks[1].DependsOn, "late");
+        AssertReadOnlyDictionary(result.Tasks[1].ContextProjection, "late", true);
+
+        var cyclicContext = new Dictionary<string, object?>();
+        cyclicContext["self"] = cyclicContext;
+        var cyclicRefinement = new TaskGraphRefinement(
+            "reject cycle",
+            [
+                new TaskGraphMutation(
+                    TaskGraphMutationKind.AddTask,
+                    "cyclic",
+                    Task: Task("cyclic") with { ContextProjection = cyclicContext })
+            ],
+            [],
+            false);
+        Assert.Throws<TaskGraphValidationException>(() =>
+            TaskGraphMutationApplier.Apply(Plan([Task("base")]), cyclicRefinement));
     }
 
     [Fact]
@@ -262,8 +879,8 @@ public sealed class TaskOrchestratorTests
         Assert.Null(outcome.State.ActiveTaskId);
         Assert.Empty(outcome.State.CompletedTaskIds);
         Assert.Equal(2, outcome.RunOutcomes.Count);
-        Assert.Same(first, outcome.RunOutcomes[0]);
-        Assert.Same(second, outcome.RunOutcomes[1]);
+        Assert.NotSame(first, outcome.RunOutcomes[0]);
+        Assert.NotSame(second, outcome.RunOutcomes[1]);
         Assert.Equal(1, evaluations);
         Assert.Contains(outcome.Diagnostics, diagnostic =>
             diagnostic.Contains("reused run id 'run_reused'", StringComparison.Ordinal));
@@ -283,7 +900,7 @@ public sealed class TaskOrchestratorTests
         Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
         Assert.Equal(OrchestrationStopReason.ChildRunFailed, outcome.StopReason);
         Assert.Single(outcome.RunOutcomes);
-        Assert.Same(child, outcome.RunOutcomes[0]);
+        Assert.NotSame(child, outcome.RunOutcomes[0]);
         Assert.Contains(outcome.Diagnostics, diagnostic =>
             diagnostic.Contains("empty run id", StringComparison.Ordinal));
     }
@@ -334,8 +951,8 @@ public sealed class TaskOrchestratorTests
         Assert.Null(outcome.State.ActiveTaskId);
         Assert.Empty(outcome.State.CompletedTaskIds);
         Assert.Equal(2, outcome.RunOutcomes.Count);
-        Assert.Same(first, outcome.RunOutcomes[0]);
-        Assert.Same(second, outcome.RunOutcomes[1]);
+        Assert.NotSame(first, outcome.RunOutcomes[0]);
+        Assert.NotSame(second, outcome.RunOutcomes[1]);
         Assert.Equal(1, evaluations);
         Assert.Contains(outcome.Diagnostics, diagnostic =>
             diagnostic.Contains("prior attempt 1 prior attempt 1 reused run id 'run_shared'", StringComparison.Ordinal));
@@ -370,7 +987,7 @@ public sealed class TaskOrchestratorTests
         Assert.Null(outcome.State.ActiveTaskId);
         Assert.Empty(outcome.State.CompletedTaskIds);
         Assert.Single(outcome.RunOutcomes);
-        Assert.Same(child, outcome.RunOutcomes[0]);
+        Assert.NotSame(child, outcome.RunOutcomes[0]);
         Assert.Equal(0, evaluations);
         Assert.Contains(outcome.Diagnostics, diagnostic =>
             diagnostic.Contains("prior attempt 1 prior attempt 1 has an empty run id", StringComparison.Ordinal));
@@ -794,7 +1411,7 @@ public sealed class TaskOrchestratorTests
 
         Assert.Equal(OrchestrationStatus.PlanInvalid, outcome.Status);
         Assert.Equal(OrchestrationStopReason.PlanInvalid, outcome.StopReason);
-        Assert.Same(invalidPlan, outcome.FinalPlan);
+        Assert.NotSame(invalidPlan, outcome.FinalPlan);
         Assert.Empty(outcome.RunOutcomes);
         Assert.Empty(executor.Requests);
         Assert.Contains(outcome.Diagnostics, diagnostic => diagnostic.Contains("definition of done", StringComparison.OrdinalIgnoreCase));
@@ -818,7 +1435,7 @@ public sealed class TaskOrchestratorTests
 
         Assert.Equal(OrchestrationStatus.PlanInvalid, outcome.Status);
         Assert.Equal(OrchestrationStopReason.PlanInvalid, outcome.StopReason);
-        Assert.Same(plan, outcome.FinalPlan);
+        Assert.NotSame(plan, outcome.FinalPlan);
         Assert.Single(outcome.RunOutcomes);
         Assert.Equal("run_inspect", outcome.RunOutcomes[0].Outcome.RunId);
         Assert.Contains(outcome.Diagnostics, diagnostic => diagnostic.Contains("refinement failed", StringComparison.OrdinalIgnoreCase));
@@ -842,7 +1459,7 @@ public sealed class TaskOrchestratorTests
             .RunAsync(Request("Reject invalid mutation."));
 
         Assert.Equal(OrchestrationStatus.PlanInvalid, outcome.Status);
-        Assert.Same(plan, outcome.FinalPlan);
+        Assert.NotSame(plan, outcome.FinalPlan);
         Assert.Single(outcome.RunOutcomes);
         Assert.Equal(["inspect"], outcome.FinalPlan!.Tasks.Select(task => task.TaskId));
     }
@@ -898,7 +1515,7 @@ public sealed class TaskOrchestratorTests
 
         Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
         Assert.Equal(OrchestrationStopReason.Failed, outcome.StopReason);
-        Assert.Same(plan, outcome.FinalPlan);
+        Assert.NotSame(plan, outcome.FinalPlan);
         Assert.Empty(outcome.RunOutcomes);
         Assert.Contains(outcome.Diagnostics, item =>
             item.Contains("initial work-context compilation", StringComparison.OrdinalIgnoreCase));
@@ -922,12 +1539,46 @@ public sealed class TaskOrchestratorTests
 
         Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
         Assert.Equal(OrchestrationStopReason.Failed, outcome.StopReason);
-        Assert.Same(plan, outcome.FinalPlan);
-        Assert.Equal("run_first", Assert.Single(outcome.RunOutcomes).Outcome.RunId);
+        Assert.NotSame(plan, outcome.FinalPlan);
+        Assert.Equal(2, outcome.RunOutcomes.Count);
+        Assert.Equal("run_first", outcome.RunOutcomes[0].Outcome.RunId);
+        Assert.Equal(RunOutcomeStatus.PartiallyComplete, outcome.RunOutcomes[1].Outcome.Status);
+        Assert.Equal(false, Assert.Single(outcome.RunOutcomes[1].Receipts.Items)
+            .Data["returnedOutcomeReceived"]);
         Assert.Contains(first.TaskId, outcome.State.CompletedTaskIds);
         Assert.Equal("run_first", Assert.Single(outcome.State.RunRefs).RunId);
         Assert.Contains(outcome.Diagnostics, item =>
             item.Contains("child run execution", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Child_failure_record_reuses_the_pre_dispatch_request_snapshot()
+    {
+        var executor = new RequestMutatingThrowingRunExecutor();
+        var outcome = await CreateOrchestrator(
+                new ScriptedTaskPlanner(Plan([Task("work")])),
+                executor,
+                new EvidenceTaskAcceptanceEvaluator())
+            .RunAsync(Request("Retain the actual dispatched request."));
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.True(executor.MutationAttempted);
+        Assert.True(executor.OuterMutationBlocked);
+        Assert.True(executor.NestedMutationSucceeded);
+        var childDispatch = Assert.Single(outcome.RunOutcomes);
+        var receipt = Assert.Single(childDispatch.Receipts.Items);
+        var context = childDispatch.Details.Request.Context!;
+        Assert.Equal("work", context["orchestration.taskId"]);
+        Assert.Equal(
+            receipt.Data["childDispatchId"],
+            context["orchestration.childDispatchId"]);
+        Assert.False(context.ContainsKey("attacker.added"));
+        Assert.NotEqual("attacker_dispatch", context["orchestration.childDispatchId"]);
+        var workingContext = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(
+            context["orchestration.workingContext"]);
+        var hostState = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(
+            workingContext["HostStateProjection"]);
+        Assert.False(hostState.ContainsKey("attacker.nested"));
     }
 
     [Fact]
@@ -951,7 +1602,7 @@ public sealed class TaskOrchestratorTests
     }
 
     [Fact]
-    public async Task Orchestrator_normalizes_definition_of_done_evaluation_failure_and_preserves_accepted_proof()
+    public async Task Definition_of_done_uses_a_detached_host_state_snapshot_instead_of_custom_lookup_behavior()
     {
         var task = Task("work");
         var plan = Plan([task]) with
@@ -982,26 +1633,37 @@ public sealed class TaskOrchestratorTests
 
         var outcome = await orchestrator.RunAsync(Request("Evaluate definition of done."));
 
-        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Equal(OrchestrationStatus.Succeeded, outcome.Status);
         Assert.Equal("run_work", Assert.Single(outcome.RunOutcomes).Outcome.RunId);
         Assert.Contains(task.TaskId, outcome.State.CompletedTaskIds);
         Assert.Equal("run_work", Assert.Single(outcome.State.RunRefs).RunId);
-        Assert.Contains(outcome.Diagnostics, item =>
-            item.Contains("definition-of-done evaluation", StringComparison.OrdinalIgnoreCase));
+        Assert.True(outcome.DefinitionOfDone?.Satisfied);
+        Assert.DoesNotContain(outcome.Diagnostics, item =>
+            item.Contains("definition-of-done", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
-    public async Task Orchestrator_normalizes_final_projection_failure_without_relabeling_proof_as_success()
+    public async Task Orchestrator_reuses_the_exact_definition_of_done_host_snapshot_for_final_context()
     {
         var task = Task("work");
-        var plan = Plan([task]);
+        var plan = Plan([task]) with
+        {
+            DefinitionOfDone =
+            [
+                new TaskAcceptanceRequirement(
+                    TaskAcceptanceRequirementKind.HostState,
+                    HostStateKey: "hostReady",
+                    HostStateValue: true)
+            ]
+        };
         var projectionCalls = 0;
         IReadOnlyDictionary<string, object?> ProjectHostState()
         {
             projectionCalls++;
-            return projectionCalls == 4
-                ? throw new InvalidOperationException("Final projection failed.")
-                : new Dictionary<string, object?> { ["hostReady"] = true };
+            return new Dictionary<string, object?>
+            {
+                ["hostReady"] = projectionCalls != 4
+            };
         }
 
         var orchestrator = new TaskOrchestrator(
@@ -1011,16 +1673,16 @@ public sealed class TaskOrchestratorTests
             new DeterministicWorkContextCompiler(),
             ProjectHostState);
 
-        var outcome = await orchestrator.RunAsync(Request("Project final state."));
+        var outcome = await orchestrator.RunAsync(Request("Retain the checked final state."));
 
-        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
-        Assert.Equal(OrchestrationStopReason.Failed, outcome.StopReason);
+        Assert.Equal(OrchestrationStatus.Succeeded, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.Complete, outcome.StopReason);
         Assert.True(outcome.DefinitionOfDone?.Satisfied);
         Assert.Equal("run_work", Assert.Single(outcome.RunOutcomes).Outcome.RunId);
         Assert.Contains(task.TaskId, outcome.State.CompletedTaskIds);
         Assert.Equal("run_work", Assert.Single(outcome.State.RunRefs).RunId);
-        Assert.Contains(outcome.Diagnostics, item =>
-            item.Contains("final host-state projection", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(3, projectionCalls);
+        Assert.True(Assert.IsType<bool>(outcome.WorkingContext.HostStateProjection["hostReady"]));
     }
 
     [Fact]
@@ -1062,6 +1724,10 @@ public sealed class TaskOrchestratorTests
 
         Assert.Equal(OrchestrationStatus.Cancelled, outcome.Status);
         Assert.Equal(OrchestrationStopReason.Cancelled, outcome.StopReason);
+        var childDispatch = Assert.Single(outcome.RunOutcomes);
+        Assert.Equal(RunOutcomeStatus.PartiallyComplete, childDispatch.Outcome.Status);
+        Assert.Equal(false, Assert.Single(childDispatch.Receipts.Items)
+            .Data["returnedOutcomeReceived"]);
         Assert.DoesNotContain(outcome.Diagnostics, item =>
             item.Contains("child run execution failed", StringComparison.OrdinalIgnoreCase));
     }
@@ -1187,6 +1853,69 @@ public sealed class TaskOrchestratorTests
 
         Assert.False(result.Satisfied);
         Assert.Contains(result.Reasons, reason => reason.Contains("did not satisfy", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Definition_of_done_rejects_json_number_that_only_matches_after_rounding()
+    {
+        using var document = JsonDocument.Parse("0.100000000000000000000000000006");
+        var task = Task("exact-numeric-host-state");
+        var plan = Plan([task]) with
+        {
+            DefinitionOfDone =
+            [
+                new TaskAcceptanceRequirement(
+                    TaskAcceptanceRequirementKind.HostState,
+                    HostStateKey: "value",
+                    HostStateValue: 0.1d)
+            ]
+        };
+        var state = new OrchestrationState(
+            "orchestration_test",
+            new WorkContextSnapshot("test", null, [], [], [], [], [], [], [], new Dictionary<string, object?>(), DateTimeOffset.UtcNow));
+        state.CompletedTaskIds.Add(task.TaskId);
+        state.RunRefs.Add(new RunRef(task.TaskId, "run_exact_numeric_host", RunOutcomeStatus.Succeeded, []));
+
+        var result = DefinitionOfDoneEvaluator.Evaluate(
+            plan,
+            state,
+            [Envelope("run_exact_numeric_host", RunOutcomeStatus.Succeeded)],
+            new Dictionary<string, object?> { ["value"] = document.RootElement });
+
+        Assert.False(result.Satisfied);
+        Assert.Contains(result.Reasons, reason => reason.Contains("did not satisfy", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Definition_of_done_accepts_identical_exact_json_number_tokens()
+    {
+        const string rawNumber = "0.100000000000000000000000000006";
+        using var expected = JsonDocument.Parse(rawNumber);
+        using var actual = JsonDocument.Parse(rawNumber);
+        var task = Task("matching-exact-numeric-host-state");
+        var plan = Plan([task]) with
+        {
+            DefinitionOfDone =
+            [
+                new TaskAcceptanceRequirement(
+                    TaskAcceptanceRequirementKind.HostState,
+                    HostStateKey: "value",
+                    HostStateValue: expected.RootElement)
+            ]
+        };
+        var state = new OrchestrationState(
+            "orchestration_test",
+            new WorkContextSnapshot("test", null, [], [], [], [], [], [], [], new Dictionary<string, object?>(), DateTimeOffset.UtcNow));
+        state.CompletedTaskIds.Add(task.TaskId);
+        state.RunRefs.Add(new RunRef(task.TaskId, "run_matching_numeric_host", RunOutcomeStatus.Succeeded, []));
+
+        var result = DefinitionOfDoneEvaluator.Evaluate(
+            plan,
+            state,
+            [Envelope("run_matching_numeric_host", RunOutcomeStatus.Succeeded)],
+            new Dictionary<string, object?> { ["value"] = actual.RootElement });
+
+        Assert.True(result.Satisfied);
     }
 
     [Fact]
@@ -1404,6 +2133,96 @@ public sealed class TaskOrchestratorTests
             new Dictionary<string, object?>(),
             []);
 
+    private static void AssertReadOnly<T>(IReadOnlyList<T> values, T addedValue)
+    {
+        var list = Assert.IsAssignableFrom<IList<T>>(values);
+        Assert.True(list.IsReadOnly);
+        Assert.Throws<NotSupportedException>(() => list.Add(addedValue));
+    }
+
+    private static void AssertReadOnlyDictionary<TKey, TValue>(
+        IReadOnlyDictionary<TKey, TValue> values,
+        TKey addedKey,
+        TValue addedValue)
+        where TKey : notnull
+    {
+        var dictionary = Assert.IsAssignableFrom<IDictionary<TKey, TValue>>(values);
+        Assert.True(dictionary.IsReadOnly);
+        Assert.Throws<NotSupportedException>(() => dictionary.Add(addedKey, addedValue));
+    }
+
+    private sealed class CountingTaskPlanner : ITaskPlanner
+    {
+        private readonly TaskGraphPlan _plan;
+
+        public CountingTaskPlanner(TaskGraphPlan plan)
+        {
+            _plan = plan;
+        }
+
+        public int CreateCalls { get; private set; }
+
+        public Task<TaskGraphPlan> CreatePlanAsync(
+            TaskPlanningRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            CreateCalls++;
+            return System.Threading.Tasks.Task.FromResult(_plan);
+        }
+
+        public Task<TaskGraphRefinement> RefinePlanAsync(
+            TaskRefinementRequest request,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Refinement was not expected.");
+    }
+
+    private sealed class CoordinatedRunExecutor : IRunExecutor
+    {
+        private readonly TaskCompletionSource<OutcomeEnvelope> _completion =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Entered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public RunRequest? Request { get; private set; }
+
+        public Task<OutcomeEnvelope> RunAsync(
+            RunRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            Request = request;
+            Entered.TrySetResult();
+            return _completion.Task;
+        }
+
+        public void Complete(OutcomeEnvelope outcome) => _completion.TrySetResult(outcome);
+    }
+
+    private sealed class CoordinatedAcceptanceEvaluator : ITaskAcceptanceEvaluator
+    {
+        private readonly TaskCompletionSource<TaskAcceptanceResult> _completion =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Entered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public OutcomeEnvelope? Outcome { get; private set; }
+
+        public Task<TaskAcceptanceResult> EvaluateAsync(
+            TaskNode task,
+            OutcomeEnvelope outcome,
+            TaskAcceptanceContext context,
+            CancellationToken cancellationToken = default)
+        {
+            Outcome = outcome;
+            context.State.CompletedTaskIds.Add("forged-by-evaluator");
+            Entered.TrySetResult();
+            return _completion.Task;
+        }
+
+        public void Complete(TaskAcceptanceResult result) => _completion.TrySetResult(result);
+    }
+
     private sealed class ScriptedTaskPlanner : ITaskPlanner
     {
         private readonly Queue<TaskGraphRefinement> _refinements;
@@ -1518,6 +2337,67 @@ public sealed class TaskOrchestratorTests
             RunRequest request,
             CancellationToken cancellationToken = default) =>
             System.Threading.Tasks.Task.FromException<OutcomeEnvelope>(_exception);
+    }
+
+    private sealed class RequestMutatingThrowingRunExecutor : IRunExecutor
+    {
+        public bool MutationAttempted { get; private set; }
+
+        public bool OuterMutationBlocked { get; private set; }
+
+        public bool NestedMutationSucceeded { get; private set; }
+
+        public Task<OutcomeEnvelope> RunAsync(
+            RunRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            var context = (IDictionary<string, object?>)request.Context!;
+            MutationAttempted = true;
+            try
+            {
+                context["orchestration.taskId"] = "attacker_task";
+                context["orchestration.childDispatchId"] = "attacker_dispatch";
+                context["attacker.added"] = true;
+            }
+            catch (NotSupportedException)
+            {
+                OuterMutationBlocked = true;
+            }
+
+            var workingContext = (WorkContextSnapshot)context["orchestration.workingContext"]!;
+            if (workingContext.HostStateProjection is IDictionary<string, object?> hostState)
+            {
+                hostState["attacker.nested"] = true;
+                NestedMutationSucceeded = true;
+            }
+
+            return System.Threading.Tasks.Task.FromException<OutcomeEnvelope>(
+                new InvalidOperationException("Mutated child request then failed."));
+        }
+    }
+
+    private sealed class DishonestReadOnlyList<T>(
+        int reportedCount,
+        int yieldedCount,
+        Func<int, T> itemFactory) : IReadOnlyList<T>
+    {
+        public int Count => reportedCount;
+
+        public int EnumerationCount { get; private set; }
+
+        public T this[int index] => itemFactory(index);
+
+        public IEnumerator<T> GetEnumerator()
+        {
+            for (var index = 0; index < yieldedCount; index++)
+            {
+                EnumerationCount++;
+                yield return itemFactory(index);
+            }
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+            GetEnumerator();
     }
 
     private sealed class ThrowingAcceptanceEvaluator : ITaskAcceptanceEvaluator

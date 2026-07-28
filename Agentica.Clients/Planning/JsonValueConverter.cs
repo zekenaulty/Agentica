@@ -12,7 +12,11 @@ internal static class JsonValueConverter
             JsonValueKind.Array => element.EnumerateArray().Select(Convert).ToArray(),
             JsonValueKind.String => element.GetString(),
             JsonValueKind.Number when element.TryGetInt64(out var value) => value,
-            JsonValueKind.Number => element.GetDouble(),
+            JsonValueKind.Number when element.TryGetUInt64(out var value) => value,
+            // Keep non-integer JSON in its exact lexical representation. Schema
+            // validation can then compare the original decimal/exponent value without
+            // silently rounding it through IEEE-754 binary floating point.
+            JsonValueKind.Number => element.Clone(),
             JsonValueKind.True => true,
             JsonValueKind.False => false,
             JsonValueKind.Null => null,

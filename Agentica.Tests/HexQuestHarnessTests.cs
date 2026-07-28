@@ -192,11 +192,10 @@ public sealed class HexQuestHarnessTests
     {
         var scenario = new HexQuestBoard().Load("record_scope_conflict_v2");
         var session = new HexQuestSession(scenario);
-        var events = new InMemoryEventSink();
         var runner = new AgenticaRunner(
             new HexQuestDeterministicPlanner(scenario.Descriptor.ScenarioId),
             HexQuestTools.CreateCatalog(session),
-            events,
+            new InMemoryEventSink(),
             new HexQuestOutcomeReporter(),
             new ExecutionPolicy(MaxSteps: 10, MaxRefinements: 6),
             EvidenceCompletionEvaluator.ForArtifactKind("hexquest.objective_completed"));
@@ -206,7 +205,9 @@ public sealed class HexQuestHarnessTests
         Assert.Equal(RunOutcomeStatus.Succeeded, envelope.Outcome.Status);
         Assert.Contains(envelope.Details.Artifacts, artifact => artifact.Kind == "hexquest.objective_completed");
         Assert.NotEmpty(envelope.Details.ToolSurfaces);
-        var stepEvents = events.Events.Where(executionEvent => executionEvent.Type == "step.started").ToArray();
+        var stepEvents = envelope.Details.Events
+            .Where(executionEvent => executionEvent.Type == "step.started")
+            .ToArray();
         Assert.NotEmpty(stepEvents);
         Assert.All(stepEvents, executionEvent =>
         {

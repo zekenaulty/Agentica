@@ -270,9 +270,7 @@ public sealed class BlockedRetryPolicyTests
     {
         var tool = new StatusTool(ReceiptStatus.Succeeded, ReceiptStatus.Succeeded);
         var planner = new SequencePlanner(
-            Plan(
-                Step("step_read_1", "safe.read", ToolKind.Query, ToolEffect.ReadOnly),
-                Step("step_read_2", "safe.read", ToolKind.Query, ToolEffect.ReadOnly)),
+            Plan(Step("step_read_1", "safe.read", ToolKind.Query, ToolEffect.ReadOnly)),
             Plan(Step("step_retry", "safe.read", ToolKind.Query, ToolEffect.ReadOnly)));
         var catalog = ToolCatalog.Create(Register("safe.read", ToolKind.Query, ToolEffect.ReadOnly, tool));
         var policy = Policy(maxSteps: 1);

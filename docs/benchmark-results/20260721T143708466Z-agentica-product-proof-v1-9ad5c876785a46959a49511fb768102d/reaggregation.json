@@ -1,6 +1,6 @@
 {
   "receiptVersion": "agentica-product-proof-reaggregation-v1",
-  "reaggregatedAtUtc": "2026-07-22T00:03:41.0815065+00:00",
+  "reaggregatedAtUtc": "2026-07-22T07:14:03.050129+00:00",
   "originalManifest": {
     "harnessVersion": "agentica-product-proof-harness-v1",
     "matrixVersion": "agentica-product-proof-v1",
@@ -14,6 +14,8 @@
   "pricingReviewedOn": "2026-07-21",
   "pricingSourceUrl": "https://ai.google.dev/gemini-api/docs/pricing",
   "runsSha256": "sha256-v1:cdc254965780f542c65cddf4e8bfb140cc5e7314b55afd06d6138cc101da9efd",
+  "expectedRunsSha256": "sha256-v1:cdc254965780f542c65cddf4e8bfb140cc5e7314b55afd06d6138cc101da9efd",
+  "trustAnchorKind": "explicit-command-line-sha256",
   "runCount": 30,
   "gatePassed": true,
   "gateFailures": []

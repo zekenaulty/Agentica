@@ -1,14 +1,15 @@
 using System.Collections;
 using System.Collections.ObjectModel;
 using System.Text.Json;
+using Agentica.Execution;
 using Agentica.Observations;
 
 namespace Agentica.Events;
 
 /// <summary>
 /// Creates bounded, deeply immutable execution-event snapshots. Event payloads are
-/// intentionally a small JSON-like value graph; opaque objects are converted to a
-/// validated <see cref="JsonElement"/> rather than retained by reference.
+/// intentionally a small JSON-like value graph; opaque objects cross the same bounded
+/// canonical structured-data boundary as tool results rather than being retained by reference.
 /// </summary>
 internal static class ExecutionEventSnapshot
 {
@@ -18,41 +19,48 @@ internal static class ExecutionEventSnapshot
     internal const int MaxTotalUtf8Bytes = 1_048_576;
     private const int MaxFailureStringLength = 1_024;
 
-    private static readonly JsonSerializerOptions SnapshotJsonOptions = new()
-    {
-        MaxDepth = MaxStructuredDepth
-    };
-
     private static readonly JsonSerializerOptions EventSizeJsonOptions = new()
     {
         MaxDepth = MaxStructuredDepth + 8
     };
 
     public static IReadOnlyDictionary<string, string> Data(
-        IReadOnlyDictionary<string, string> source)
+        IReadOnlyDictionary<string, string> source) =>
+        Data(source, new SnapshotBudget());
+
+    private static IReadOnlyDictionary<string, string> Data(
+        IReadOnlyDictionary<string, string> source,
+        SnapshotBudget budget)
     {
         ArgumentNullException.ThrowIfNull(source);
-        if (source.Count > MaxCollectionItems)
-        {
-            throw Limit("Event data", $"more than {MaxCollectionItems} entries");
-        }
-
-        var snapshot = new Dictionary<string, string>(source.Count, StringComparer.Ordinal);
+        var snapshot = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var pair in source)
         {
-            snapshot.Add(
-                BoundedText(pair.Key, "Event data key"),
-                BoundedText(pair.Value, "Event data value"));
+            if (snapshot.Count >= MaxCollectionItems)
+            {
+                throw Limit("Event data", $"more than {MaxCollectionItems} entries");
+            }
+
+            var key = BoundedText(pair.Key, "Event data key");
+            var value = BoundedText(pair.Value, "Event data value");
+            budget.Consume(2);
+            budget.ConsumeText(key, "Event data key");
+            budget.ConsumeText(value, "Event data value");
+            snapshot.Add(key, value);
         }
 
         return ReadOnly(snapshot);
     }
 
     public static IReadOnlyDictionary<string, object?> Payload(
-        IReadOnlyDictionary<string, object?> source)
+        IReadOnlyDictionary<string, object?> source) =>
+        Payload(source, new SnapshotBudget());
+
+    private static IReadOnlyDictionary<string, object?> Payload(
+        IReadOnlyDictionary<string, object?> source,
+        SnapshotBudget budget)
     {
         ArgumentNullException.ThrowIfNull(source);
-        var budget = new SnapshotBudget();
         return SnapshotDictionary(source, budget, depth: 0);
     }
 
@@ -91,43 +99,64 @@ internal static class ExecutionEventSnapshot
                 BoundedOptionalText(source.ErrorClass, "Event diagnostic error class"),
                 BoundedOptionalText(source.FailureKind, "Event diagnostic failure kind"));
 
-    public static UserFacingReason? Reason(UserFacingReason? source)
+    public static UserFacingReason? Reason(UserFacingReason? source) =>
+        Reason(source, new SnapshotBudget());
+
+    private static UserFacingReason? Reason(
+        UserFacingReason? source,
+        SnapshotBudget budget)
     {
         if (source is null)
         {
             return null;
         }
 
-        var tags = SnapshotStrings(source.Tags, "User-facing reason tags");
+        var summary = budget.Text(source.Summary, "User-facing reason summary");
+        var detail = BoundedOptionalText(source.Detail, "User-facing reason detail");
+        var status = BoundedOptionalText(source.Status, "User-facing reason status");
+        var projectionSource = budget.Text(
+            source.ProjectionSource,
+            "User-facing reason projection source");
+        budget.ConsumeOptionalText(detail, "User-facing reason detail");
+        budget.ConsumeOptionalText(status, "User-facing reason status");
+        var tags = SnapshotStrings(source.Tags, "User-facing reason tags", budget);
         return new UserFacingReason(
-            BoundedText(source.Summary, "User-facing reason summary"),
-            BoundedOptionalText(source.Detail, "User-facing reason detail"),
-            BoundedOptionalText(source.Status, "User-facing reason status"))
+            summary,
+            detail,
+            status)
         {
             Tags = tags,
-            ProjectionSource = BoundedText(source.ProjectionSource, "User-facing reason projection source")
+            ProjectionSource = projectionSource
         };
     }
 
-    public static IReadOnlyList<EvidenceRef> Evidence(IReadOnlyList<EvidenceRef> source)
+    public static IReadOnlyList<EvidenceRef> Evidence(IReadOnlyList<EvidenceRef> source) =>
+        Evidence(source, new SnapshotBudget());
+
+    private static IReadOnlyList<EvidenceRef> Evidence(
+        IReadOnlyList<EvidenceRef> source,
+        SnapshotBudget budget)
     {
         ArgumentNullException.ThrowIfNull(source);
-        if (source.Count > MaxCollectionItems)
-        {
-            throw Limit("Event evidence", $"more than {MaxCollectionItems} entries");
-        }
-
-        var snapshot = new List<EvidenceRef>(source.Count);
+        var snapshot = new List<EvidenceRef>();
         foreach (var evidence in source)
         {
+            if (snapshot.Count >= MaxCollectionItems)
+            {
+                throw Limit("Event evidence", $"more than {MaxCollectionItems} entries");
+            }
+
             if (evidence is null)
             {
                 throw new ExecutionEventSnapshotException("Event evidence contains a null reference.");
             }
 
-            snapshot.Add(new EvidenceRef(
-                BoundedText(evidence.Kind, "Event evidence kind"),
-                BoundedText(evidence.RefId, "Event evidence id")));
+            var kind = BoundedText(evidence.Kind, "Event evidence kind");
+            var refId = BoundedText(evidence.RefId, "Event evidence id");
+            budget.Consume();
+            budget.ConsumeText(kind, "Event evidence kind");
+            budget.ConsumeText(refId, "Event evidence id");
+            snapshot.Add(new EvidenceRef(kind, refId));
         }
 
         return snapshot.AsReadOnly();
@@ -147,19 +176,20 @@ internal static class ExecutionEventSnapshot
         IReadOnlyDictionary<string, object?> payload,
         ExecutionDiagnostics? diagnostics)
     {
+        var budget = new SnapshotBudget();
         var snapshot = new ExecutionEvent(
             EventId: BoundedText(eventId, "Event id"),
             Type: BoundedText(type, "Event type"),
             At: at,
-            Data: Data(data))
+            Data: Data(data, budget))
         {
             Sequence = sequence,
             Source = BoundedOptionalText(source, "Event source"),
             Context = Context(context),
             Intent = Intent(intent),
-            UserFacingReason = Reason(reason),
-            EvidenceRefs = Evidence(evidence),
-            Payload = Payload(payload),
+            UserFacingReason = Reason(reason, budget),
+            EvidenceRefs = Evidence(evidence, budget),
+            Payload = Payload(payload, budget),
             Diagnostics = Diagnostics(diagnostics)
         };
 
@@ -235,16 +265,16 @@ internal static class ExecutionEventSnapshot
         int depth)
     {
         EnsureDepth(depth);
-        if (source.Count > MaxCollectionItems)
-        {
-            throw Limit("Event payload dictionary", $"more than {MaxCollectionItems} entries");
-        }
-
-        var snapshot = new Dictionary<string, object?>(source.Count, StringComparer.Ordinal);
+        var snapshot = new Dictionary<string, object?>(StringComparer.Ordinal);
         foreach (var pair in source)
         {
+            if (snapshot.Count >= MaxCollectionItems)
+            {
+                throw Limit("Event payload dictionary", $"more than {MaxCollectionItems} entries");
+            }
+
             snapshot.Add(
-                BoundedText(pair.Key, "Event payload key"),
+                budget.Text(pair.Key, "Event payload key"),
                 SnapshotValue(pair.Value, budget, depth + 1));
         }
 
@@ -263,24 +293,31 @@ internal static class ExecutionEventSnapshot
 
         if (value is string text)
         {
-            return BoundedText(text, "Event payload string");
+            return budget.Text(text, "Event payload string");
         }
 
         if (IsKnownImmutable(value))
         {
+            budget.ConsumeText(
+                Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+                "Event payload scalar");
             return value;
+        }
+
+        if (value is JsonElement { ValueKind: JsonValueKind.Number } number)
+        {
+            budget.Text(number.GetRawText(), "Event JSON number");
+            return number.Clone();
         }
 
         if (value is JsonElement element)
         {
-            ValidateJson(element, budget, depth);
-            return element.Clone();
+            return SnapshotCanonicalValue(element, budget, depth);
         }
 
         if (value is JsonDocument document)
         {
-            ValidateJson(document.RootElement, budget, depth);
-            return document.RootElement.Clone();
+            return SnapshotCanonicalValue(document, budget, depth);
         }
 
         if (value is IReadOnlyDictionary<string, object?> readOnlyDictionary)
@@ -309,6 +346,9 @@ internal static class ExecutionEventSnapshot
             }
 
             budget.Consume(bytes.Length);
+            budget.ConsumeByteCount(
+                checked(((bytes.Length + 2) / 3) * 4),
+                "Event byte payload");
             return new ReadOnlyCollection<byte>(bytes.ToArray());
         }
 
@@ -322,13 +362,26 @@ internal static class ExecutionEventSnapshot
             return SnapshotSequence(sequence, budget, depth);
         }
 
+        return SnapshotCanonicalValue(value, budget, depth);
+    }
+
+    private static object? SnapshotCanonicalValue(
+        object value,
+        SnapshotBudget budget,
+        int depth)
+    {
         try
         {
-            var serializedElement = JsonSerializer.SerializeToElement(value, value.GetType(), SnapshotJsonOptions);
-            ValidateJson(serializedElement, budget, depth);
-            return serializedElement.Clone();
+            var canonical = ToolResultNormalizer.SnapshotStructuredData(
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["value"] = value
+                });
+            return SnapshotValue(canonical["value"], budget, depth);
         }
-        catch (Exception exception) when (exception is JsonException or NotSupportedException)
+        catch (Exception exception) when (
+            exception is not ExecutionEventSnapshotException &&
+            RuntimeExceptionBoundary.IsRecoverable(exception))
         {
             throw new ExecutionEventSnapshotException(
                 $"Event payload type '{value.GetType().Name}' could not be safely snapshotted.",
@@ -342,21 +395,21 @@ internal static class ExecutionEventSnapshot
         int depth)
     {
         EnsureDepth(depth);
-        if (source.Count > MaxCollectionItems)
-        {
-            throw Limit("Event payload dictionary", $"more than {MaxCollectionItems} entries");
-        }
-
-        var snapshot = new Dictionary<string, object?>(source.Count, StringComparer.Ordinal);
+        var snapshot = new Dictionary<string, object?>(StringComparer.Ordinal);
         foreach (DictionaryEntry entry in source)
         {
+            if (snapshot.Count >= MaxCollectionItems)
+            {
+                throw Limit("Event payload dictionary", $"more than {MaxCollectionItems} entries");
+            }
+
             if (entry.Key is not string key)
             {
                 throw new ExecutionEventSnapshotException("Event payload dictionary keys must be strings.");
             }
 
             snapshot.Add(
-                BoundedText(key, "Event payload key"),
+                budget.Text(key, "Event payload key"),
                 SnapshotValue(entry.Value, budget, depth + 1));
         }
 
@@ -397,59 +450,12 @@ internal static class ExecutionEventSnapshot
             }
 
             budget?.Consume();
-            snapshot.Add(BoundedText(value, field));
+            snapshot.Add(budget is null
+                ? BoundedText(value, field)
+                : budget.Text(value, field));
         }
 
         return snapshot.AsReadOnly();
-    }
-
-    private static void ValidateJson(
-        JsonElement element,
-        SnapshotBudget budget,
-        int depth)
-    {
-        EnsureDepth(depth);
-        switch (element.ValueKind)
-        {
-            case JsonValueKind.Object:
-                var propertyCount = 0;
-                foreach (var property in element.EnumerateObject())
-                {
-                    if (propertyCount++ >= MaxCollectionItems)
-                    {
-                        throw Limit("Event JSON object", $"more than {MaxCollectionItems} properties");
-                    }
-
-                    _ = BoundedText(property.Name, "Event JSON property name");
-                    budget.Consume();
-                    ValidateJson(property.Value, budget, depth + 1);
-                }
-
-                break;
-
-            case JsonValueKind.Array:
-                var itemCount = 0;
-                foreach (var item in element.EnumerateArray())
-                {
-                    if (itemCount++ >= MaxCollectionItems)
-                    {
-                        throw Limit("Event JSON array", $"more than {MaxCollectionItems} items");
-                    }
-
-                    budget.Consume();
-                    ValidateJson(item, budget, depth + 1);
-                }
-
-                break;
-
-            case JsonValueKind.String:
-                _ = BoundedOptionalText(element.GetString(), "Event JSON string");
-                break;
-
-            case JsonValueKind.Number:
-                _ = BoundedText(element.GetRawText(), "Event JSON number");
-                break;
-        }
     }
 
     private static ExecutionEventContext? SafeContext(ExecutionEventContext? source) =>
@@ -494,7 +500,7 @@ internal static class ExecutionEventSnapshot
 
             return evidence.AsReadOnly();
         }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
+        catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
         {
             return new List<EvidenceRef>().AsReadOnly();
         }
@@ -542,7 +548,9 @@ internal static class ExecutionEventSnapshot
         {
             throw;
         }
-        catch (Exception exception) when (exception is JsonException or NotSupportedException)
+        catch (Exception exception) when (
+            (exception is JsonException or NotSupportedException) &&
+            RuntimeExceptionBoundary.IsRecoverable(exception))
         {
             throw new ExecutionEventSnapshotException(
                 "The complete event could not be measured against the immutable snapshot budget.",
@@ -567,6 +575,7 @@ internal static class ExecutionEventSnapshot
     private sealed class SnapshotBudget
     {
         private int _remaining = MaxCollectionItems;
+        private int _remainingBytes = MaxTotalUtf8Bytes;
 
         public void Consume(int count = 1)
         {
@@ -576,6 +585,36 @@ internal static class ExecutionEventSnapshot
             }
 
             _remaining -= count;
+        }
+
+        public string Text(string? value, string field)
+        {
+            var bounded = BoundedText(value, field);
+            ConsumeText(bounded, field);
+            return bounded;
+        }
+
+        public void ConsumeOptionalText(string? value, string field)
+        {
+            if (value is not null)
+            {
+                ConsumeText(value, field);
+            }
+        }
+
+        public void ConsumeText(string value, string field)
+        {
+            ConsumeByteCount(System.Text.Encoding.UTF8.GetByteCount(value), field);
+        }
+
+        public void ConsumeByteCount(int bytes, string field)
+        {
+            if (bytes < 0 || bytes > _remainingBytes)
+            {
+                throw Limit(field, $"more than {MaxTotalUtf8Bytes} aggregate UTF-8 bytes");
+            }
+
+            _remainingBytes -= bytes;
         }
     }
 

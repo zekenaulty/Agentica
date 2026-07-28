@@ -42,15 +42,20 @@ public sealed class RetryingLlmClient : ILlmClient
                             reasons)
                     };
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException exception) when (
+                cancellationToken.IsCancellationRequested &&
+                ClientExceptionBoundary.IsRecoverable(exception))
             {
                 throw;
             }
-            catch (OperationCanceledException exception) when (callTimeout.IsCancellationRequested)
+            catch (OperationCanceledException exception) when (
+                callTimeout.IsCancellationRequested &&
+                ClientExceptionBoundary.IsRecoverable(exception))
             {
                 throw CallTimedOut(request, attempt, exception);
             }
-            catch (OperationCanceledException exception)
+            catch (OperationCanceledException exception) when (
+                ClientExceptionBoundary.IsRecoverable(exception))
             {
                 lastException = exception;
                 var reason = "operation_canceled_without_caller_cancellation";
@@ -164,11 +169,15 @@ public sealed class RetryingLlmClient : ILlmClient
         {
             await Task.Delay(delay, callTimeout.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (callerToken.IsCancellationRequested)
+        catch (OperationCanceledException exception) when (
+            callerToken.IsCancellationRequested &&
+            ClientExceptionBoundary.IsRecoverable(exception))
         {
             throw;
         }
-        catch (OperationCanceledException exception) when (callTimeout.IsCancellationRequested)
+        catch (OperationCanceledException exception) when (
+            callTimeout.IsCancellationRequested &&
+            ClientExceptionBoundary.IsRecoverable(exception))
         {
             throw CallTimedOut(request, attempt, exception);
         }
@@ -194,7 +203,8 @@ public sealed class RetryingLlmClient : ILlmClient
 
     private static bool ShouldRetry(LlmClientException exception, CancellationToken cancellationToken)
     {
-        if (cancellationToken.IsCancellationRequested)
+        if (cancellationToken.IsCancellationRequested ||
+            !ClientExceptionBoundary.IsRecoverable(exception))
         {
             return false;
         }
@@ -213,6 +223,7 @@ public sealed class RetryingLlmClient : ILlmClient
 
     private static bool ShouldRetry(HttpRequestException exception, CancellationToken cancellationToken) =>
         !cancellationToken.IsCancellationRequested &&
+        ClientExceptionBoundary.IsRecoverable(exception) &&
         ClassifyHttp(exception.StatusCode) is
             LlmClientErrorKind.Network or
             LlmClientErrorKind.RateLimited or
@@ -220,7 +231,8 @@ public sealed class RetryingLlmClient : ILlmClient
 
     private static bool IsRetryableTransientException(Exception exception, CancellationToken cancellationToken)
     {
-        if (cancellationToken.IsCancellationRequested)
+        if (cancellationToken.IsCancellationRequested ||
+            !ClientExceptionBoundary.IsRecoverable(exception))
         {
             return false;
         }
