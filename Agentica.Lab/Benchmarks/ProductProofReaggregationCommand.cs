@@ -1,22 +1,15 @@
 namespace Agentica.Lab.Benchmarks;
 
-internal sealed record OriginalProductProofManifestIdentity(
-    string HarnessVersion,
-    string MatrixVersion,
-    string CohortId,
-    string ProviderName,
-    string ModelId,
-    string ConfigurationId,
-    string OriginalPricingSnapshotId);
-
 internal sealed record ProductProofReaggregationReceipt(
     string ReceiptVersion,
     DateTimeOffset ReaggregatedAtUtc,
-    OriginalProductProofManifestIdentity OriginalManifest,
+    BenchmarkOriginalManifestIdentity OriginalManifest,
     string PricingSnapshotId,
     DateOnly PricingReviewedOn,
     string PricingSourceUrl,
     string RunsSha256,
+    string ExpectedRunsSha256,
+    string TrustAnchorKind,
     int RunCount,
     bool GatePassed,
     IReadOnlyList<string> GateFailures);
@@ -40,6 +33,15 @@ internal static class ProductProofReaggregationCommand
         try
         {
             snapshot = ProductProofBenchmarkCohortReader.Read(options.CohortDirectory!);
+            if (!string.Equals(
+                    snapshot.RunsSha256,
+                    options.ExpectedRunsSha256,
+                    StringComparison.Ordinal))
+            {
+                throw new ProductProofBenchmarkCohortException(
+                    "runs.jsonl does not match the explicitly trusted SHA-256 anchor.");
+            }
+
             report = StrictBenchmarkAggregator.Aggregate(
                 ProductProofBenchmarkMatrix.Current,
                 snapshot.Results,
@@ -56,21 +58,33 @@ internal static class ProductProofReaggregationCommand
             return 2;
         }
 
+        var reaggregatedAtUtc = DateTimeOffset.UtcNow;
+        var originalManifest = new BenchmarkOriginalManifestIdentity(
+            snapshot.Manifest.HarnessVersion,
+            snapshot.Manifest.Matrix.Version,
+            snapshot.Manifest.Cohort.CohortId,
+            snapshot.Manifest.Cohort.ProviderName,
+            snapshot.Manifest.Cohort.ModelId,
+            snapshot.Manifest.Cohort.ConfigurationId,
+            snapshot.Manifest.Configuration.PricingSnapshotId);
+        var trust = new BenchmarkReaggregationTrust(
+            ReceiptVersion,
+            reaggregatedAtUtc,
+            originalManifest,
+            snapshot.RunsSha256,
+            options.ExpectedRunsSha256!,
+            "explicit-command-line-sha256");
+        report = report with { ReaggregationTrust = trust };
         var receipt = new ProductProofReaggregationReceipt(
             ReceiptVersion,
-            DateTimeOffset.UtcNow,
-            new OriginalProductProofManifestIdentity(
-                snapshot.Manifest.HarnessVersion,
-                snapshot.Manifest.Matrix.Version,
-                snapshot.Manifest.Cohort.CohortId,
-                snapshot.Manifest.Cohort.ProviderName,
-                snapshot.Manifest.Cohort.ModelId,
-                snapshot.Manifest.Cohort.ConfigurationId,
-                snapshot.Manifest.Configuration.PricingSnapshotId),
+            reaggregatedAtUtc,
+            originalManifest,
             ProductProofPricing.Current.SnapshotId,
             ProductProofPricing.Current.ReviewedOn,
             ProductProofPricing.Current.SourceUrl,
             snapshot.RunsSha256,
+            options.ExpectedRunsSha256!,
+            "explicit-command-line-sha256",
             snapshot.Results.Count,
             report.GatePassed,
             report.GateFailures);
@@ -78,8 +92,7 @@ internal static class ProductProofReaggregationCommand
         try
         {
             var store = ProductProofBenchmarkStore.OpenExisting(snapshot.DirectoryPath);
-            store.WriteAggregate(report);
-            store.WriteReaggregationReceipt(receipt);
+            store.PublishReaggregation(report, receipt);
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or InvalidOperationException)

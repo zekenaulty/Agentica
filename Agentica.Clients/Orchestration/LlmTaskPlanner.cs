@@ -89,7 +89,8 @@ public sealed class LlmTaskPlanner : ITaskPlanner
         {
             return await _client.GenerateAsync(request, cancellationToken).ConfigureAwait(false);
         }
-        catch (LlmClientException exception)
+        catch (LlmClientException exception) when (
+            ClientExceptionBoundary.IsRecoverable(exception))
         {
             throw new WorkflowPlannerException(
                 WorkflowPlannerFailureKind.Unavailable,

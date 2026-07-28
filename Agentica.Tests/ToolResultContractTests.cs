@@ -181,6 +181,35 @@ public sealed class ToolResultContractTests
     }
 
     [Fact]
+    public async Task Result_snapshot_preserves_exact_json_number_tokens_after_source_disposal()
+    {
+        const string integer = "123456789012345678901234567890123456789";
+        const string number = "0.100000000000000000000000000006";
+        OutcomeEnvelope envelope;
+
+        using (var document = JsonDocument.Parse(
+                   $$"""{"integer":{{integer}},"number":{{number}}}"""))
+        {
+            var raw = new Dictionary<string, object?>
+            {
+                ["integer"] = document.RootElement.GetProperty("integer"),
+                ["number"] = document.RootElement.GetProperty("number")
+            };
+            envelope = await RunAsync(new FixedResultTool(invocation =>
+                new ToolResult(Receipt(invocation, ReceiptStatus.Succeeded, raw))));
+        }
+
+        var receipt = Assert.Single(envelope.Receipts.Items);
+        Assert.Equal(integer, Assert.IsType<JsonElement>(receipt.Data["integer"]).GetRawText());
+        Assert.Equal(number, Assert.IsType<JsonElement>(receipt.Data["number"]).GetRawText());
+
+        var serialized = JsonSerializer.Serialize(receipt.Data);
+        using var serializedDocument = JsonDocument.Parse(serialized);
+        Assert.Equal(integer, serializedDocument.RootElement.GetProperty("integer").GetRawText());
+        Assert.Equal(number, serializedDocument.RootElement.GetProperty("number").GetRawText());
+    }
+
+    [Fact]
     public async Task Deep_json_result_is_rejected_without_becoming_success()
     {
         var json = new string('[', 40) + "0" + new string(']', 40);

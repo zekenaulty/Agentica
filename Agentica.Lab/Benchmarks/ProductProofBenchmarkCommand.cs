@@ -187,7 +187,7 @@ internal static class ProductProofBenchmarkCommand
         Console.Error.WriteLine(
             "  Agentica.Lab benchmark product-proof --live [--output-dir <path>]  [requires AGENTICA_RUN_LIVE_LLM_BENCHMARKS=true]");
         Console.Error.WriteLine(
-            "  Agentica.Lab benchmark product-proof aggregate <cohort-directory>  [offline; no provider calls]");
+            "  Agentica.Lab benchmark product-proof aggregate <cohort-directory> --expected-runs-sha256 sha256-v1:<64 lowercase hex>  [offline; no provider calls]");
     }
 
     private static void PrintReport(BenchmarkReport report, string outputDirectory)

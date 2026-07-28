@@ -81,6 +81,22 @@ public sealed record RunRef(
     RunOutcomeStatus Status,
     IReadOnlyList<EvidenceRef> EvidenceRefs);
 
+/// <summary>
+/// Immutable public projection of the orchestration state machine at termination.
+/// </summary>
+public sealed record OrchestrationStateSnapshot(
+    string OrchestrationId,
+    OrchestrationStatus Status,
+    OrchestrationStopReason StopReason,
+    string? ActiveTaskId,
+    IReadOnlyList<string> CompletedTaskIds,
+    IReadOnlyList<string> BlockedTaskIds,
+    IReadOnlyList<string> AvailableTaskIds,
+    IReadOnlyList<RunRef> RunRefs,
+    IReadOnlyDictionary<string, int> TaskRunCounts,
+    int RefinementCount,
+    WorkContextSnapshot WorkingContext);
+
 public sealed record DefinitionOfDoneResult(
     bool Satisfied,
     IReadOnlyList<string> Reasons,
@@ -92,7 +108,7 @@ public sealed record OrchestrationOutcomeEnvelope(
     OrchestrationStopReason StopReason,
     string Objective,
     TaskGraphPlan? FinalPlan,
-    OrchestrationState State,
+    OrchestrationStateSnapshot State,
     WorkContextSnapshot WorkingContext,
     IReadOnlyList<OutcomeEnvelope> RunOutcomes,
     IReadOnlyList<EvidenceRef> EvidenceRefs)

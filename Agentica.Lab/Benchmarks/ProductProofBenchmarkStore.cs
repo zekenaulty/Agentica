@@ -86,46 +86,74 @@ internal sealed class ProductProofBenchmarkStore
     public void WriteReaggregationReceipt(object receipt) =>
         WriteJsonAtomically("reaggregation.json", receipt);
 
-    private void WriteJsonAtomically(string fileName, object value)
+    public void PublishReaggregation(object aggregate, object receipt)
     {
-        ArgumentNullException.ThrowIfNull(value);
-        var destination = Path.Combine(DirectoryPath, fileName);
-        var temporary = destination + $".{Guid.NewGuid():N}.tmp";
-        var json = JsonSerializer.Serialize(value, IndentedJson) + Environment.NewLine;
+        ArgumentNullException.ThrowIfNull(aggregate);
+        ArgumentNullException.ThrowIfNull(receipt);
+        var aggregateJson = Serialize(aggregate);
+        var receiptJson = Serialize(receipt);
 
         lock (_gate)
         {
             RequireOrdinaryDirectory();
-            RequireOrdinaryDestination(destination);
-            try
-            {
-                using (var stream = new FileStream(
-                           temporary,
-                           FileMode.CreateNew,
-                           FileAccess.Write,
-                           FileShare.None,
-                           bufferSize: 4096,
-                           FileOptions.WriteThrough))
-                using (var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
-                {
-                    writer.Write(json);
-                    writer.Flush();
-                    stream.Flush(flushToDisk: true);
-                }
 
-                RequireOrdinaryDestination(destination);
-                File.Move(temporary, destination, overwrite: true);
-            }
-            finally
+            // aggregate.json is the authoritative commit marker and carries its own
+            // trust anchor. Publish the compatibility receipt first so a failure can
+            // never expose a new aggregate without its matching receipt.
+            WriteJsonAtomicallyUnderLock("reaggregation.json", receiptJson);
+            WriteJsonAtomicallyUnderLock("aggregate.json", aggregateJson);
+        }
+    }
+
+    private void WriteJsonAtomically(string fileName, object value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        var json = Serialize(value);
+
+        lock (_gate)
+        {
+            RequireOrdinaryDirectory();
+            WriteJsonAtomicallyUnderLock(fileName, json);
+        }
+    }
+
+    private void WriteJsonAtomicallyUnderLock(string fileName, string json)
+    {
+        var destination = Path.Combine(DirectoryPath, fileName);
+        var temporary = destination + $".{Guid.NewGuid():N}.tmp";
+
+        RequireOrdinaryDestination(destination);
+        try
+        {
+            using (var stream = new FileStream(
+                       temporary,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None,
+                       bufferSize: 4096,
+                       FileOptions.WriteThrough))
+            using (var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
             {
-                if (File.Exists(temporary) &&
-                    (File.GetAttributes(temporary) & (FileAttributes.Directory | FileAttributes.ReparsePoint)) == 0)
-                {
-                    File.Delete(temporary);
-                }
+                writer.Write(json);
+                writer.Flush();
+                stream.Flush(flushToDisk: true);
+            }
+
+            RequireOrdinaryDestination(destination);
+            File.Move(temporary, destination, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary) &&
+                (File.GetAttributes(temporary) & (FileAttributes.Directory | FileAttributes.ReparsePoint)) == 0)
+            {
+                File.Delete(temporary);
             }
         }
     }
+
+    private static string Serialize(object value) =>
+        JsonSerializer.Serialize(value, IndentedJson) + Environment.NewLine;
 
     private void RequireOrdinaryDirectory()
     {
@@ -143,9 +171,15 @@ internal sealed class ProductProofBenchmarkStore
             return;
         }
 
-        if ((File.GetAttributes(path) & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+        var attributes = File.GetAttributes(path);
+        if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
         {
             throw new InvalidOperationException($"Benchmark output '{Path.GetFileName(path)}' must be an ordinary file.");
+        }
+
+        if ((attributes & FileAttributes.ReadOnly) != 0)
+        {
+            throw new InvalidOperationException($"Benchmark output '{Path.GetFileName(path)}' is read-only.");
         }
     }
 

@@ -94,7 +94,7 @@ That does not mean Agentica should spend many slices avoiding LLM planning. LLM 
 
 Provider-call reliability belongs in `Agentica.Clients`, not in the runtime execution loop. Transient LLM generation failures should be retried at the client boundary before `PlannerUnavailable` reaches Agentica. Runtime blocked retries are for workflow blockage and recovery, not for masking temporary provider transport failures.
 
-The first client retry policy uses a deliberately conservative generation call timeout of 10 minutes. That timeout bounds one `ILlmClient.GenerateAsync` call, including retries. It is a local reliability guard for early provider smoke testing and should later become configurable.
+The first client retry policy uses a deliberately conservative 10-minute generation cancellation deadline across retries. It cancels the linked token but is a hard bound only when the provider adapter or transport honors cancellation or enforces its own deadline. It is a local reliability guard for early provider smoke testing and should later become configurable.
 
 Cutover rule:
 
@@ -226,11 +226,11 @@ Do not start with a general `create_note` tool. A note-writing tool gives the pl
 
 Agentica is a bounded planner/executor, not an open-ended autonomous loop.
 
-Core execution policy should include only hard runtime guards:
+Core execution policy should include bounded runtime guards, with cooperative deadlines named honestly:
 
 - Max steps.
 - Max refinements.
-- Timeout.
+- Cooperative in-process timeout/cancellation.
 - Cancellation.
 - Planning mode.
 - Approval wait behavior.
@@ -334,7 +334,7 @@ Retry is authorization, not convenience:
 
 Completion is also explicit authority. Every runner host supplies an evaluator; evaluators receive an immutable snapshot and return resolved evidence. Plan exhaustion is a named demo policy, not a constructor default.
 
-The in-memory run ledger is authoritative. Event sinks, outcome reporters, and user-facing projections are observers. Their failure is diagnosed and isolated; it cannot erase a real invocation or change a proven business outcome. Durable audit delivery, if required later, needs a separate write-ahead/outbox contract.
+The in-memory run ledger is authoritative. Event sinks, outcome reporters, and user-facing projections are observers. Their exceptions are diagnosed and isolated; they cannot erase a real invocation or change a proven business outcome. Event-sink delivery is waited behind a finite policy bound and circuit-broken on timeout. A detached timed-out callback may finish later and therefore cannot own business effects. Reporters and reason projectors remain trusted in-process callbacks and are not forcibly detached if they block. Durable audit delivery, if required later, needs a separate write-ahead/outbox contract.
 
 ## Decision 012: One Compiled Manifest Is The Initial Security Authority
 
@@ -345,11 +345,11 @@ Plans pin that manifest hash. Immediately before dispatch, the runtime recompile
 Authorization uses two independent keys:
 
 - the effect policy must allow the declared effect; and
-- approval-required or external-side-effect work must have an exact, unexpired manifest/tool/data/output grant.
+- approval-required or external-side-effect work must have an exact, unexpired one-shot grant bound to authorization scope, attempt, step, canonical input, manifest, tool, data, and output class.
 
 Planner egress belongs inside the same boundary. External planners declare `IExternalWorkflowPlanner` and require a non-null allowed-boundary policy before the first request or any continuation/refinement. Coarse run data classifications are sticky and plan-time projected. This deliberately conservative slice can reject a safe operation; it must not silently transmit workspace or conversation content through an unapproved boundary.
 
-Destination-specific grants, single-use interactive approvals, signatures, independent sub-hashes, fine-grained taint, and OS-handle-relative path confinement remain later breadth. They do not weaken the initial rule: changed registrations and insufficient authority fail closed.
+Grant consumption is atomic across policies snapshotted from the same in-memory grant and is recorded with issuer, expiry, boundaries, outputs, and invocation binding in the attempt ledger before dispatch. Reuse of that grant lineage across a second step or run fails closed, and retry needs a separately issued attempt-bound grant. Reconstructing a grant is a new host issuance; the host owns global grant-id uniqueness and durable replay protection. The current primitive is not a human approval service. Destination identities, signatures, independent sub-hashes, fine-grained taint, and OS-handle-relative path confinement remain later breadth. They do not weaken the initial rule: changed registrations and insufficient authority fail closed.
 
 ## Decision 013: Orchestration Success Requires Local And Global Proof
 
@@ -357,4 +357,14 @@ An orchestration task has no valid executable meaning without nonempty, kind-val
 
 Task acceptance is evaluated against the child outcome and host snapshot, then independently checked against the task's declared criteria. Every accepted evidence reference must resolve. After all required tasks are complete, the orchestrator evaluates the global definition of done across accepted child envelopes and current host state before reporting success.
 
-Graph changes are transactional and restricted to the mutation kinds the runtime actually implements. Planner, contract, validation, and mutation failures return structured orchestration outcomes while preserving the previous valid graph and child proof. The generic orchestration surface remains incubating until measured use establishes that this bounded contract is sufficient; implementing the proof gate does not make it a separate supported product.
+Graph changes are transactional and restricted to the mutation kinds the runtime actually implements. Planner, contract, validation, and mutation failures return structured orchestration outcomes while preserving the previous valid graph and retained child proof. Each child dispatch is recorded before execution; if its complete returned envelope cannot cross the bounded snapshot boundary, the dispatch remains explicit as partial/indeterminate proof. The generic orchestration surface remains incubating until measured use establishes that this bounded contract is sufficient; implementing the proof gate does not make it a separate supported product.
+
+Planner-returned task graphs, host projections, child envelopes, acceptance results, and final orchestration state cross explicit bounded snapshot boundaries. The mutable state machine stays private; the public envelope contains an immutable `OrchestrationStateSnapshot` rather than the live state object.
+
+## Decision 014: In-Process Deadlines Are Cooperative And Lab Paths Are Static Guards
+
+Agentica does not detach a mutation-capable planner or tool task merely because a wait deadline elapsed. Doing so could emit a terminal timeout while the abandoned task continued effects outside the proof ledger. In-process deadlines therefore request cancellation and await truthful termination. Transport adapters should impose their own deadlines; adversarial execution needs a future isolated worker/process contract.
+
+The Lab workspace boundary is similarly explicit about its threat model. It performs bounded lexical and static link/reparse checks before pathname I/O, streams reads/searches under one owned duration across preflight, child process, and fallback, drains and terminates search processes, and refuses incomplete preflight coverage. It is a safety guard for a cooperative single-user research workspace, not handle-relative confinement against concurrent adversarial path replacement.
+
+Chat image publication freezes and bounds provider responses before local mutation, stages and digest-checks files, and conservatively preflights serialized result data plus reserved final-proof/journal overhead before final-path or SQLite publication. Same-volume moves are atomic per file, and compensation after later failure is attempted and journaled. The flat `images/*` compatibility shape is not an atomic multi-file set, a durable outbox, or crash recovery; those stronger guarantees remain deferred while external image tools are quarantined.

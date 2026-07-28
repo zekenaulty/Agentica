@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Text.Json;
 using Agentica.Artifacts;
@@ -45,6 +46,14 @@ public sealed class AgenticaRunner
         _eventSink = eventSink;
         _outcomeReporter = outcomeReporter;
         _policy = policy ?? ExecutionPolicy.Default;
+        if (_policy.EffectiveEventSinkDeliveryTimeout <= TimeSpan.Zero ||
+            _policy.EffectiveEventSinkDeliveryTimeout > TimeSpan.FromMinutes(1))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(policy),
+                "Event sink delivery timeout must be greater than zero and no more than one minute.");
+        }
+
         _completionEvaluator = completionEvaluator;
         _planValidator = new PlanExecutionValidator(_toolCatalog, _policy);
         _planningRequestFactory = new PlanningRequestFactory(_toolCatalog, _policy, planningFrameProjector);
@@ -57,20 +66,40 @@ public sealed class AgenticaRunner
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        RunRequest? originalRequest = null;
-        var currentRequest = request;
+        RunRequest? originalRequest;
+        RunRequest currentRequest;
+        Exception? initialRequestSnapshotFailure = null;
+        try
+        {
+            // Retain a detached, type-compatible runtime copy for blocked retries.
+            // Returned proof uses the separate canonical ProofRequest projection.
+            originalRequest = ExecutionRecordSnapshot.Request(request);
+            currentRequest = originalRequest;
+        }
+        catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
+        {
+            originalRequest = null;
+            initialRequestSnapshotFailure = exception;
+            currentRequest = new RunRequest("Request snapshot rejected.", request.Origin);
+        }
+
         var attempts = new List<RunAttemptSummary>();
         var attemptEnvelopes = new List<OutcomeEnvelope>();
         var attemptNumber = 1;
 
         while (true)
         {
-            var envelope = await RunAttemptAsync(currentRequest, attemptNumber, cancellationToken).ConfigureAwait(false);
-            originalRequest ??= envelope.Details.Request;
+            var envelope = await RunAttemptAsync(
+                    currentRequest,
+                    attemptNumber,
+                    cancellationToken,
+                    attemptNumber == 1 ? initialRequestSnapshotFailure : null)
+                .ConfigureAwait(false);
             attempts.Add(RunAttemptSummary.From(attemptNumber, envelope));
             attemptEnvelopes.Add(envelope);
 
-            if (attemptNumber > _policy.MaxBlockedRetries ||
+            if (originalRequest is null ||
+                attemptNumber > _policy.MaxBlockedRetries ||
                 !_blockedRetryEvaluator.CanRetry(attemptEnvelopes))
             {
                 return AttachAttemptSummaries(envelope, attempts, attemptEnvelopes);
@@ -84,7 +113,8 @@ public sealed class AgenticaRunner
     private async Task<OutcomeEnvelope> RunAttemptAsync(
         RunRequest request,
         int attemptNumber,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Exception? knownRequestSnapshotFailure = null)
     {
         using var timeoutCts = _policy.Timeout is { } timeout
             ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
@@ -96,15 +126,18 @@ public sealed class AgenticaRunner
         }
 
         var ct = timeoutCts?.Token ?? cancellationToken;
-        Exception? requestSnapshotFailure = null;
-        try
+        var requestSnapshotFailure = knownRequestSnapshotFailure;
+        if (requestSnapshotFailure is null)
         {
-            request = ExecutionRecordSnapshot.Request(request);
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            requestSnapshotFailure = exception;
-            request = new RunRequest(request.Objective, request.Origin);
+            try
+            {
+                request = ExecutionRecordSnapshot.Request(request);
+            }
+            catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
+            {
+                requestSnapshotFailure = exception;
+                request = new RunRequest("Request snapshot rejected.", request.Origin);
+            }
         }
 
         var run = new AgenticaRun(AgenticaIds.New("run"), request, attemptNumber);
@@ -114,6 +147,7 @@ public sealed class AgenticaRunner
         run.ExposedBoundaries.Add(ToolDataBoundary.UserContent);
         var toolCooldowns = new Dictionary<string, ToolCooldownState>(StringComparer.Ordinal);
         var toolIdentityAliases = new ConcurrentDictionary<string, string>(StringComparer.Ordinal);
+        var manifestRecheckBudget = new ManifestRecheckBudget(_toolCatalog.Manifest);
 
         Emit(
             run,
@@ -192,7 +226,8 @@ public sealed class AgenticaRunner
                 currentPlan = ExecutionRecordSnapshot.Plan(currentPlan);
                 RegisterPlanToolSurface(run, currentPlan, initialPlanningRequest);
             }
-            catch (OperationCanceledException exception)
+            catch (OperationCanceledException exception) when (
+                RuntimeExceptionBoundary.IsRecoverable(exception))
             {
                 EmitPlanningCancelled(
                     run,
@@ -202,12 +237,14 @@ public sealed class AgenticaRunner
                     planningRequest: initialPlanningRequest);
                 throw;
             }
-            catch (WorkflowPlannerException exception)
+            catch (WorkflowPlannerException exception) when (
+                RuntimeExceptionBoundary.IsRecoverable(exception))
             {
                 return FinishPlannerFailure(run, exception, "planner.create.failed");
             }
-            catch (Exception exception)
+            catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
             {
+                var exceptionMessage = BoundedExceptionMessage(exception);
                 return Finish(
                     run,
                     RunOutcomeStatus.PlanInvalid,
@@ -216,11 +253,11 @@ public sealed class AgenticaRunner
                     [
                         new ValidationIssue(
                             "planner.create.failed",
-                            $"Planner failed to create a valid plan: {exception.Message}")
+                            $"Planner failed to create a valid plan: {exceptionMessage}")
                     ],
                     diagnostics: new ExecutionDiagnostics(
                         "planner.create.failed",
-                        $"Planner failed to create a valid plan: {exception.Message}",
+                        $"Planner failed to create a valid plan: {exceptionMessage}",
                         exception.GetType().Name));
             }
 
@@ -228,7 +265,7 @@ public sealed class AgenticaRunner
             EmitPlanCreated(run, currentPlan);
 
             var executedSteps = new HashSet<string>(StringComparer.Ordinal);
-            var validationIssues = ValidatePlan(run, currentPlan, executedSteps);
+            var validationIssues = ValidatePlan(run, currentPlan, executedSteps, toolIdentityAliases);
             if (validationIssues.Count > 0)
             {
                 return Finish(run, RunOutcomeStatus.PlanInvalid, StopReason.PlanInvalid, validationIssues);
@@ -294,7 +331,8 @@ public sealed class AgenticaRunner
                         currentPlan = ExecutionRecordSnapshot.Plan(currentPlan);
                         RegisterPlanToolSurface(run, currentPlan, continuationPlanningRequest);
                     }
-                    catch (OperationCanceledException exception)
+                    catch (OperationCanceledException exception) when (
+                        RuntimeExceptionBoundary.IsRecoverable(exception))
                     {
                         EmitPlanningCancelled(
                             run,
@@ -305,12 +343,14 @@ public sealed class AgenticaRunner
                             currentPlan: currentPlan);
                         throw;
                     }
-                    catch (WorkflowPlannerException exception)
+                    catch (WorkflowPlannerException exception) when (
+                        RuntimeExceptionBoundary.IsRecoverable(exception))
                     {
                         return FinishPlannerFailure(run, exception, "planner.continue.failed");
                     }
-                    catch (Exception exception)
+                    catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
                     {
+                        var exceptionMessage = BoundedExceptionMessage(exception);
                         return Finish(
                             run,
                             RunOutcomeStatus.PlanInvalid,
@@ -319,11 +359,11 @@ public sealed class AgenticaRunner
                             [
                                 new ValidationIssue(
                                     "planner.continue.failed",
-                                    $"Planner failed to continue the plan: {exception.Message}")
+                                    $"Planner failed to continue the plan: {exceptionMessage}")
                             ],
                             diagnostics: new ExecutionDiagnostics(
                                 "planner.continue.failed",
-                                $"Planner failed to continue the plan: {exception.Message}",
+                                $"Planner failed to continue the plan: {exceptionMessage}",
                                 exception.GetType().Name));
                     }
 
@@ -331,7 +371,7 @@ public sealed class AgenticaRunner
                     run.PlanVersions.Add(currentPlan);
                     EmitPlanCreated(run, currentPlan);
 
-                    validationIssues = ValidatePlan(run, currentPlan, executedSteps);
+                    validationIssues = ValidatePlan(run, currentPlan, executedSteps, toolIdentityAliases);
                     if (validationIssues.Count > 0)
                     {
                         return Finish(run, RunOutcomeStatus.PlanInvalid, StopReason.PlanInvalid, validationIssues);
@@ -355,6 +395,7 @@ public sealed class AgenticaRunner
                     nextSteps,
                     toolCooldowns,
                     toolIdentityAliases,
+                    manifestRecheckBudget,
                     ct).ConfigureAwait(false);
 
                 foreach (var executionResult in executionResults)
@@ -472,7 +513,8 @@ public sealed class AgenticaRunner
                         refinedPlan = ExecutionRecordSnapshot.Plan(refinedPlan);
                         RegisterPlanToolSurface(run, refinedPlan, refinementPlanningRequest);
                     }
-                    catch (OperationCanceledException exception)
+                    catch (OperationCanceledException exception) when (
+                        RuntimeExceptionBoundary.IsRecoverable(exception))
                     {
                         EmitPlanningCancelled(
                             run,
@@ -489,12 +531,14 @@ public sealed class AgenticaRunner
                             ]);
                         throw;
                     }
-                    catch (WorkflowPlannerException exception)
+                    catch (WorkflowPlannerException exception) when (
+                        RuntimeExceptionBoundary.IsRecoverable(exception))
                     {
                         return FinishPlannerFailure(run, exception, "planner.refine.failed");
                     }
-                    catch (Exception exception)
+                    catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
                     {
+                        var exceptionMessage = BoundedExceptionMessage(exception);
                         return Finish(
                             run,
                             RunOutcomeStatus.PlanInvalid,
@@ -503,11 +547,11 @@ public sealed class AgenticaRunner
                             [
                                 new ValidationIssue(
                                     "planner.refine.failed",
-                                    $"Planner failed to refine the plan: {exception.Message}")
+                                    $"Planner failed to refine the plan: {exceptionMessage}")
                             ],
                             diagnostics: new ExecutionDiagnostics(
                                 "planner.refine.failed",
-                                $"Planner failed to refine the plan: {exception.Message}",
+                                $"Planner failed to refine the plan: {exceptionMessage}",
                                 exception.GetType().Name));
                     }
 
@@ -557,7 +601,7 @@ public sealed class AgenticaRunner
                                 .ToArray()
                         });
 
-                    validationIssues = ValidatePlan(run, currentPlan, executedSteps);
+                    validationIssues = ValidatePlan(run, currentPlan, executedSteps, toolIdentityAliases);
                     if (validationIssues.Count > 0)
                     {
                         return Finish(run, RunOutcomeStatus.PlanInvalid, StopReason.PlanInvalid, validationIssues);
@@ -580,18 +624,79 @@ public sealed class AgenticaRunner
                 }
             }
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException exception) when (
+            RuntimeExceptionBoundary.IsRecoverable(exception) &&
+            ct.IsCancellationRequested &&
+            !cancellationToken.IsCancellationRequested)
         {
             return Finish(run, RunOutcomeStatus.Cancelled, StopReason.Timeout, blockers: ["Run timed out."]);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException exception) when (
+            RuntimeExceptionBoundary.IsRecoverable(exception) &&
+            cancellationToken.IsCancellationRequested)
         {
             return Finish(run, RunOutcomeStatus.Cancelled, StopReason.Cancelled, blockers: ["Run was cancelled."]);
         }
     }
 
-    public IReadOnlyList<ValidationIssue> ValidatePlan(WorkflowPlan plan) =>
-        _planValidator.Validate(plan);
+    public IReadOnlyList<ValidationIssue> ValidatePlan(WorkflowPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        try
+        {
+            return _planValidator.Validate(ExecutionRecordSnapshot.Plan(plan));
+        }
+        catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
+        {
+            return Array.AsReadOnly(new[]
+            {
+                new ValidationIssue(
+                    "plan.snapshot.invalid",
+                    "Plan validation input could not be safely snapshotted.")
+            });
+        }
+    }
+
+    /// <summary>
+    /// Validates a plan against a concrete authorization scope and attempt. The scope-free
+    /// overload intentionally fails closed for tools that require invocation grants.
+    /// </summary>
+    public IReadOnlyList<ValidationIssue> ValidatePlan(
+        WorkflowPlan plan,
+        string authorizationScopeId,
+        int attemptNumber = 1)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(authorizationScopeId);
+        if (!ValidationIssueCollector.IsDisplayBounded(authorizationScopeId))
+        {
+            return Array.AsReadOnly(new[]
+            {
+                new ValidationIssue(
+                    "plan.authorization_scope.identifier.too_long",
+                    "Authorization scope id exceeds the validation identifier limit.")
+            });
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(authorizationScopeId);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(attemptNumber);
+        try
+        {
+            return _planValidator.Validate(
+                ExecutionRecordSnapshot.Plan(plan),
+                authorizationScopeId,
+                attemptNumber);
+        }
+        catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
+        {
+            return Array.AsReadOnly(new[]
+            {
+                new ValidationIssue(
+                    "plan.snapshot.invalid",
+                    "Plan validation input could not be safely snapshotted.")
+            });
+        }
+    }
 
     private CompletionEvaluation EvaluateCompletion(AgenticaRun run)
     {
@@ -601,13 +706,7 @@ public sealed class AgenticaRunner
             var evaluated = _completionEvaluator.Evaluate(context);
             var completion = evaluated is null
                 ? null
-                : evaluated with
-                {
-                    Blockers = Array.AsReadOnly(evaluated.Blockers?.ToArray() ?? []),
-                    EvidenceRefs = Array.AsReadOnly(evaluated.EvidenceRefs?
-                        .Select(reference => reference is null ? null! : reference with { })
-                        .ToArray() ?? [])
-                };
+                : ExecutionRecordSnapshot.Completion(evaluated);
             if (completion is null ||
                 !Enum.IsDefined(completion.Decision) ||
                 !Enum.IsDefined(completion.StopReason) ||
@@ -623,7 +722,7 @@ public sealed class AgenticaRunner
 
             return completion;
         }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
+        catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
         {
             return CompletionEvaluation.Failed(
                 StopReason.CompletionEvaluationFailed,
@@ -692,12 +791,23 @@ public sealed class AgenticaRunner
     private IReadOnlyList<ValidationIssue> ValidatePlan(
         AgenticaRun run,
         WorkflowPlan plan,
-        IReadOnlySet<string> completedStepIds) =>
-        _planValidator.Validate(
+        IReadOnlySet<string> completedStepIds,
+        ConcurrentDictionary<string, string> toolIdentityAliases)
+    {
+        var aliasSnapshot = new ReadOnlyDictionary<string, string>(
+            toolIdentityAliases
+                .ToArray()
+                .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal));
+        return _planValidator.Validate(
             plan,
             completedStepIds,
             run.ExposedBoundaries,
-            ToolManifestHashFor(run, plan) ?? string.Empty);
+            ToolManifestHashFor(run, plan) ?? string.Empty,
+            run.Request.AuthorizationScopeId,
+            run.AttemptNumber,
+            sourceIdsByCanonicalId: aliasSnapshot,
+            allowDeferredInputAuthorization: true);
+    }
 
     private IReadOnlyList<PlanStep> SelectNextSteps(
         WorkflowPlan plan,
@@ -752,6 +862,7 @@ public sealed class AgenticaRunner
         IReadOnlyList<PlanStep> steps,
         Dictionary<string, ToolCooldownState> toolCooldowns,
         ConcurrentDictionary<string, string> toolIdentityAliases,
+        ManifestRecheckBudget manifestRecheckBudget,
         CancellationToken cancellationToken)
     {
         var toolSurfaceId = ToolSurfaceIdFor(run, plan);
@@ -776,6 +887,7 @@ public sealed class AgenticaRunner
                     manifestHash,
                     toolCooldowns,
                     toolIdentityAliases,
+                    manifestRecheckBudget,
                     cancellationToken).ConfigureAwait(false)
             ];
         }
@@ -813,6 +925,7 @@ public sealed class AgenticaRunner
                 manifestHash,
                 toolCooldowns,
                 toolIdentityAliases,
+                manifestRecheckBudget,
                 cancellationToken))
             .ToArray();
         var results = await Task.WhenAll(tasks).ConfigureAwait(false);
@@ -846,6 +959,7 @@ public sealed class AgenticaRunner
         string? expectedManifestHash,
         Dictionary<string, ToolCooldownState> toolCooldowns,
         ConcurrentDictionary<string, string> toolIdentityAliases,
+        ManifestRecheckBudget manifestRecheckBudget,
         CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -858,21 +972,31 @@ public sealed class AgenticaRunner
                 "Tool dispatch was refused because the plan is not pinned to a compiled manifest.");
         }
 
-        CompiledToolManifest currentManifest;
-        try
-        {
-            currentManifest = _toolCatalog.CompileCurrentManifest();
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
+        var manifestRecheck = manifestRecheckBudget.Recompile(
+            _toolCatalog.CompileCurrentManifest);
+        if (manifestRecheck.Status == ManifestRecheckStatus.Exhausted)
         {
             return CreateSecurityRefusal(
                 step,
                 stopwatch,
+                "tool.security.manifest_recheck_budget_exhausted",
+                "Tool dispatch was refused before invocation because the bounded per-attempt " +
+                "manifest-recheck work budget was exhausted.");
+        }
+
+        if (manifestRecheck.Status == ManifestRecheckStatus.CompilationFailed)
+        {
+            var exception = manifestRecheck.Exception!;
+            return CreateSecurityRefusal(
+                step,
+                stopwatch,
                 "tool.security.registration_invalid",
-                $"Tool dispatch was refused because the current registration surface is invalid: {exception.Message}",
+                "Tool dispatch was refused because the current registration surface is invalid: " +
+                BoundedExceptionMessage(exception),
                 exception.GetType().Name);
         }
 
+        var currentManifest = manifestRecheck.Manifest!;
         if (!string.Equals(currentManifest.ManifestHash, expectedManifestHash, StringComparison.Ordinal))
         {
             return CreateSecurityRefusal(
@@ -930,22 +1054,49 @@ public sealed class AgenticaRunner
                 $"disallowed boundaries: {string.Join(", ", plannerBoundaryViolations)}.");
         }
 
-        var grant = ToolSecurityEvaluator.EvaluateDispatch(
-            _policy.EffectiveSecurityPolicy,
-            expectedManifestHash,
-            registration,
-            run.ExposedBoundaries,
-            DateTimeOffset.UtcNow);
-        if (!grant.Allowed)
+        IReadOnlyDictionary<string, object?> dispatchInput;
+        string operationalInputDigest;
+        try
+        {
+            var aliasSnapshot = new ReadOnlyDictionary<string, string>(
+                toolIdentityAliases
+                    .ToArray()
+                    .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal));
+            var restoredInput = ToolResultNormalizer.RestoreSourceIdentities(step.Input, aliasSnapshot);
+            dispatchInput = ToolResultNormalizer.SnapshotStructuredData(restoredInput);
+            operationalInputDigest = ToolInvocationAuthorization.ComputeOperationalInputDigest(dispatchInput);
+        }
+        catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
         {
             return CreateSecurityRefusal(
                 step,
                 stopwatch,
-                grant.Code ?? "tool.security.grant_required",
-                grant.Message ?? $"Tool '{step.ToolId}' is not authorized for dispatch.");
+                "tool.security.input_snapshot_invalid",
+                $"Tool '{step.ToolId}' operational input could not be safely frozen before dispatch.",
+                exception.GetType().Name);
         }
 
-        var inputIssues = ToolInputValidator.Validate(step, descriptor.InputSchema);
+        var dispatchStep = step with { Input = dispatchInput };
+        var authorization = ToolSecurityEvaluator.EvaluateDispatch(
+            _policy.EffectiveSecurityPolicy,
+            expectedManifestHash,
+            registration,
+            dispatchStep,
+            run.Request.AuthorizationScopeId,
+            run.AttemptNumber,
+            run.ExposedBoundaries,
+            DateTimeOffset.UtcNow,
+            operationalInputDigest: operationalInputDigest);
+        if (!authorization.Allowed)
+        {
+            return CreateSecurityRefusal(
+                step,
+                stopwatch,
+                authorization.Code ?? "tool.security.grant_required",
+                authorization.Message ?? $"Tool '{step.ToolId}' is not authorized for dispatch.");
+        }
+
+        var inputIssues = _planValidator.ValidateDispatchInput(dispatchStep);
         if (inputIssues.Count > 0)
         {
             return CreateSecurityRefusal(
@@ -955,7 +1106,7 @@ public sealed class AgenticaRunner
                 "Tool dispatch was refused because input no longer validates against the checked registration.");
         }
 
-        if (TryCreateCooldownResultOrReserve(run, step, descriptor, toolCooldowns) is { } cooldownResult)
+        if (TryCreateCooldownResultOrReserve(run, dispatchStep, descriptor, toolCooldowns) is { } cooldownResult)
         {
             stopwatch.Stop();
             return new StepExecutionResult(
@@ -968,13 +1119,101 @@ public sealed class AgenticaRunner
                 stopwatch.ElapsedMilliseconds);
         }
 
+        var consumedGrant = authorization.Grant;
+        if (consumedGrant is { } executionGrant)
+        {
+            var consumedAt = DateTimeOffset.UtcNow;
+            if (executionGrant.ExpiresAt <= consumedAt)
+            {
+                var refusal = CreateSecurityRefusal(
+                    step,
+                    stopwatch,
+                    "tool.security.grant_expired",
+                    $"Tool '{step.ToolId}' execution grant expired before dispatch.");
+                UpdateCooldownReceipt(dispatchStep, descriptor, refusal.Result.Receipt, toolCooldowns);
+                return refusal;
+            }
+
+            if (!executionGrant.TryConsume())
+            {
+                var refusal = CreateSecurityRefusal(
+                    step,
+                    stopwatch,
+                    "tool.security.grant_consumed",
+                    $"Tool '{step.ToolId}' execution grant was already consumed.");
+                UpdateCooldownReceipt(dispatchStep, descriptor, refusal.Result.Receipt, toolCooldowns);
+                return refusal;
+            }
+
+            var consumption = new ToolGrantConsumption(
+                executionGrant.GrantId,
+                executionGrant.AuthorizationScopeId,
+                run.RunId,
+                run.AttemptNumber,
+                step.StepId,
+                step.ToolId,
+                expectedManifestHash,
+                authorization.InvocationInputDigest!,
+                executionGrant.Issuer,
+                executionGrant.ExpiresAt,
+                Array.AsReadOnly(executionGrant.AllowedOutboundBoundaries
+                    .OrderBy(boundary => boundary)
+                    .ToArray()),
+                Array.AsReadOnly(executionGrant.AllowedExternalOutputs
+                    .OrderBy(output => output)
+                    .ToArray()),
+                consumedAt);
+            lock (run.GrantConsumptionGate)
+            {
+                run.GrantConsumptions.Add(consumption);
+            }
+
+            Emit(
+                run,
+                ExecutionEventType.GrantConsumed,
+                [("grant", executionGrant.GrantId), ("step", step.StepId)],
+                source: "Runner",
+                context: Context(run, step: step),
+                payload: new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["grantId"] = executionGrant.GrantId,
+                    ["authorizationScopeId"] = executionGrant.AuthorizationScopeId,
+                    ["attemptNumber"] = run.AttemptNumber,
+                    ["stepId"] = step.StepId,
+                    ["toolId"] = step.ToolId,
+                    ["manifestHash"] = expectedManifestHash,
+                    ["invocationInputDigest"] = authorization.InvocationInputDigest,
+                    ["issuer"] = executionGrant.Issuer,
+                    ["expiresAt"] = executionGrant.ExpiresAt,
+                    ["allowedOutboundBoundaries"] = executionGrant.AllowedOutboundBoundaries
+                        .OrderBy(boundary => boundary)
+                        .Select(boundary => boundary.ToString())
+                        .ToArray(),
+                    ["allowedExternalOutputs"] = executionGrant.AllowedExternalOutputs
+                        .OrderBy(output => output)
+                        .Select(output => output.ToString())
+                        .ToArray()
+                });
+        }
+
         try
         {
             var invocation = new ToolInvocation(
                 run.RunId,
                 step.StepId,
                 step.ToolId,
-                ToolResultNormalizer.RestoreSourceIdentities(step.Input, toolIdentityAliases));
+                dispatchInput);
+            if (consumedGrant is not null && consumedGrant.ExpiresAt <= DateTimeOffset.UtcNow)
+            {
+                var refusal = CreateSecurityRefusal(
+                    step,
+                    stopwatch,
+                    "tool.security.grant_expired",
+                    $"Tool '{step.ToolId}' execution grant expired immediately before dispatch.");
+                UpdateCooldownReceipt(dispatchStep, descriptor, refusal.Result.Receipt, toolCooldowns);
+                return refusal;
+            }
+
             var rawResult = await registration.Tool.ExecuteAsync(
                 invocation,
                 cancellationToken).ConfigureAwait(false);
@@ -985,7 +1224,7 @@ public sealed class AgenticaRunner
                 toolIdentityAliases[alias.Key] = alias.Value;
             }
 
-            UpdateCooldownReceipt(step, descriptor, result.Receipt, toolCooldowns);
+            UpdateCooldownReceipt(dispatchStep, descriptor, result.Receipt, toolCooldowns);
             ResetCooldownsAfterMutation(descriptor, result, toolCooldowns);
             stopwatch.Stop();
             return new StepExecutionResult(
@@ -995,7 +1234,8 @@ public sealed class AgenticaRunner
                 stopwatch.ElapsedMilliseconds,
                 security.ExposesToPlanner);
         }
-        catch (OperationCanceledException exception)
+        catch (OperationCanceledException exception) when (
+            RuntimeExceptionBoundary.IsRecoverable(exception))
         {
             var receipt = new Receipt(
                 AgenticaIds.New("receipt"),
@@ -1009,6 +1249,7 @@ public sealed class AgenticaRunner
                     ["errorClass"] = exception.GetType().Name,
                     ["cancellationRequested"] = cancellationToken.IsCancellationRequested
                 });
+            UpdateCooldownReceipt(dispatchStep, descriptor, receipt, toolCooldowns);
             stopwatch.Stop();
             return new StepExecutionResult(
                 step,
@@ -1021,27 +1262,28 @@ public sealed class AgenticaRunner
                 stopwatch.ElapsedMilliseconds,
                 security.ExposesToPlanner);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
         {
+            var exceptionMessage = BoundedExceptionMessage(exception);
             var receipt = new Receipt(
                 AgenticaIds.New("receipt"),
                 step.StepId,
                 step.ToolId,
                 ReceiptStatus.Failed,
-                $"Tool '{step.ToolId}' failed: {exception.Message}",
+                $"Tool '{step.ToolId}' failed: {exceptionMessage}",
                 DateTimeOffset.UtcNow,
                 new Dictionary<string, object?>
                 {
                     ["errorClass"] = exception.GetType().Name
                 });
-            UpdateCooldownReceipt(step, descriptor, receipt, toolCooldowns);
+            UpdateCooldownReceipt(dispatchStep, descriptor, receipt, toolCooldowns);
             stopwatch.Stop();
             return new StepExecutionResult(
                 step,
                 new ToolResult(receipt),
                 new ExecutionDiagnostics(
                     "tool.execution.failed",
-                    $"Tool '{step.ToolId}' failed: {exception.Message}",
+                    $"Tool '{step.ToolId}' failed: {exceptionMessage}",
                     exception.GetType().Name,
                     ReceiptStatus.Failed.ToString()),
                 stopwatch.ElapsedMilliseconds,
@@ -1311,7 +1553,9 @@ public sealed class AgenticaRunner
         {
             return JsonSerializer.Serialize(value);
         }
-        catch (Exception exception) when (exception is NotSupportedException or JsonException)
+        catch (Exception exception) when (
+            (exception is NotSupportedException or JsonException) &&
+            RuntimeExceptionBoundary.IsRecoverable(exception))
         {
             return value.ToString() ?? string.Empty;
         }
@@ -1428,13 +1672,20 @@ public sealed class AgenticaRunner
         IReadOnlyList<OutcomeEnvelope> attemptEnvelopes) =>
         envelope with
         {
-            PriorAttempts = attemptEnvelopes
+            PriorAttempts = ExecutionRecordSnapshot.ReadOnly(attemptEnvelopes
                 .Take(Math.Max(0, attemptEnvelopes.Count - 1))
-                .Select(attempt => attempt with { PriorAttempts = [] })
-                .ToArray(),
+                .Select(attempt => attempt with
+                {
+                    PriorAttempts = ExecutionRecordSnapshot.ReadOnly(Array.Empty<OutcomeEnvelope>())
+                })),
             Details = envelope.Details with
             {
-                RunAttempts = attempts.ToArray()
+                RunAttempts = ExecutionRecordSnapshot.ReadOnly(attempts
+                    .Select(attempt => attempt with
+                    {
+                        CompletedSteps = ExecutionRecordSnapshot.ReadOnly(attempt.CompletedSteps),
+                        Blockers = ExecutionRecordSnapshot.ReadOnly(attempt.Blockers)
+                    }))
             }
         };
 
@@ -1470,7 +1721,7 @@ public sealed class AgenticaRunner
                 blockers) ?? throw new InvalidOperationException("Outcome reporter returned no report.");
             report = ExecutionRecordSnapshot.Report(rawReport);
         }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
+        catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
         {
             reportDiagnostics = new ExecutionDiagnostics(
                 "outcome.reporter.failed",
@@ -1486,6 +1737,8 @@ public sealed class AgenticaRunner
                         [new EvidenceRef("stopReason", stopReason.ToString())])
                 ]);
         }
+
+        report = ExecutionRecordSnapshot.Report(report);
 
         var effectiveDiagnostics = diagnostics ?? reportDiagnostics;
         var outcomeEvidence = completionEvidence
@@ -1550,33 +1803,62 @@ public sealed class AgenticaRunner
             divergences,
             validationIssues,
             status);
+        var frozenBreadcrumbs = new BreadcrumbLedger(ExecutionRecordSnapshot.ReadOnly(
+            breadcrumbs.Entries.Select(entry => entry with
+            {
+                EvidenceRefs = ExecutionRecordSnapshot.ReadOnly(
+                    entry.EvidenceRefs.Select(reference => reference with { }))
+            })));
+        var frozenDivergences = new DivergenceLedger(ExecutionRecordSnapshot.ReadOnly(
+            divergences.Entries.Select(entry => entry with
+            {
+                EvidenceRefs = ExecutionRecordSnapshot.ReadOnly(
+                    entry.EvidenceRefs.Select(reference => reference with { }))
+            })));
+        var frozenContinuity = continuity with
+        {
+            RecommendationReasons = ExecutionRecordSnapshot.ReadOnly(continuity.RecommendationReasons)
+        };
 
         return new OutcomeEnvelope(
             Outcome: new RunOutcome(
                 RunId: run.RunId,
                 Status: status,
                 StopReason: stopReason,
-                CompletedSteps: run.CompletedSteps.ToArray(),
+                CompletedSteps: ExecutionRecordSnapshot.ReadOnly(run.CompletedSteps),
                 Blockers: blockers,
                 CompletionEvidence: completionEvidence),
             Report: report,
-            Receipts: new ReceiptEnvelope(run.Receipts.ToArray()),
+            Receipts: new ReceiptEnvelope(ExecutionRecordSnapshot.ReadOnly(
+                run.Receipts.Select(ExecutionRecordSnapshot.Receipt))),
             Details: new DetailEnvelope(
-                Request: ExecutionRecordSnapshot.Request(run.Request),
-                PlanVersions: run.PlanVersions.ToArray(),
-                PlanRefinements: run.PlanRefinements.ToArray(),
-                Observations: run.Observations.ToArray(),
-                Artifacts: run.Artifacts.ToArray(),
-                Batches: run.Batches.ToArray(),
-                Events: run.Events.ToList().AsReadOnly(),
+                Request: ExecutionRecordSnapshot.ProofRequest(run.Request),
+                PlanVersions: ExecutionRecordSnapshot.ReadOnly(
+                    run.PlanVersions.Select(ExecutionRecordSnapshot.Plan)),
+                PlanRefinements: ExecutionRecordSnapshot.ReadOnly(
+                    run.PlanRefinements.Select(ExecutionRecordSnapshot.PlanRefinement)),
+                Observations: ExecutionRecordSnapshot.ReadOnly(
+                    run.Observations.Select(ExecutionRecordSnapshot.Observation)),
+                Artifacts: ExecutionRecordSnapshot.ReadOnly(
+                    run.Artifacts.Select(ExecutionRecordSnapshot.Artifact)),
+                Batches: ExecutionRecordSnapshot.ReadOnly(
+                    run.Batches.Select(ExecutionRecordSnapshot.Batch)),
+                Events: ExecutionRecordSnapshot.ReadOnly(
+                    run.Events.Select(ExecutionEventSnapshot.Clone)),
                 ValidationIssues: validationIssues)
             {
-                ToolSurfaces = run.ToolSurfaces.ToArray(),
-                PlanningFrames = run.PlanningFrames.ToArray(),
-                EventDeliveryFailure = run.EventDeliveryFailure,
-                Breadcrumbs = breadcrumbs,
-                Divergences = divergences,
-                Continuity = continuity
+                ToolSurfaces = ExecutionRecordSnapshot.ReadOnly(
+                    run.ToolSurfaces.Select(ExecutionRecordSnapshot.ToolSurface)),
+                PlanningFrames = ExecutionRecordSnapshot.ReadOnly(
+                    run.PlanningFrames.Select(ExecutionRecordSnapshot.PlanningFrame)),
+                GrantConsumptions = ExecutionRecordSnapshot.ReadOnly(
+                    run.GrantConsumptions.Select(ExecutionRecordSnapshot.GrantConsumption)),
+                EventDeliveryFailure = run.EventDeliveryFailure is null
+                    ? null
+                    : run.EventDeliveryFailure with { },
+                Breadcrumbs = frozenBreadcrumbs,
+                Divergences = frozenDivergences,
+                Continuity = frozenContinuity
             });
     }
 
@@ -1829,70 +2111,70 @@ public sealed class AgenticaRunner
         IReadOnlyDictionary<string, object?>? payload = null,
         ExecutionDiagnostics? diagnostics = null)
     {
-        var eventType = type.WireName();
-        var eventId = AgenticaIds.New("event");
-        var eventAt = DateTimeOffset.UtcNow;
-        var eventSequence = run.NextEventSequence();
-        ExecutionEvent executionEvent;
-        try
-        {
-            var eventData = ExecutionEventSnapshot.Data(
-                data.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal));
-            var eventPayload = ExecutionEventSnapshot.Payload(
-                payload ?? new Dictionary<string, object?>(StringComparer.Ordinal));
-            UserFacingReason? userFacingReason;
-            try
-            {
-                userFacingReason = ExecutionEventSnapshot.Reason(
-                    _userFacingReasonProjector.Project(new UserFacingReasonProjectionRequest(
-                        EventType: eventType,
-                        Source: source,
-                        Context: ExecutionEventSnapshot.Context(context),
-                        Intent: ExecutionEventSnapshot.Intent(intent),
-                        Data: ExecutionEventSnapshot.Data(eventData),
-                        Payload: ExecutionEventSnapshot.Payload(eventPayload),
-                        Diagnostics: ExecutionEventSnapshot.Diagnostics(diagnostics))));
-            }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
-            {
-                userFacingReason = null;
-                diagnostics ??= new ExecutionDiagnostics(
-                    "event.reason_projection.failed",
-                    "User-facing event reason projection failed; the canonical event was preserved.",
-                    exception.GetType().Name,
-                    "EventProjectionFailure");
-            }
-
-            executionEvent = ExecutionEventSnapshot.Create(
-                eventId,
-                eventType,
-                eventAt,
-                eventSequence,
-                source,
-                context,
-                intent,
-                userFacingReason,
-                eventData,
-                evidenceRefs ?? [],
-                eventPayload,
-                diagnostics);
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            executionEvent = ExecutionEventSnapshot.CreateFailure(
-                eventId,
-                eventType,
-                eventAt,
-                eventSequence,
-                source,
-                context,
-                evidenceRefs,
-                diagnostics,
-                exception);
-        }
-
         lock (run.EventDeliveryGate)
         {
+            var eventType = type.WireName();
+            var eventId = AgenticaIds.New("event");
+            var eventAt = DateTimeOffset.UtcNow;
+            var eventSequence = run.NextEventSequence();
+            ExecutionEvent executionEvent;
+            try
+            {
+                var eventData = ExecutionEventSnapshot.Data(
+                    data.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal));
+                var eventPayload = ExecutionEventSnapshot.Payload(
+                    payload ?? new Dictionary<string, object?>(StringComparer.Ordinal));
+                UserFacingReason? userFacingReason;
+                try
+                {
+                    userFacingReason = ExecutionEventSnapshot.Reason(
+                        _userFacingReasonProjector.Project(new UserFacingReasonProjectionRequest(
+                            EventType: eventType,
+                            Source: source,
+                            Context: ExecutionEventSnapshot.Context(context),
+                            Intent: ExecutionEventSnapshot.Intent(intent),
+                            Data: ExecutionEventSnapshot.Data(eventData),
+                            Payload: ExecutionEventSnapshot.Payload(eventPayload),
+                            Diagnostics: ExecutionEventSnapshot.Diagnostics(diagnostics))));
+                }
+                catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
+                {
+                    userFacingReason = null;
+                    diagnostics ??= new ExecutionDiagnostics(
+                        "event.reason_projection.failed",
+                        "User-facing event reason projection failed; the canonical event was preserved.",
+                        exception.GetType().Name,
+                        "EventProjectionFailure");
+                }
+
+                executionEvent = ExecutionEventSnapshot.Create(
+                    eventId,
+                    eventType,
+                    eventAt,
+                    eventSequence,
+                    source,
+                    context,
+                    intent,
+                    userFacingReason,
+                    eventData,
+                    evidenceRefs ?? [],
+                    eventPayload,
+                    diagnostics);
+            }
+            catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
+            {
+                executionEvent = ExecutionEventSnapshot.CreateFailure(
+                    eventId,
+                    eventType,
+                    eventAt,
+                    eventSequence,
+                    source,
+                    context,
+                    evidenceRefs,
+                    diagnostics,
+                    exception);
+            }
+
             // The run ledger is authoritative. Sink delivery is best-effort and cannot
             // invalidate business state or evidence that has already been recorded.
             run.AddEvent(executionEvent);
@@ -1904,9 +2186,37 @@ public sealed class AgenticaRunner
 
             try
             {
-                _eventSink.Emit(ExecutionEventSnapshot.Clone(executionEvent));
+                var observerEvent = ExecutionEventSnapshot.Clone(executionEvent);
+                var delivery = Task.Run(() => _eventSink.Emit(observerEvent));
+                var completed = false;
+                Exception? deliveryException = null;
+                try
+                {
+                    completed = delivery.Wait(_policy.EffectiveEventSinkDeliveryTimeout);
+                }
+                catch (AggregateException exception)
+                {
+                    deliveryException = exception.GetBaseException();
+                }
+
+                if (!completed && deliveryException is null)
+                {
+                    _ = delivery.ContinueWith(
+                        task => _ = task.Exception,
+                        CancellationToken.None,
+                        TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                        TaskScheduler.Default);
+                    throw new TimeoutException(
+                        $"Event delivery exceeded the configured " +
+                        $"{_policy.EffectiveEventSinkDeliveryTimeout.TotalMilliseconds:0.###} ms bound.");
+                }
+
+                if (deliveryException is not null)
+                {
+                    throw deliveryException;
+                }
             }
-            catch (Exception exception)
+            catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
             {
                 run.EventDeliveryFailure = new EventDeliveryFailure(
                     EventId: executionEvent.EventId,
@@ -1914,7 +2224,9 @@ public sealed class AgenticaRunner
                     EventSequence: executionEvent.Sequence,
                     SinkType: _eventSink.GetType().FullName ?? _eventSink.GetType().Name,
                     ExceptionType: exception.GetType().FullName ?? exception.GetType().Name,
-                    Message: "Event delivery failed.",
+                    Message: exception is TimeoutException
+                        ? exception.Message
+                        : "Event delivery failed.",
                     FailedAt: DateTimeOffset.UtcNow);
             }
         }
@@ -2134,10 +2446,11 @@ public sealed class AgenticaRunner
         WorkflowPlannerException exception,
         string defaultCode)
     {
-        var code = string.IsNullOrWhiteSpace(exception.Code) ? defaultCode : exception.Code;
+        var code = BoundedPlannerCode(exception.Code, defaultCode);
+        var exceptionMessage = BoundedExceptionMessage(exception);
         var diagnostics = new ExecutionDiagnostics(
             Code: code,
-            Message: exception.Message,
+            Message: exceptionMessage,
             ErrorClass: exception.GetType().Name,
             FailureKind: exception.FailureKind.ToString());
 
@@ -2147,7 +2460,7 @@ public sealed class AgenticaRunner
                 run,
                 RunOutcomeStatus.Blocked,
                 StopReason.PlannerUnavailable,
-                blockers: [exception.Message],
+                blockers: [exceptionMessage],
                 diagnostics: diagnostics);
         }
 
@@ -2157,9 +2470,172 @@ public sealed class AgenticaRunner
             StopReason.PlanInvalid,
             validationIssues:
             [
-                new ValidationIssue(code, exception.Message)
+                new ValidationIssue(code, exceptionMessage)
             ],
             diagnostics: diagnostics);
+    }
+
+    private static string BoundedExceptionMessage(Exception exception)
+    {
+        const int maximumBytes = 4096;
+        const string suffix = "\u2026";
+        var message = string.IsNullOrWhiteSpace(exception.Message)
+            ? "External operation failed."
+            : exception.Message;
+        if (System.Text.Encoding.UTF8.GetByteCount(message) <= maximumBytes)
+        {
+            return message;
+        }
+
+        var suffixBytes = System.Text.Encoding.UTF8.GetByteCount(suffix);
+        var low = 0;
+        var high = message.Length;
+        while (low < high)
+        {
+            var candidate = low + ((high - low + 1) / 2);
+            if (System.Text.Encoding.UTF8.GetByteCount(message.AsSpan(0, candidate)) <=
+                maximumBytes - suffixBytes)
+            {
+                low = candidate;
+            }
+            else
+            {
+                high = candidate - 1;
+            }
+        }
+
+        if (low > 0 && low < message.Length && char.IsHighSurrogate(message[low - 1]))
+        {
+            low--;
+        }
+
+        return string.Concat(message.AsSpan(0, low), suffix);
+    }
+
+    private static string BoundedPlannerCode(string? code, string fallback)
+    {
+        const int maximumLength = 128;
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return fallback;
+        }
+
+        return code.Length <= maximumLength
+            ? code
+            : code[..maximumLength];
+    }
+
+    /// <summary>
+    /// Bounds the aggregate cost of mandatory manifest recompilation within one attempt.
+    /// Every dispatch reserves the measured expected-manifest complexity before recompiling;
+    /// a drifted, larger result must also fit before any invocation can proceed.
+    /// </summary>
+    private sealed class ManifestRecheckBudget
+    {
+        private const int MaxAggregateNodes = 16 * 16_384;
+        private const int MaxAggregateWorkBytes = 16 * 1024 * 1024;
+        private const int StructuralBytesPerNode = 16;
+
+        private readonly object _gate = new();
+        private readonly ToolManifestComplexity _expected;
+        private readonly string _expectedHash;
+        private int _remainingNodes = MaxAggregateNodes;
+        private int _remainingWorkBytes = MaxAggregateWorkBytes;
+        private bool _closed;
+
+        public ManifestRecheckBudget(CompiledToolManifest expectedManifest)
+        {
+            _expected = ToolManifestCompiler.ComplexityOf(expectedManifest);
+            _expectedHash = expectedManifest.ManifestHash;
+        }
+
+        public ManifestRecheckResult Recompile(
+            Func<CompiledToolManifest> compileCurrentManifest)
+        {
+            ArgumentNullException.ThrowIfNull(compileCurrentManifest);
+            lock (_gate)
+            {
+                if (_closed ||
+                    !TryConsumeLocked(_expected.Nodes, WorkBytes(_expected)))
+                {
+                    _closed = true;
+                    return ManifestRecheckResult.Exhausted;
+                }
+
+                CompiledToolManifest currentManifest;
+                try
+                {
+                    currentManifest = compileCurrentManifest();
+                }
+                catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
+                {
+                    _closed = true;
+                    return ManifestRecheckResult.Failed(exception);
+                }
+
+                var current = ToolManifestCompiler.ComplexityOf(currentManifest);
+                if (!TryConsumeLocked(
+                        Math.Max(0, current.Nodes - _expected.Nodes),
+                        Math.Max(0, WorkBytes(current) - WorkBytes(_expected))))
+                {
+                    _closed = true;
+                    return ManifestRecheckResult.Exhausted;
+                }
+
+                if (!string.Equals(
+                        currentManifest.ManifestHash,
+                        _expectedHash,
+                        StringComparison.Ordinal))
+                {
+                    // One fully bounded compile is sufficient to prove drift. Prevent
+                    // sibling dispatches from recompiling the same hostile surface.
+                    _closed = true;
+                }
+
+                return ManifestRecheckResult.Succeeded(currentManifest);
+            }
+        }
+
+        private bool TryConsumeLocked(int nodes, int workBytes)
+        {
+            if (nodes > _remainingNodes || workBytes > _remainingWorkBytes)
+            {
+                return false;
+            }
+
+            _remainingNodes -= nodes;
+            _remainingWorkBytes -= workBytes;
+            return true;
+        }
+
+        private static int WorkBytes(ToolManifestComplexity complexity)
+        {
+            var workBytes = (long)complexity.Utf8Bytes +
+                            ((long)complexity.Nodes * StructuralBytesPerNode);
+            return (int)Math.Min(int.MaxValue, Math.Max(1, workBytes));
+        }
+    }
+
+    private enum ManifestRecheckStatus
+    {
+        Succeeded = 0,
+        Exhausted = 1,
+        CompilationFailed = 2
+    }
+
+    private sealed record ManifestRecheckResult(
+        ManifestRecheckStatus Status,
+        CompiledToolManifest? Manifest,
+        Exception? Exception)
+    {
+        public static ManifestRecheckResult Exhausted { get; } =
+            new(ManifestRecheckStatus.Exhausted, null, null);
+
+        public static ManifestRecheckResult Succeeded(CompiledToolManifest manifest) =>
+            new(ManifestRecheckStatus.Succeeded, manifest, null);
+
+        public static ManifestRecheckResult Failed(Exception exception) =>
+            new(ManifestRecheckStatus.CompilationFailed, null, exception);
     }
 
     private sealed record StepExecutionResult(

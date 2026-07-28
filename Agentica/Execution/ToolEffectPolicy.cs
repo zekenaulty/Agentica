@@ -8,7 +8,13 @@ public sealed record ToolEffectPolicy
     public ToolEffectPolicy(IEnumerable<ToolEffect> AllowedEffects)
     {
         ArgumentNullException.ThrowIfNull(AllowedEffects);
-        this.AllowedEffects = AllowedEffects.ToFrozenSet();
+        var allowedEffects = AllowedEffects.ToArray();
+        if (allowedEffects.Any(effect => !Enum.IsDefined(effect)))
+        {
+            throw new ArgumentException("Effect policy cannot contain undefined effects.", nameof(AllowedEffects));
+        }
+
+        this.AllowedEffects = allowedEffects.ToFrozenSet();
     }
 
     public IReadOnlySet<ToolEffect> AllowedEffects { get; }

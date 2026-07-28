@@ -2,6 +2,7 @@ using System.Collections;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Agentica.Execution;
 
 namespace Agentica.Orchestration;
 
@@ -10,6 +11,7 @@ internal static class StructuralValueEquality
     private const int MaxDepth = 64;
     private const int MaxNodes = 4_096;
     private const int MaxCollectionItems = 4_096;
+    private const int MaxJsonNumberLength = 1_024;
 
     public static bool AreEqual(object? left, object? right)
     {
@@ -17,7 +19,9 @@ internal static class StructuralValueEquality
         {
             return new ComparisonContext().AreEqual(left, right, depth: 0);
         }
-        catch (Exception exception) when (exception is not (OutOfMemoryException or OperationCanceledException))
+        catch (Exception exception) when (
+            exception is not OperationCanceledException &&
+            RuntimeExceptionBoundary.IsRecoverable(exception))
         {
             // Host state is untrusted proof input. Unsupported, unstable, or hostile values fail closed.
             return false;
@@ -179,8 +183,23 @@ internal static class StructuralValueEquality
             case JsonValueKind.Number when element.TryGetInt64(out var integer):
                 value = integer;
                 return true;
+            case JsonValueKind.Number when element.TryGetUInt64(out var unsignedInteger):
+                value = unsignedInteger;
+                return true;
             case JsonValueKind.Number:
-                value = element.GetDouble();
+                var raw = element.GetRawText();
+                if (raw.Length > MaxJsonNumberLength)
+                {
+                    return false;
+                }
+
+                // Non-integral/arbitrary-precision JSON values must not cross an
+                // IEEE-754 conversion before proof comparison. Keep the bounded
+                // token type distinct from CLR numeric types: an explicitly
+                // declared double/decimal requirement is not the same proof value
+                // as an untyped JSON token, and identical JSON tokens remain
+                // structurally comparable without rounding.
+                value = new JsonNumberToken(raw);
                 return true;
             case JsonValueKind.True:
                 value = true;
@@ -195,6 +214,8 @@ internal static class StructuralValueEquality
                 return false;
         }
     }
+
+    private readonly record struct JsonNumberToken(string Lexeme);
 
     private static DictionaryReadResult ReadStringDictionary(object value)
     {

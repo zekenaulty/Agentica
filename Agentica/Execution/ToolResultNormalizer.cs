@@ -134,7 +134,7 @@ internal static class ToolResultNormalizer
                 Diagnostics: null,
                 IdentityAliases: identityAliases);
         }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
+        catch (Exception exception) when (RuntimeExceptionBoundary.IsRecoverable(exception))
         {
             return Invalid(
                 invocation,
@@ -293,14 +293,9 @@ internal static class ToolResultNormalizer
         budget.VisitNode(depth: 0);
         source ??= new Dictionary<string, object?>(StringComparer.Ordinal);
 
-        if (source.Count > MaxCollectionItems)
-        {
-            throw new InvalidOperationException(
-                $"Structured tool data exceeds the maximum of {MaxCollectionItems} entries.");
-        }
-
-        var snapshot = new Dictionary<string, object?>(source.Count, StringComparer.Ordinal);
-        foreach (var pair in source.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        var entries = EnumerateDictionaryEntries(source);
+        var snapshot = new Dictionary<string, object?>(entries.Count, StringComparer.Ordinal);
+        foreach (var pair in entries.OrderBy(pair => pair.Key, StringComparer.Ordinal))
         {
             if (pair.Key is null)
             {
@@ -484,14 +479,9 @@ internal static class ToolResultNormalizer
         SnapshotBudget budget,
         ISet<object> activeReferences)
     {
-        if (source.Count > MaxCollectionItems)
-        {
-            throw new InvalidOperationException(
-                $"Structured tool data exceeds the maximum of {MaxCollectionItems} entries.");
-        }
-
-        var snapshot = new Dictionary<string, object?>(source.Count, StringComparer.Ordinal);
-        foreach (var pair in source.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        var entries = EnumerateDictionaryEntries(source);
+        var snapshot = new Dictionary<string, object?>(entries.Count, StringComparer.Ordinal);
+        foreach (var pair in entries.OrderBy(pair => pair.Key, StringComparer.Ordinal))
         {
             if (pair.Key is null)
             {
@@ -519,15 +509,15 @@ internal static class ToolResultNormalizer
         SnapshotBudget budget,
         ISet<object> activeReferences)
     {
-        if (source.Count > MaxCollectionItems)
-        {
-            throw new InvalidOperationException(
-                $"Structured tool data exceeds the maximum of {MaxCollectionItems} entries.");
-        }
-
-        var entries = new List<(string Key, object? Value)>(source.Count);
+        var entries = new List<(string Key, object? Value)>();
         foreach (DictionaryEntry entry in source)
         {
+            if (entries.Count >= MaxCollectionItems)
+            {
+                throw new InvalidOperationException(
+                    $"Structured tool data exceeds the maximum of {MaxCollectionItems} entries.");
+            }
+
             if (entry.Key is not string key)
             {
                 throw new InvalidOperationException("Structured tool data dictionary keys must be strings.");
@@ -536,7 +526,9 @@ internal static class ToolResultNormalizer
             entries.Add((key, entry.Value));
         }
 
-        var snapshot = new Dictionary<string, object?>(source.Count, StringComparer.Ordinal);
+        // Do not trust an extension object's reported Count for allocation. The
+        // bounded enumeration above is the authoritative captured size.
+        var snapshot = new Dictionary<string, object?>(entries.Count, StringComparer.Ordinal);
         foreach (var entry in entries.OrderBy(entry => entry.Key, StringComparer.Ordinal))
         {
             var key = budget.SnapshotString(entry.Key, "structured-data key");
@@ -551,6 +543,24 @@ internal static class ToolResultNormalizer
         }
 
         return new ReadOnlyDictionary<string, object?>(snapshot);
+    }
+
+    private static IReadOnlyList<KeyValuePair<string, object?>> EnumerateDictionaryEntries(
+        IEnumerable<KeyValuePair<string, object?>> source)
+    {
+        var entries = new List<KeyValuePair<string, object?>>();
+        foreach (var pair in source)
+        {
+            if (entries.Count >= MaxCollectionItems)
+            {
+                throw new InvalidOperationException(
+                    $"Structured tool data exceeds the maximum of {MaxCollectionItems} entries.");
+            }
+
+            entries.Add(pair);
+        }
+
+        return entries.AsReadOnly();
     }
 
     private static IReadOnlyList<object?> SnapshotSequence(
@@ -719,27 +729,11 @@ internal static class ToolResultNormalizer
                 {
                     var raw = element.GetRawText();
                     budget.ConsumeStringBytes(raw, "structured JSON number");
-                    if (element.TryGetInt64(out var signedInteger))
-                    {
-                        return signedInteger;
-                    }
-
-                    if (element.TryGetUInt64(out var unsignedInteger))
-                    {
-                        return unsignedInteger;
-                    }
-
-                    if (element.TryGetDecimal(out var decimalNumber))
-                    {
-                        return decimalNumber;
-                    }
-
-                    if (element.TryGetDouble(out var floatingPointNumber) && double.IsFinite(floatingPointNumber))
-                    {
-                        return floatingPointNumber;
-                    }
-
-                    throw new InvalidOperationException("Structured JSON tool data contains an unsupported number.");
+                    // Retain the exact JSON token. Converting through decimal or
+                    // double can silently change a valid value before schema
+                    // range/type checks see it; Clone detaches the scalar from the
+                    // caller/document while preserving its original lexeme.
+                    return element.Clone();
                 }
             case JsonValueKind.True:
                 budget.ConsumeScalarBytes(4, "Boolean value");

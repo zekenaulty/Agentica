@@ -21,6 +21,8 @@ namespace Agentica.Tests;
 
 public sealed class ChatSecurityVerticalTests
 {
+    private const string TestAuthorizationScopeId = "authorization_scope_chat_security_tests";
+
     [Fact]
     public async Task LocalOnlyRejectsImageGenerationBeforeProviderDispatch()
     {
@@ -171,7 +173,10 @@ public sealed class ChatSecurityVerticalTests
                 new DeterministicOutcomeReporter(),
                 policy,
                 completionEvaluator)
-            .RunAsync(new RunRequest("Exercise the Chat security boundary.", RequestOrigin.User));
+            .RunAsync(new RunRequest(
+                "Exercise the Chat security boundary.",
+                RequestOrigin.User,
+                AuthorizationScopeId: TestAuthorizationScopeId));
 
     private static ExecutionPolicy ExternalToolPolicy(ToolSecurityPolicy securityPolicy) =>
         new(
@@ -192,6 +197,11 @@ public sealed class ChatSecurityVerticalTests
 
     private static ToolExecutionGrant ImageGrant(string manifestHash) =>
         new(
+            AgenticaIds.New("grant"),
+            TestAuthorizationScopeId,
+            1,
+            "step_image",
+            ToolInvocationAuthorization.ComputeInputDigest(ImagePlan().Steps.Single().Input),
             manifestHash,
             LabChatToolIds.WorkspaceImageGenerate,
             [

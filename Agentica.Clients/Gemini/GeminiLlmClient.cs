@@ -36,11 +36,14 @@ public sealed class GeminiLlmClient : ILlmClient
 
             return GeminiResponseMapper.Map(modelId, response);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException exception) when (
+            cancellationToken.IsCancellationRequested &&
+            ClientExceptionBoundary.IsRecoverable(exception))
         {
             throw;
         }
-        catch (OperationCanceledException exception)
+        catch (OperationCanceledException exception) when (
+            ClientExceptionBoundary.IsRecoverable(exception))
         {
             throw new LlmClientException(
                 ProviderName,
@@ -54,7 +57,7 @@ public sealed class GeminiLlmClient : ILlmClient
         {
             throw;
         }
-        catch (Exception exception)
+        catch (Exception exception) when (ClientExceptionBoundary.IsRecoverable(exception))
         {
             var classification = GeminiExceptionClassifier.Classify(exception);
             throw new LlmClientException(

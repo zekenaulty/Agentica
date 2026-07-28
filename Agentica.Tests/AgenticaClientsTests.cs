@@ -744,6 +744,26 @@ public sealed class AgenticaClientsTests
     }
 
     [Fact]
+    public async Task Retrying_llm_client_does_not_retry_cancellation_wrapping_fatal_failure()
+    {
+        var cancellation = new OperationCanceledException(
+            "Provider cancellation wrapper carrying a fatal failure.",
+            CreateOutOfMemoryException(),
+            CancellationToken.None);
+        var inner = new SequenceLlmClient(
+            cancellation,
+            new LlmResponse("fake", "fake-model", PlanJson("query_state", "Query", "ReadOnly")));
+        var client = new RetryingLlmClient(inner, NoDelayRetries(maxAttempts: 3));
+
+        var thrown = await Assert.ThrowsAsync<OperationCanceledException>(
+            () => client.GenerateAsync(SimpleLlmRequest()));
+
+        Assert.Same(cancellation, thrown);
+        Assert.IsType<OutOfMemoryException>(thrown.InnerException);
+        Assert.Equal(1, inner.CallCount);
+    }
+
+    [Fact]
     public async Task Retrying_llm_client_does_not_retry_when_caller_token_is_cancelled()
     {
         using var cancellation = new CancellationTokenSource();
@@ -841,6 +861,12 @@ public sealed class AgenticaClientsTests
 
         return type.HasElementType && type.GetElementType() is { } elementType && IsGoogleType(elementType);
     }
+
+    private static OutOfMemoryException CreateOutOfMemoryException() =>
+        (OutOfMemoryException)(Activator.CreateInstance(
+            typeof(OutOfMemoryException),
+            "Forced fatal provider failure.") ??
+            throw new InvalidOperationException("Could not create the process-integrity test exception."));
 
     private static void AssertRequiredProperties(JsonElement schema, params string[] expected)
     {

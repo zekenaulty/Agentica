@@ -82,14 +82,23 @@ public sealed class MazeQuestHarnessHostTests
             context));
 
         Assert.Equal(RunOutcomeStatus.Succeeded, envelope.Outcome.Status);
-        var harness = Assert.IsType<MazeQuestHarnessContext>(
+        var harness = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(
             envelope.Details.Request.Context![MazeQuestCapabilitySurfaceCompiler.ContextKey]);
+        Assert.IsNotType<MazeQuestHarnessContext>(harness);
+        var activeCapabilitySurface = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(
+            harness["ActiveCapabilitySurface"]);
+        var contextSurfaceReceipt = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(
+            harness["ContextSurfaceReceipt"]);
+        var exposedToolIds = Assert.IsAssignableFrom<IEnumerable<object?>>(
+                contextSurfaceReceipt["ExposedToolIds"])
+            .Select(Assert.IsType<string>)
+            .ToArray();
         Assert.NotEmpty(envelope.Details.ToolSurfaces);
         var initialToolSurface = envelope.Details.ToolSurfaces[0];
 
-        Assert.NotEqual(harness.ActiveCapabilitySurface.SurfaceId, initialToolSurface.SurfaceId);
+        Assert.NotEqual(activeCapabilitySurface["SurfaceId"], initialToolSurface.SurfaceId);
         Assert.All(
-            harness.ContextSurfaceReceipt.ExposedToolIds,
+            exposedToolIds,
             toolId => Assert.Contains(initialToolSurface.ToolDescriptors, descriptor => descriptor.ToolId == toolId));
         Assert.Contains(
             envelope.Details.Events,
@@ -117,7 +126,7 @@ public sealed class MazeQuestHarnessHostTests
         var observationSurface = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(
             observationHarness["ActiveCapabilitySurface"]);
         Assert.Equal("mazequest.harness", observationSurface["ManifestId"]);
-        Assert.NotEqual(harness.ActiveCapabilitySurface.SurfaceId, observationSurface["SurfaceId"]);
+        Assert.NotEqual(activeCapabilitySurface["SurfaceId"], observationSurface["SurfaceId"]);
     }
 
     [Fact]

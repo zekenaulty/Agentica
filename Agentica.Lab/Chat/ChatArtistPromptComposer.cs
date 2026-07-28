@@ -27,7 +27,7 @@ internal sealed class ChatArtistPromptComposer
             ? DefaultStyleRecipe
             : request.StyleRecipe.Trim();
 
-        var response = await _llmClient.GenerateAsync(
+        var providerResponse = await _llmClient.GenerateAsync(
                 new LlmRequest(
                     request.ComposerModelId,
                     [
@@ -46,6 +46,7 @@ internal sealed class ChatArtistPromptComposer
                     }),
                 cancellationToken)
             .ConfigureAwait(false);
+        var response = ChatProviderResponseCompiler.Compile(providerResponse);
 
         var plan = ParsePlan(response.StructuredJson ?? response.Text);
         if (string.IsNullOrWhiteSpace(plan.FinalPrompt))
@@ -56,20 +57,15 @@ internal sealed class ChatArtistPromptComposer
             };
         }
 
-        plan = plan with
-        {
-            FinalPrompt = Limit(plan.FinalPrompt.Trim(), MaxPromptChars),
-            AspectRatio = string.IsNullOrWhiteSpace(plan.AspectRatio)
-                ? request.AspectRatio ?? string.Empty
-                : plan.AspectRatio.Trim()
-        };
+        plan = SnapshotPlan(plan, request.AspectRatio);
 
         return new ChatArtistPromptComposition(
             plan,
             response.ProviderName,
             response.ModelId,
             response.Usage,
-            response.Metadata);
+            response.Metadata,
+            response.ProviderRequestId);
     }
 
     private static string BuildUserPrompt(
@@ -178,6 +174,43 @@ internal sealed class ChatArtistPromptComposer
     private static string Limit(string value, int maxChars) =>
         value.Length <= maxChars ? value : value[..maxChars];
 
+    private static ChatArtistPromptPlan SnapshotPlan(
+        ChatArtistPromptPlan plan,
+        string? requestedAspectRatio)
+    {
+        const int maxPlanFieldChars = 2000;
+        const int maxAspectRatioChars = 32;
+        const int maxSourceSignals = 32;
+        const int maxSourceSignalChars = 512;
+        var layers = plan.Layers ?? new ChatArtistPromptLayers();
+        return new ChatArtistPromptPlan
+        {
+            Subject = Limit(plan.Subject ?? string.Empty, maxPlanFieldChars),
+            Setting = Limit(plan.Setting ?? string.Empty, maxPlanFieldChars),
+            Style = Limit(plan.Style ?? string.Empty, maxPlanFieldChars),
+            Mood = Limit(plan.Mood ?? string.Empty, maxPlanFieldChars),
+            Composition = Limit(plan.Composition ?? string.Empty, maxPlanFieldChars),
+            Lighting = Limit(plan.Lighting ?? string.Empty, maxPlanFieldChars),
+            AspectRatio = Limit(
+                string.IsNullOrWhiteSpace(plan.AspectRatio)
+                    ? requestedAspectRatio ?? string.Empty
+                    : plan.AspectRatio.Trim(),
+                maxAspectRatioChars),
+            Layers = new ChatArtistPromptLayers
+            {
+                Foreground = Limit(layers.Foreground ?? string.Empty, maxPlanFieldChars),
+                Midground = Limit(layers.Midground ?? string.Empty, maxPlanFieldChars),
+                Background = Limit(layers.Background ?? string.Empty, maxPlanFieldChars)
+            },
+            SourceSignals = Array.AsReadOnly(
+                (plan.SourceSignals ?? [])
+                .Take(maxSourceSignals)
+                .Select(signal => Limit(signal ?? string.Empty, maxSourceSignalChars))
+                .ToArray()),
+            FinalPrompt = Limit(plan.FinalPrompt.Trim(), MaxPromptChars)
+        };
+    }
+
     private const string ComposerSystemPrompt =
         """
         You are Agentica's bounded image prompt artist. Convert recent chat and the user's image request into one concrete image generation brief.
@@ -246,7 +279,8 @@ internal sealed record ChatArtistPromptComposition(
     string ProviderName,
     string ModelId,
     LlmUsage? Usage,
-    IReadOnlyDictionary<string, string>? Metadata);
+    IReadOnlyDictionary<string, string> Metadata,
+    string? ProviderRequestId);
 
 internal sealed record ChatArtistPromptPlan
 {

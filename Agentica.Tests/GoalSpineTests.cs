@@ -106,8 +106,10 @@ public sealed class GoalSpineTests
 
         Assert.NotNull(planner.CreateRequest);
         var frame = Assert.Single(planner.CreateRequest!.ContextFrames, item => item.Kind == "agentica.goal_spine");
-        var spine = Assert.IsType<GoalSpine>(frame.Payload["goalSpine"]);
-        Assert.Equal("Query state once.", spine.RootGoal);
+        var spine = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(
+            frame.Payload["goalSpine"]);
+        Assert.IsNotType<GoalSpine>(spine);
+        Assert.Equal("Query state once.", spine["RootGoal"]);
         Assert.Contains("GoalSpine shapes continuity only", Assert.IsType<string>(frame.Payload["proofBoundary"]));
         Assert.Contains(envelope.Details.PlanningFrames, item => item.FrameId == frame.FrameId);
     }
