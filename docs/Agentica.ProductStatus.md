@@ -101,11 +101,11 @@ The 2026-07-22 outside review correctly reopened ownership, Chat effect truth, a
 Weighted successor completion:
 
 ```text
-(20*100 + 20*100 + 15*100 + 10*100 + 10*100 + 10*100 + 5*80 + 10*100) / 100
-= 99.00%
+(20*100 + 20*100 + 15*100 + 10*100 + 10*100 + 10*100 + 5*100 + 10*100) / 100
+= 100.00%
 ```
 
-**Current effect-truth/ownership slice: 99% complete.** Local implementation and deterministic proof are complete. The only remaining point is the first green hosted run of the new Windows CI job; the existing Linux release gate remains required independently.
+**Current effect-truth/ownership slice: 100% complete.** Local implementation and deterministic proof are complete, and the first hosted Windows proof passed alongside the independent Linux release gate.
 
 | ID | Successor workstream | Weight | Completion | Current reality | Remaining exit gate |
 | --- | --- | ---: | ---: | --- | --- |
@@ -115,12 +115,12 @@ Weighted successor completion:
 | E4 | Bounded workspace I/O and honest path threat model | 10% | 100% | File reads and fallback scanning decode strictly, while the normal `rg --text` path rejects invalid UTF-8 or NUL in process output; byte/character/line/output/traversal caps apply and one owned duration spans preflight, child process, and fallback; output/error drain concurrently even on termination failure; incomplete preflight coverage refuses | Handle-relative adversarial confinement remains explicitly deferred |
 | E5 | Honest deadline and observer behavior | 10% | 100% | In-process run timeout is documented as cooperative so mutation work is never abandoned outside proof; event-sink waits are finite, typed on timeout, and circuit-broken without changing business truth; fatal process-integrity exceptions propagate through bounded nested-wrapper inspection instead of becoming fallback proof | Worker-process isolation is required before claiming hard adversarial deadlines |
 | E6 | Benchmark trust anchor | 10% | 100% | Offline reaggregation requires an independently supplied expected `runs.jsonl` SHA-256. The authoritative `aggregate.json` embeds matching expected/observed digests and its complete reaggregation trust record; `reaggregation.json` is compatibility-only. Claims are narrowed to structural reaggregation of a trusted version-controlled cohort | Provider attestation and first-principles oracle replay remain deferred |
-| E7 | Windows proof lane | 5% | 80% | SHA-pinned Windows Server 2022 CI now performs locked restore, lock drift check, Release build, and the full deterministic suite including the real junction branch; the full suite is also green locally on Windows | First green hosted Windows job |
+| E7 | Windows proof lane | 5% | 100% | SHA-pinned Windows Server 2022 CI performs locked restore, lock drift check, Release build, and the full deterministic suite including the real junction branch; [CI run 30329591366](https://github.com/zekenaulty/Agentica/actions/runs/30329591366) is the first green hosted Windows proof and passed alongside the independent Linux gate | Keep both hosted jobs green |
 | E8 | Validator and planner-surface truth | 10% | 100% | Compilation rejects blank, oversized, or canonically duplicate identities plus invalid bounds; registrations, fields, allowed values, public validation graphs, issue output, and validation work are explicitly capped; schema indexes and allowed-value sets compile once; an aggregate per-attempt budget bounds mandatory manifest recompilation; numeric validation remains exact and type-preserving; planners no longer see tools categorically denied by effect, boundary, or grant availability | Maintain these checks as schema/tool breadth changes |
 
-Successor exit condition: caller/planner mutation cannot rewrite accepted or returned proof; every post-provider image path reports or compensates its effects; one host-issued in-memory grant lineage cannot authorize more than one bound dispatch; workspace operations remain resource-bounded; and documentation distinguishes cooperative/static guards from hard isolation. All local parts of that condition are enforced; hosted Windows evidence remains pending.
+Successor exit condition: caller/planner mutation cannot rewrite accepted or returned proof; every post-provider image path reports or compensates its effects; one host-issued in-memory grant lineage cannot authorize more than one bound dispatch; workspace operations remain resource-bounded; and documentation distinguishes cooperative/static guards from hard isolation. Every named local condition is enforced, and both hosted proof lanes are green.
 
-The 2026-07-27 local successor gate used SDK 10.0.302: locked restore, vulnerability/deprecation audits, formatting, the Release warnings-as-errors build, selected analyzers, package validation, a fresh external consumer, the Lab subprocess gate, and digest-anchored offline benchmark reaggregation were clean; 525 tests passed, 2 opt-in live-provider tests were explicitly skipped, and 0 failed; fresh coverage was 85.12% line and 70.93% branch. Docker Engine 27.4.0 built the digest-pinned non-root image and passed the `quest list` smoke. This is local evidence; it does not satisfy E7's pending hosted-Windows exit gate.
+The 2026-07-27 local successor gate used SDK 10.0.302: locked restore, vulnerability/deprecation audits, formatting, the Release warnings-as-errors build, selected analyzers, package validation, a fresh external consumer, the Lab subprocess gate, and digest-anchored offline benchmark reaggregation were clean; 525 tests passed, 2 opt-in live-provider tests were explicitly skipped, and 0 failed; fresh coverage was 85.12% line and 70.93% branch. Docker Engine 27.4.0 built the digest-pinned non-root image and passed the `quest list` smoke. Hosted [CI run 30329591366](https://github.com/zekenaulty/Agentica/actions/runs/30329591366) then passed both the Windows proof and the independent Linux release job.
 
 ## Closed Baseline Details
 

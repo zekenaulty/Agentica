@@ -42,7 +42,7 @@ Implemented reality:
 - The runtime now supports small validated multi-step plan slices, read-only query batches, and dependency fields on plan steps.
 - The bounded orchestration proof contract now rejects empty acceptance, unmet global definition-of-done, unsupported mutations, planner/graph failures, and failed-child false success. A child-dispatch record is frozen before execution; a missing, throwing, cancelled, malformed, or oversized return becomes explicit partial/indeterminate proof rather than an erased call. Generic orchestration remains Incubating and excluded from product claims pending broader integration and measured reliability.
 - A fixed Gemini 2.5 Flash cohort passed 29/30 overall with zero false successes: WorkbenchQuest 25/25 and the MazeQuest holdout 4/5. This is a versioned product proof, not a general reliability guarantee.
-- The 2026-07-27 local gate passes: 525 tests passed, 2 live-provider tests were explicitly skipped, and 0 failed; coverage is 85.12% line/70.93% branch; locked restore, vulnerability/deprecation audits, formatting, Release build, selected analyzers, package validation, a fresh external consumer, the Lab subprocess gate, and digest-anchored offline benchmark reaggregation are clean. Docker Engine 27.4.0 also built the digest-pinned non-root image and passed the `quest list` smoke. The prior Linux no-publish workflow remains the hosted baseline; the new Windows lane still needs its first hosted green run.
+- The 2026-07-27 local gate passes: 525 tests passed, 2 live-provider tests were explicitly skipped, and 0 failed; coverage is 85.12% line/70.93% branch; locked restore, vulnerability/deprecation audits, formatting, Release build, selected analyzers, package validation, a fresh external consumer, the Lab subprocess gate, and digest-anchored offline benchmark reaggregation are clean. Docker Engine 27.4.0 also built the digest-pinned non-root image and passed the `quest list` smoke. Hosted [CI run 30329591366](https://github.com/zekenaulty/Agentica/actions/runs/30329591366) passed both the first Windows proof and the independent Linux release job.
 
 Runtime contract reference:
 
@@ -51,7 +51,7 @@ Runtime contract reference:
 
 Current active slice:
 
-The active **Effect Truth And Ownership Closure** slice is 99% complete. Its local implementation and deterministic gates are green; the remaining point is the first green hosted run of the new Windows CI job. Public packaging, a supported CLI, and broad Lab expansion remain deferred; see the [canonical status](docs/Agentica.ProductStatus.md).
+The **Effect Truth And Ownership Closure** slice is 100% complete against its bounded exit gates. Local implementation, deterministic proof, and both hosted CI lanes are green. Public packaging, a supported CLI, and broad Lab expansion remain deferred; see the [canonical status](docs/Agentica.ProductStatus.md).
 
 ## The Goal
 
@@ -480,7 +480,7 @@ Where the code is still behind the product goal:
 - MCP remains intentionally unimplemented.
 - Storage, durable run replay, global grant-id uniqueness, and host policy plugins are still adapter-level future work; the implemented one-shot approval grants are deliberately narrow in-memory runtime capabilities, not a human approval service or durable authorization store.
 
-The immediate next proof is operational: obtain and preserve the first green hosted run of the new Windows CI job while keeping the independent Linux release workflow green.
+The immediate next step is to preserve both hosted proof lanes while choosing the next explicit product slice. Completion of this bounded closure does not promote the repository beyond Incubating or authorize public package/CLI claims.
 
 ## Non-Goals
 
