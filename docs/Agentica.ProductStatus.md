@@ -27,7 +27,7 @@ The repository has two distinct identities that must not be conflated:
 
 The lab's growth was productive: it exposed real planning, continuity, completion, and safety failures while keeping most domain vocabulary out of the runtime. The drift was primarily role, naming, and status-authority drift rather than valueless experimentation.
 
-The hardening gates now support internal research artifacts, not a public release. Public distribution remains deliberately deferred: the current source-available license does not permit reuse, the packages are marked research preview, no supported CLI exists, and one green no-publish CI run does not establish supported-product readiness.
+The hardening gates now support internal research artifacts, not a public release. Public distribution remains deliberately deferred: the current source-available license does not permit reuse, the packages are marked research preview, no supported CLI exists, and green no-publish CI evidence does not establish supported-product readiness.
 
 ## Project Role And Naming Decision
 
@@ -96,7 +96,7 @@ T0-T6 are complete against their bounded gates. The no-publish GitHub workflow p
 
 ## Active Slice: Effect Truth And Ownership Closure
 
-The 2026-07-22 outside review correctly reopened ownership, Chat effect truth, and grant semantics that the first bounded program had overstated. This successor slice is closing those findings without changing product identity: Agentica remains an Incubating source-available research repository, orchestration remains experimental, and external Chat image tools remain quarantined by default.
+The 2026-07-22 outside review correctly reopened ownership, Chat effect truth, and grant semantics that the first bounded program had overstated. This successor slice closed those findings without changing product identity: Agentica remains an Incubating source-available research repository, orchestration remains experimental, and external Chat image tools remain quarantined by default.
 
 Weighted successor completion:
 
@@ -210,7 +210,7 @@ Completion below measures each document's own acceptance criteria. A 100% founda
 | [Agentica Goal Status](Agentica.GoalStatus.md) | Historical | 100% | Closed evidence log for the first executable slice; it is not a live product status page |
 | [Original Planning README](../Agentica.ReadMe.md) | Historical | 100% | Original development plan retained for rationale; this page and the primary README replace its status claims |
 | [Agentic Harness Host](CodexGoal.Agentica.AgenticHarnessHost.md) | Incubating | 90% | Maze/Chess/Workbench prove the host pattern and the fixed product cohort exercises it; a reusable external host and broader secure promotion remain |
-| [ChessQuest Hardening Backlog](CodexGoal.Agentica.Lab.ChessQuestHardeningBacklog.md) | Incubating | 75% | Many honesty, probe, threat, continuity, and opponent passes landed; defer remaining lab expansion behind external release-gate evidence |
+| [ChessQuest Hardening Backlog](CodexGoal.Agentica.Lab.ChessQuestHardeningBacklog.md) | Incubating | 75% | Many honesty, probe, threat, continuity, and opponent passes landed; defer remaining lab expansion until selected as a future explicit slice |
 | [ChessQuest Harness](CodexGoal.Agentica.Lab.ChessQuestHarness.md) | Incubating | 80% | Referee, probes, strategy, phases, replay, and orchestration exist; measured reliability remains incomplete |
 | [MazeQuest Harness](CodexGoal.Agentica.Lab.MazeQuestHarness.md) | Implemented | 95% | Harness criteria substantially landed and the fixed T5 holdout measured 4/5 truthful completions; broader scenario reliability is not claimed |
 | [WorkbenchQuest Harness](CodexGoal.Agentica.Lab.WorkbenchQuestHarness.md) | Implemented | 100% | All named harness criteria landed; the fixed T5 primary matrix measured 25/25 truthful completions |
@@ -226,7 +226,7 @@ Completion below measures each document's own acceptance criteria. A 100% founda
 | [Runtime Harness Gaps](CodexGoal.Agentica.RuntimeHarnessGaps.md) | Implemented | 100% | Input schemas, completion seams, continuation, effects, context shaping, and tests landed |
 | [Secure Evolving Harness Tool System](CodexGoal.Agentica.SecureEvolvingHarnessToolSystem.md) | Incubating | 40% | The minimal compiled-registration, grant, manifest-recheck, boundary, provenance, and path-security vertical is implemented; broader taint, promotion, registry, and multi-hash architecture remains deferred |
 | [Workflow Routing Ontology](CodexGoal.Agentica.WorkflowRoutingOntology.md) | Draft | 15% | Partial substrate only; split or defer rather than running it as a parallel active slice |
-| [MazeQuest Item Usage, Puzzle Bindings, And Energy Plan](MazeQuest.ItemUsagePuzzleAndEnergyPlan.md) | Incubating | 50% | Energy and part of the affordance substrate exist; the broader control and puzzle slice remains deferred behind external release-gate evidence |
+| [MazeQuest Item Usage, Puzzle Bindings, And Energy Plan](MazeQuest.ItemUsagePuzzleAndEnergyPlan.md) | Incubating | 50% | Energy and part of the affordance substrate exist; the broader control and puzzle slice remains deferred until selected as a future explicit slice |
 
 Lifecycle totals:
 
