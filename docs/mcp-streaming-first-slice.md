@@ -46,6 +46,8 @@ Run `Agentica.Lab mcp-inspect <endpoint> <server-id>` to list remote tool names,
 
 The SDK transport uses Streamable HTTP with optional host-supplied bearer authentication. Result content currently accepts text blocks and optional structured JSON, with a 65,536-character default limit per channel. Unsupported binary/image/resource blocks fail. The receipt carries server/tool/schema identities, a content digest, and success/error status. The observation carries the remote result as untrusted data. The MCP server's actual behavior must still be checked by the host; this adapter cannot prove that a remote operation is read-only.
 
+A loopback integration test now exercises the actual MCP SDK HTTP session through protocol discovery fallback, initialization, tool listing, pinned binding, authenticated tool call, and result receipt. This verifies the adapter path with a local fixture server; it does not establish the behavior of a third-party server.
+
 For a protected Streamable HTTP server, set `AGENTICA_MCP_BEARER_TOKEN` in the host environment. The token is sent as an Authorization header and is never included in planner descriptions or receipts. The endpoint remains HTTPS or loopback HTTP.
 
 For several host-bound tools on one server, set `AGENTICA_MCP_BINDINGS_FILE` to a local JSON manifest instead of the single-tool environment settings. This file is an authority-bearing host configuration; review it before installing it. Example:
@@ -97,7 +99,7 @@ The source review informing this boundary used the [Domain of Domains architectu
 - Add bounded persistence and lifecycle disposal for provider-native continuations. Gemini, OpenAI, Anthropic, and xAI continuation cover bounded thought/reasoning and text output; provider tool steps and unknown deltas require separate native handling.
 - Add a provider-neutral stream event contract for time-to-first-token, token usage, tool-call phases, and terminal/unknown outcomes; keep provider-specific payloads behind adapters.
 - Add provider token-aware frame compilation: reserve output, reasoning, tool-result and safety capacity, then select representation depth for optional frame entries with omission/degradation receipts.
-- Expand MCP transport authentication beyond host bearer tokens, safe result types, and integration testing against a live local MCP server. Verify mutation effects with a real host-specific acceptance predicate.
+- Expand MCP transport authentication beyond host bearer tokens and support additional safe result types. Verify mutation effects with a real host-specific acceptance predicate and test a separately operated MCP server.
 - Extend Ollama with native continuation if the transcript model can preserve every required provider field. Run live OpenAI, Anthropic, and xAI smoke calls when credentials are provided.
 
 The user supplied the Bounded Context Envelope and Host/Application Authority synthesis directly; the four linked Google source documents were also reviewed for the contracts above.
