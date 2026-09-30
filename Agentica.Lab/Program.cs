@@ -158,6 +158,9 @@ static async Task<int> RunDefaultAsync(IReadOnlyList<string> args)
             MaxRefinements: 2,
             PlanningMode: options.PlanningMode,
             MaxBlockedRetries: options.MaxBlockedRetries,
+            EffectPolicy: mcp is null ? null : new ToolEffectPolicy(
+                ToolEffectPolicy.LocalOnly.AllowedEffects.Concat(
+                    mcp.Registrations.Select(item => item.Descriptor.Effect))),
             SecurityPolicy: LabSecurityPolicy.ForPlanner(planner)));
 
     var envelope = await runner.RunAsync(

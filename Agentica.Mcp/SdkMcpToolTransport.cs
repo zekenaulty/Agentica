@@ -20,7 +20,8 @@ public sealed class SdkMcpToolTransport : IMcpToolTransport, IAsyncDisposable
     public static async Task<SdkMcpToolTransport> ConnectHttpAsync(
         string serverId,
         Uri endpoint,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? bearerToken = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverId);
         ArgumentNullException.ThrowIfNull(endpoint);
@@ -29,11 +30,24 @@ public sealed class SdkMcpToolTransport : IMcpToolTransport, IAsyncDisposable
         {
             throw new ArgumentException("MCP HTTP endpoints must use HTTPS or loopback HTTP.", nameof(endpoint));
         }
+        if (bearerToken is not null &&
+            (string.IsNullOrWhiteSpace(bearerToken) || bearerToken.Contains('\r') ||
+             bearerToken.Contains('\n')))
+        {
+            throw new ArgumentException("MCP bearer token contains invalid characters.",
+                nameof(bearerToken));
+        }
 
         var transport = new HttpClientTransport(new HttpClientTransportOptions
         {
             Endpoint = endpoint,
-            TransportMode = HttpTransportMode.StreamableHttp
+            TransportMode = HttpTransportMode.StreamableHttp,
+            AdditionalHeaders = bearerToken is null
+                ? null
+                : new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["Authorization"] = "Bearer " + bearerToken
+                }
         });
         try
         {

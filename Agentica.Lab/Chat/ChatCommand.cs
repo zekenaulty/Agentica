@@ -201,6 +201,9 @@ internal static class ChatCommand
                 MaxBlockedRetries: 1,
                 MaxBatchSize: 4,
                 MaxParallelism: 4,
+                EffectPolicy: mcp is null ? null : new ToolEffectPolicy(
+                    ToolEffectPolicy.LocalOnly.AllowedEffects.Concat(
+                        mcp.Registrations.Select(item => item.Descriptor.Effect))),
                 SecurityPolicy: CreateSecurityPolicy(selectedPlanner)),
             completionEvaluator: EvidenceCompletionEvaluator.ForArtifactKind(ChatArtifactKinds.Response),
             planningFrameProjector: new ChatPlanningFrameProjector());

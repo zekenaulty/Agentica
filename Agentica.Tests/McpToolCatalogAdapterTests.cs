@@ -96,6 +96,37 @@ public sealed class McpToolCatalogAdapterTests
                 "Description", "{\"type\":\"object\"}"));
     }
 
+    [Fact]
+    public async Task Host_bound_external_action_is_standing_scoped_authority()
+    {
+        var binding = McpTrustedBindingFactory.Create(
+            "server-1", "search", McpSchemaFingerprint.Sha256(Schema),
+            "remote-publish", "Publish", "Host installed publication capability", Schema,
+            ToolKind.Action, ToolEffect.ExternalSideEffect,
+            [ToolDataBoundary.UserContent], [ToolDataBoundary.ExternalUntrusted],
+            ToolExternalOutputClassification.Mixed,
+            ToolApprovalRequirement.None, ToolRetrySafety.Additive);
+        Assert.Equal(ToolEffect.ExternalSideEffect, binding.Descriptor.Effect);
+        Assert.False(binding.Descriptor.RequiresApproval);
+        Assert.Equal(ToolApprovalRequirement.None, binding.Security.ApprovalRequirement);
+        Assert.Equal(ToolRetrySafety.Additive, binding.Security.RetrySafety);
+        var registration = Assert.Single(await McpToolCatalogAdapter.BindAsync(
+            new FakeTransport(), [binding]));
+        Assert.Equal("remote-publish", registration.Descriptor.ToolId);
+    }
+
+    [Fact]
+    public void Host_bound_external_action_rejects_ambiguous_classification()
+    {
+        Assert.Throws<ArgumentException>(() => McpTrustedBindingFactory.Create(
+            "server-1", "search", McpSchemaFingerprint.Sha256(Schema),
+            "remote-publish", "Publish", "Host installed publication capability", Schema,
+            ToolKind.Action, ToolEffect.Unknown,
+            [ToolDataBoundary.UserContent], [ToolDataBoundary.ExternalUntrusted],
+            ToolExternalOutputClassification.Mixed,
+            ToolApprovalRequirement.None, ToolRetrySafety.Additive));
+    }
+
     private static McpToolBinding Binding() => new(
         "server-1", "search", McpSchemaFingerprint.Sha256(Schema),
         new ToolDescriptor("remote-search", "Remote search", ToolKind.Query,

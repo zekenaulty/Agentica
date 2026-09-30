@@ -44,7 +44,37 @@ AGENTICA_MCP_TOOL_DESCRIPTION=Search the approved source
 
 Run `Agentica.Lab mcp-inspect <endpoint> <server-id>` to list remote tool names, input schemas, and canonical hashes for review before pinning one in the host configuration. Discovery alone never registers a tool.
 
-The first SDK transport uses unauthenticated Streamable HTTP. Result content currently accepts text blocks and optional structured JSON, with a 65,536-character limit per channel. Unsupported binary/image/resource blocks fail. The receipt carries server/tool/schema identities, a content digest, and success/error status. The observation carries the remote result as untrusted data. The MCP server's actual behavior must still be checked by the host; this adapter cannot prove that a remote operation is read-only.
+The SDK transport uses Streamable HTTP with optional host-supplied bearer authentication. Result content currently accepts text blocks and optional structured JSON, with a 65,536-character default limit per channel. Unsupported binary/image/resource blocks fail. The receipt carries server/tool/schema identities, a content digest, and success/error status. The observation carries the remote result as untrusted data. The MCP server's actual behavior must still be checked by the host; this adapter cannot prove that a remote operation is read-only.
+
+For a protected Streamable HTTP server, set `AGENTICA_MCP_BEARER_TOKEN` in the host environment. The token is sent as an Authorization header and is never included in planner descriptions or receipts. The endpoint remains HTTPS or loopback HTTP.
+
+For several host-bound tools on one server, set `AGENTICA_MCP_BINDINGS_FILE` to a local JSON manifest instead of the single-tool environment settings. This file is an authority-bearing host configuration; review it before installing it. Example:
+
+```json
+{
+  "serverId": "project-services",
+  "endpoint": "https://example.org/mcp",
+  "tools": [
+    {
+      "remoteName": "search",
+      "schemaSha256": "<canonical pinned SHA-256>",
+      "toolId": "mcp.project.search",
+      "displayName": "Project Search",
+      "description": "Search authorized project records",
+      "kind": "Query",
+      "effect": "ReadOnly",
+      "reads": ["UserContent"],
+      "exposesToPlanner": ["ExternalUntrusted"],
+      "externalOutput": "Mixed",
+      "approvalRequirement": "None",
+      "retrySafety": "Idempotent",
+      "maxResultCharacters": 65536
+    }
+  ]
+}
+```
+
+Each entry declares its local `kind`, `effect`, `reads`, `exposesToPlanner`, `externalOutput`, `approvalRequirement`, and `retrySafety`. The host may bind an `Action` with `ExternalSideEffect` or `WritesLocalState`; `ApprovalRequirement=None` means the installed binding is the standing grant, while `ExplicitGrant` requires a separate per-invocation grant. The manifest cannot bind unknown effects or retry semantics. Lab allows only the effect classes actually present in its installed MCP bindings, in addition to its normal local effects. Discovery without a manifest entry remains inert. This is a tool registration contract, not a claim that the remote server faithfully performs its advertised effect.
 
 ## Native Ollama streaming
 
@@ -59,7 +89,7 @@ The host's deliberate installation of a tool into an active execution surface is
 - Add bounded persistence and lifecycle disposal for provider-native continuations. Gemini, OpenAI, Anthropic, and xAI continuation cover bounded thought/reasoning and text output; provider tool steps and unknown deltas require separate native handling.
 - Add a provider-neutral stream event contract for time-to-first-token, token usage, tool-call phases, and terminal/unknown outcomes; keep provider-specific payloads behind adapters.
 - Add context-window budgeting at frame compilation: reserve output and safety margin, then account for mandatory layers and candidate selection with omission receipts.
-- Expand MCP transport authentication, safe result types, explicit mutation authorization, and integration testing against a live local MCP server.
+- Expand MCP transport authentication beyond host bearer tokens, safe result types, and integration testing against a live local MCP server. Verify mutation effects with a real host-specific acceptance predicate.
 - Extend Ollama with native continuation if the transcript model can preserve every required provider field. Run live OpenAI, Anthropic, and xAI smoke calls when credentials are provided.
 
 The user has supplied the Bounded Context Envelope and Host/Application Authority synthesis directly. The referenced original Google Domain of Domains thesis and Nyx cognition-loop source still need direct review before their additional claims become core contracts.
