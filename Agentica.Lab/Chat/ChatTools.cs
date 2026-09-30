@@ -17,7 +17,8 @@ internal static class ChatTools
         ChatStore store,
         ChatConversation conversation,
         ChatPersona persona,
-        string workspaceRoot) =>
+        string workspaceRoot,
+        IReadOnlyList<ToolRegistration>? additional = null) =>
         CreateCatalog(
             store,
             conversation,
@@ -25,14 +26,16 @@ internal static class ChatTools
             workspaceRoot,
             new ChatToolDependencies(
                 new GeminiLlmClient(),
-                new GeminiImageGenerationClient()));
+                new GeminiImageGenerationClient()),
+            additional);
 
     internal static ToolCatalog CreateCatalog(
         ChatStore store,
         ChatConversation conversation,
         ChatPersona persona,
         string workspaceRoot,
-        ChatToolDependencies dependencies)
+        ChatToolDependencies dependencies,
+        IReadOnlyList<ToolRegistration>? additional = null)
     {
         ArgumentNullException.ThrowIfNull(dependencies);
         return ToolCatalog.Create(CreateRegistrations(
@@ -40,7 +43,7 @@ internal static class ChatTools
             conversation,
             persona,
             workspaceRoot,
-            dependencies));
+            dependencies).Concat(additional ?? []).ToArray());
     }
 
     internal static ToolRegistration[] CreateRegistrations(

@@ -11,6 +11,7 @@ using Agentica.Lab.Scenarios.WorkbenchQuest;
 using Agentica.Clients.Gemini;
 using Agentica.Clients.Llm;
 using Agentica.Clients.Planning;
+using Agentica.Mcp;
 using Agentica.Execution;
 using Agentica.Events;
 using Agentica.Outcomes;
@@ -35,6 +36,11 @@ if (string.Equals(args[0], "run", StringComparison.OrdinalIgnoreCase))
 if (string.Equals(args[0], "chat", StringComparison.OrdinalIgnoreCase))
 {
     return await ChatCommand.RunAsync(args.Skip(1).ToArray(), CreateCommandServices());
+}
+
+if (string.Equals(args[0], "mcp-inspect", StringComparison.OrdinalIgnoreCase))
+{
+    return await InspectMcpAsync(args.Skip(1).ToArray());
 }
 
 if (string.Equals(args[0], "quest", StringComparison.OrdinalIgnoreCase))
@@ -105,9 +111,13 @@ static async Task<int> RunDefaultAsync(IReadOnlyList<string> args)
     var runLog = CreateRunLog(options.LogRun, options.LogDir, "run", args);
     var eventSink = CreateEventSink(new ConsoleEventSink(), runLog);
 
+    await using var mcp = await McpLabRuntime.OpenFromEnvironmentAsync(CancellationToken.None);
+    var toolCatalog = mcp is null
+        ? DemoTools.CreateCatalog()
+        : ToolCatalog.Create(mcp.Registrations.ToArray());
     var runner = new AgenticaRunner(
         planner: planner,
-        toolCatalog: DemoTools.CreateCatalog(),
+        toolCatalog: toolCatalog,
         eventSink: eventSink,
         outcomeReporter: new DeterministicOutcomeReporter(),
         completionEvaluator: PlanExhaustionCompletionEvaluator.Instance,
@@ -125,6 +135,27 @@ static async Task<int> RunDefaultAsync(IReadOnlyList<string> args)
     PrintEnvelope(envelope);
     FinishRunLog(runLog, envelope);
     return envelope.Outcome.Status == RunOutcomeStatus.Succeeded ? 0 : 1;
+}
+
+static async Task<int> InspectMcpAsync(IReadOnlyList<string> args)
+{
+    if (args.Count != 2 || !Uri.TryCreate(args[0], UriKind.Absolute, out var endpoint))
+    {
+        Console.Error.WriteLine("Usage: Agentica.Lab mcp-inspect <endpoint> <server-id>");
+        return 2;
+    }
+    await using var transport = await SdkMcpToolTransport.ConnectHttpAsync(
+        args[1], endpoint);
+    foreach (var tool in await transport.ListToolsAsync(CancellationToken.None))
+    {
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            tool.Name,
+            SchemaSha256 = McpSchemaFingerprint.Sha256(tool.InputSchemaJson),
+            tool.InputSchemaJson
+        }));
+    }
+    return 0;
 }
 
 static void PrintEnvelope(OutcomeEnvelope envelope)
@@ -217,17 +248,19 @@ static IWorkflowPlanner CreatePlanner(CliRunOptions options)
     };
 
     var modelId = options.ModelId ?? GeminiModelId.Flash25;
-    var llmClient = new RetryingLlmClient(
-        new GeminiLlmClient(GeminiClientOptions.FromEnvironment(modelId)),
-        new LlmRetryOptions(CallTimeout: TimeSpan.FromMinutes(10)));
+    var llmClient = GeminiTransportSelection.Create(modelId);
     return new LlmWorkflowPlanner(
         llmClient,
         new LlmPlannerOptions(
             ModelId: modelId,
             GenerationOptions: new LlmGenerationOptions(
-                Temperature: 0,
+                Temperature: GeminiTransportSelection.UseInteractions ? null : 0,
                 MaxOutputTokens: options.MaxOutputTokens ?? LlmPlannerOptions.DefaultMaxOutputTokens,
-                Thinking: thinkingOptions)));
+                Thinking: thinkingOptions),
+            StatelessRepair: GeminiTransportSelection.UseInteractions),
+        onStreamEvent: GeminiTransportSelection.UseInteractions
+            ? new GeminiStreamTelemetryReporter().Report
+            : null);
 }
 
 static bool GeminiCredentialsAvailable()
@@ -247,6 +280,7 @@ static bool GeminiCredentialsAvailable()
 static void PrintUsage()
 {
     Console.Error.WriteLine("Usage:");
+    Console.Error.WriteLine("  Agentica.Lab mcp-inspect <endpoint> <server-id>");
     Console.Error.WriteLine("  Agentica.Lab run \"<objective>\" [--planner deterministic|gemini] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--include-thoughts] [--log-run] [--log-dir <path>]");
     Console.Error.WriteLine("  Agentica.Lab chat [message] [--planner deterministic|gemini] [--persona agentica|bookforge|mara|nanda|nyx|plain|thal] [--conversation <id>] [--new] [--app-home <path>] [--workspace <path>] [--db <path>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--include-thoughts] [--verbose-events]");
     Console.Error.WriteLine("  Agentica.Lab quest list");

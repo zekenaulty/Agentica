@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Agentica.Clients\Agentica.Clients.csproj" />
+    <ProjectReference Include="..\Agentica.Mcp\Agentica.Mcp.csproj" />
   </ItemGroup>
 
 </Project>

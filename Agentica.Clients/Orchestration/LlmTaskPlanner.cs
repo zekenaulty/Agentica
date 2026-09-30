@@ -14,11 +14,16 @@ public sealed class LlmTaskPlanner : ITaskPlanner
 
     private readonly ILlmClient _client;
     private readonly LlmTaskPlannerOptions _options;
+    private readonly Action<LlmStreamEvent>? _onStreamEvent;
 
-    public LlmTaskPlanner(ILlmClient client, LlmTaskPlannerOptions? options = null)
+    public LlmTaskPlanner(
+        ILlmClient client,
+        LlmTaskPlannerOptions? options = null,
+        Action<LlmStreamEvent>? onStreamEvent = null)
     {
         _client = client;
         _options = options ?? LlmTaskPlannerOptions.Default;
+        _onStreamEvent = onStreamEvent;
     }
 
     public async Task<TaskGraphPlan> CreatePlanAsync(
@@ -87,7 +92,11 @@ public sealed class LlmTaskPlanner : ITaskPlanner
     {
         try
         {
-            return await _client.GenerateAsync(request, cancellationToken).ConfigureAwait(false);
+            return await LlmStreamCompletion.GenerateAsync(
+                _client,
+                request,
+                _onStreamEvent,
+                cancellationToken).ConfigureAwait(false);
         }
         catch (LlmClientException exception) when (
             ClientExceptionBoundary.IsRecoverable(exception))

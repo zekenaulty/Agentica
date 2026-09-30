@@ -14,11 +14,16 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
 
     private readonly ILlmClient _client;
     private readonly LlmPlannerOptions _options;
+    private readonly Action<LlmStreamEvent>? _onStreamEvent;
 
-    public LlmWorkflowPlanner(ILlmClient client, LlmPlannerOptions? options = null)
+    public LlmWorkflowPlanner(
+        ILlmClient client,
+        LlmPlannerOptions? options = null,
+        Action<LlmStreamEvent>? onStreamEvent = null)
     {
         _client = client;
         _options = options ?? LlmPlannerOptions.Default;
+        _onStreamEvent = onStreamEvent;
     }
 
     public async Task<WorkflowPlan> CreatePlanAsync(
@@ -201,7 +206,11 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
     {
         try
         {
-            return await _client.GenerateAsync(request, cancellationToken).ConfigureAwait(false);
+            return await LlmStreamCompletion.GenerateAsync(
+                _client,
+                request,
+                _onStreamEvent,
+                cancellationToken).ConfigureAwait(false);
         }
         catch (LlmClientException exception) when (
             ClientExceptionBoundary.IsRecoverable(exception))

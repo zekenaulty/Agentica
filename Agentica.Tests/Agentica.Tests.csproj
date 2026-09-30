@@ -27,6 +27,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Agentica\Agentica.csproj" />
     <ProjectReference Include="..\Agentica.Clients\Agentica.Clients.csproj" />
+    <ProjectReference Include="..\Agentica.Mcp\Agentica.Mcp.csproj" />
     <ProjectReference Include="..\Agentica.Lab\Agentica.Lab.csproj" Aliases="AgenticaLab" />
   </ItemGroup>
 

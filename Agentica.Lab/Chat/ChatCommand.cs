@@ -1,4 +1,5 @@
 using Agentica.Execution;
+using Agentica.Lab.Configuration;
 using Agentica.Outcomes;
 using Agentica.Planning;
 using Agentica.Requests;
@@ -137,9 +138,12 @@ internal static class ChatCommand
         var request = new RunRequest(userInput, RequestOrigin.User, context);
         var eventSink = new ChatEventSink(options.VerboseEvents);
         var planner = CreatePlanner(selectedPlanner, options, services);
+        await using var mcp = await McpLabRuntime.OpenFromEnvironmentAsync(cancellationToken)
+            .ConfigureAwait(false);
         var runner = new AgenticaRunner(
             planner,
-            ChatTools.CreateCatalog(store, conversation, persona, conversation.WorkspaceRoot),
+            ChatTools.CreateCatalog(store, conversation, persona,
+                conversation.WorkspaceRoot, mcp?.Registrations),
             eventSink,
             new ChatOutcomeReporter(),
             policy: new ExecutionPolicy(

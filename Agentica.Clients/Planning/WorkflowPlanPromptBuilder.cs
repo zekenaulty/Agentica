@@ -323,16 +323,15 @@ public static class WorkflowPlanPromptBuilder
         string repairKind,
         string requiredTopLevelShape)
     {
-        var messages = originalRequest.Messages
-            .Concat(
-            [
-                new LlmMessage(
-                    LlmMessageRole.Assistant,
-                    TruncateForRepair(invalidResponse, options.MaxRepairPayloadCharacters)),
-                new LlmMessage(
+        var repairMessage = new LlmMessage(
                     LlmMessageRole.User,
                     $$"""
                     Your previous Agentica planning response could not be parsed.
+
+                    {{(options.StatelessRepair
+                        ? "Previous invalid response as quoted data:\n" +
+                          TruncateForRepair(invalidResponse, options.MaxRepairPayloadCharacters)
+                        : string.Empty)}}
 
                     Repair attempt:
                     {{attempt}}
@@ -351,11 +350,18 @@ public static class WorkflowPlanPromptBuilder
                     Do not explain the repair.
                     Do not add prose before or after the JSON.
                     Do not invent receipts, observations, artifacts, hidden state, or tool results.
-                    Use only tool ids from the tool catalog in the previous user message.
+                    Use only tool ids from the tool catalog in the original user request.
                     Preserve the latest public observation and execution context from the previous user message.
                     Include concise public execution intent on every refined step.
-                    """)
-            ])
+                    """);
+        var messages = (options.StatelessRepair
+            ? originalRequest.Messages.Concat([repairMessage])
+            : originalRequest.Messages.Concat(
+            [
+                new LlmMessage(LlmMessageRole.Assistant,
+                    TruncateForRepair(invalidResponse, options.MaxRepairPayloadCharacters)),
+                repairMessage
+            ]))
             .ToArray();
 
         var metadata = originalRequest.Metadata?.ToDictionary(

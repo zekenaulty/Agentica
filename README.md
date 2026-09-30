@@ -414,7 +414,7 @@ GEMINI_API_KEY=your-local-dev-key
 
 ### LLM Provider Retries
 
-`Agentica.Clients` has a narrow retry layer around provider generation calls. The Lab wraps Gemini with `RetryingLlmClient` before constructing the LLM planner.
+`Agentica.Clients` has a narrow retry layer around legacy provider generation calls. The Lab wraps the legacy Gemini client with `RetryingLlmClient`; the opt-in Interactions streaming path is not retried after dispatch because its outcome may be unknown.
 
 Defaults:
 
@@ -439,7 +439,7 @@ There are two envelopes:
 
 Agentica may later be exposed through MCP as a tool such as `agentica.run`.
 
-Agentica may later consume MCP tools by adapting remote tool descriptors into `ToolDescriptor` objects and remote tool results into `ToolResult`, `Observation`, `Artifact`, and `Receipt` objects.
+`Agentica.Mcp` now consumes one host-approved remote tool through the official C# MCP SDK. The host pins the server identity, remote tool name, and input schema hash; remote discovery cannot grant a capability. The adapter rechecks schema before invocation and converts bounded text output into an untrusted observation and a receipt. Lab `run` and `chat` can opt into this path through [the MCP and streaming setup](docs/mcp-streaming-first-slice.md).
 
 The runtime package must not depend on MCP SDK types.
 
@@ -475,9 +475,9 @@ Where the code is still behind the product goal:
 - One fixed measured cohort established 25/25 Workbench success and 4/5 Maze holdout success with zero false successes; repeated cohorts and broader scenarios are still needed for a reliability claim.
 - LLM outcome reporting is not yet the primary report path; deterministic/host reporters still carry most proof reporting.
 - Planning decisions are intentionally still `WorkflowPlan`/`PlanRefinement` shaped; richer model decisions such as "already complete", "cannot resume", or "ask for approval" are not first-class structured model outputs yet.
-- Provider retry observability is currently response/exception metadata, not a runtime event stream.
+- The opt-in Gemini Interactions path emits live activity, text, thought-summary, and terminal usage events. The legacy Gemini path still buffers generation.
 - The bounded/redacted run logger is a Lab adapter, not a general recorder API; redaction remains best-effort and serialization is not streaming-bounded.
-- MCP remains intentionally unimplemented.
+- MCP has a first read-only client adapter. Remote authentication, richer MCP content, mutation grants, and full server parity are still open.
 - Storage, durable run replay, global grant-id uniqueness, and host policy plugins are still adapter-level future work; the implemented one-shot approval grants are deliberately narrow in-memory runtime capabilities, not a human approval service or durable authorization store.
 
 The immediate next step is to preserve both hosted proof lanes while choosing the next explicit product slice. Completion of this bounded closure does not promote the repository beyond Incubating or authorize public package/CLI claims.

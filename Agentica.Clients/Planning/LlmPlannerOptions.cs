@@ -7,7 +7,8 @@ public sealed record LlmPlannerOptions(
     string ModelId = GeminiModelId.Flash25,
     LlmGenerationOptions? GenerationOptions = null,
     int InvalidJsonRepairAttempts = 2,
-    int MaxRepairPayloadCharacters = 8000)
+    int MaxRepairPayloadCharacters = 8000,
+    bool StatelessRepair = false)
 {
     public const int DefaultMaxOutputTokens = 12_288;
 
