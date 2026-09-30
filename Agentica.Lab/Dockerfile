@@ -16,6 +16,8 @@ COPY ["Agentica/Agentica.csproj", "Agentica/"]
 COPY ["Agentica/Packages.lock.json", "Agentica/"]
 COPY ["Agentica.Clients/Agentica.Clients.csproj", "Agentica.Clients/"]
 COPY ["Agentica.Clients/Packages.lock.json", "Agentica.Clients/"]
+COPY ["Agentica.Mcp/Agentica.Mcp.csproj", "Agentica.Mcp/"]
+COPY ["Agentica.Mcp/Packages.lock.json", "Agentica.Mcp/"]
 COPY ["Agentica.Lab/Agentica.Lab.csproj", "Agentica.Lab/"]
 COPY ["Agentica.Lab/Packages.lock.json", "Agentica.Lab/"]
 RUN dotnet restore "Agentica.Lab/Agentica.Lab.csproj" --locked-mode --configfile NuGet.config
@@ -24,6 +26,7 @@ COPY ["LICENSE", "."]
 COPY ["README.md", "."]
 COPY ["Agentica/", "Agentica/"]
 COPY ["Agentica.Clients/", "Agentica.Clients/"]
+COPY ["Agentica.Mcp/", "Agentica.Mcp/"]
 COPY ["Agentica.Lab/", "Agentica.Lab/"]
 RUN dotnet publish "Agentica.Lab/Agentica.Lab.csproj" \
     --configuration $BUILD_CONFIGURATION \

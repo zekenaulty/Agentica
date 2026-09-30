@@ -29,6 +29,9 @@ public sealed class ContainerContractTests
         Assert.Contains("--configfile NuGet.config", dockerfile, StringComparison.Ordinal);
         Assert.Contains("COPY [\"NuGet.config\", \".\"]", dockerfile, StringComparison.Ordinal);
         Assert.Contains("COPY [\".editorconfig\", \".\"]", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("COPY [\"Agentica.Mcp/Agentica.Mcp.csproj\", \"Agentica.Mcp/\"]", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("COPY [\"Agentica.Mcp/Packages.lock.json\", \"Agentica.Mcp/\"]", dockerfile, StringComparison.Ordinal);
+        Assert.Contains("COPY [\"Agentica.Mcp/\", \"Agentica.Mcp/\"]", dockerfile, StringComparison.Ordinal);
         Assert.Contains("dotnet publish", dockerfile, StringComparison.Ordinal);
         Assert.Contains("--no-restore", dockerfile, StringComparison.Ordinal);
         Assert.Contains("Internal research harness; not a supported product CLI", dockerfile, StringComparison.Ordinal);
