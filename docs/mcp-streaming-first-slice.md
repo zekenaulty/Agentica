@@ -102,7 +102,7 @@ The [Gemini thought-signature thesis](https://docs.google.com/document/d/1UefWYj
 
 ## Next contracts
 
-- Add bounded persistence and lifecycle disposal for provider-native continuations. Gemini, OpenAI, Anthropic, and xAI continuation cover bounded thought/reasoning and text output; provider tool steps and unknown deltas require separate native handling.
+- Add bounded persistence and lifecycle disposal for provider-native continuations. Gemini, OpenAI, Anthropic, xAI, and Ollama continuation cover bounded thought/reasoning and text output; provider tool steps and unknown deltas require separate native handling.
 - Extend stream telemetry with explicit tool-call phases and structured timestamps/usage snapshots suitable for a UI; keep provider-specific payloads behind adapters.
 - Add provider token-aware frame compilation: reserve output, reasoning, tool-result and safety capacity, then select representation depth for optional frame entries with omission/degradation receipts.
 - Expand MCP transport authentication beyond host bearer tokens and support additional safe result types. Verify mutation effects with a real host-specific acceptance predicate and test a separately operated MCP server.
