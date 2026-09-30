@@ -106,4 +106,26 @@ public sealed class StreamTelemetryReporterTests
         Assert.Equal("cancelled",
             cancellation.RootElement.GetProperty("kind").GetString());
     }
+
+    [Fact]
+    public void Human_feed_only_displays_thought_summaries_when_requested()
+    {
+        using var withheld = new StringWriter();
+        var defaultReporter = new AgenticaLab::Agentica.Lab.Configuration.StreamTelemetryReporter(
+            "gemini", writer: withheld);
+        defaultReporter.Report(new LlmStreamEvent(LlmStreamEventKind.Started));
+        defaultReporter.Report(new LlmStreamEvent(LlmStreamEventKind.ThoughtSummaryDelta,
+            "provider summary"));
+        Assert.DoesNotContain("provider summary", withheld.ToString(),
+            StringComparison.Ordinal);
+
+        using var included = new StringWriter();
+        var optedInReporter = new AgenticaLab::Agentica.Lab.Configuration.StreamTelemetryReporter(
+            "gemini", includeThoughtSummaries: true, writer: included);
+        optedInReporter.Report(new LlmStreamEvent(LlmStreamEventKind.Started));
+        optedInReporter.Report(new LlmStreamEvent(LlmStreamEventKind.ThoughtSummaryDelta,
+            "provider summary"));
+        Assert.Contains("provider summary", included.ToString(),
+            StringComparison.Ordinal);
+    }
 }

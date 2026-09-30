@@ -125,7 +125,8 @@ internal sealed class StreamTelemetryReporter
                       $"elapsed={_clock.ElapsedMilliseconds} ms");
                 break;
             case LlmStreamEventKind.ThoughtSummaryDelta:
-                _writer.WriteLine($"[{_provider}] thought summary: {item.Text}");
+                if (_includeThoughtSummaries)
+                    _writer.WriteLine($"[{_provider}] thought summary: {item.Text}");
                 break;
             case LlmStreamEventKind.Completed:
                 _writer.WriteLine(
