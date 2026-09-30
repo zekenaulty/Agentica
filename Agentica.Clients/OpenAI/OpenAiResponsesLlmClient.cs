@@ -272,7 +272,10 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
 
         var body = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
-            ["model"] = modelId, ["input"] = input, ["stream"] = true, ["store"] = false
+            ["model"] = modelId,
+            ["input"] = input,
+            ["stream"] = true,
+            ["store"] = false
         };
         if (instruction.Length > 0) body["instructions"] = instruction;
         if (_includeEncryptedReasoning)

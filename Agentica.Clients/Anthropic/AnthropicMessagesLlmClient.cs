@@ -246,7 +246,8 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
         }
         messages.AddRange(userMessages.Select(item => (object)new
         {
-            role = "user", content = item.Content
+            role = "user",
+            content = item.Content
         }));
         if (JsonSerializer.Serialize(messages).Length > LlmNativeContinuation.MaxPayloadCharacters)
             throw Failure("continuation_too_large", LlmClientErrorKind.BadRequest);
@@ -255,8 +256,10 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
         if (maxTokens <= 0) throw Failure("invalid_max_output_tokens", LlmClientErrorKind.BadRequest);
         var body = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
-            ["model"] = modelId, ["messages"] = messages,
-            ["max_tokens"] = maxTokens, ["stream"] = true
+            ["model"] = modelId,
+            ["messages"] = messages,
+            ["max_tokens"] = maxTokens,
+            ["stream"] = true
         };
         if (system.Length > 0) body["system"] = system;
         var thinking = request.GenerationOptions?.Thinking;
@@ -271,13 +274,20 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
             var budget = thinking.ThinkingBudgetTokens.Value;
             if (budget < 1024 || budget >= maxTokens)
                 throw Failure("invalid_thinking_budget", LlmClientErrorKind.BadRequest);
-            body["thinking"] = new { type = "enabled", budget_tokens = budget,
-                display = thinking.IncludeThoughts ? "summarized" : "omitted" };
+            body["thinking"] = new
+            {
+                type = "enabled",
+                budget_tokens = budget,
+                display = thinking.IncludeThoughts ? "summarized" : "omitted"
+            };
         }
         else if (thinking is not null)
         {
-            body["thinking"] = new { type = "adaptive",
-                display = thinking.IncludeThoughts ? "summarized" : "omitted" };
+            body["thinking"] = new
+            {
+                type = "adaptive",
+                display = thinking.IncludeThoughts ? "summarized" : "omitted"
+            };
         }
         if (request.StructuredOutput is { } structured)
         {

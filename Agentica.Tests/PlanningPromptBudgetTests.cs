@@ -39,9 +39,9 @@ public sealed class PlanningPromptBudgetTests
         Assert.Equal(8, receipt.Decisions.Count);
         Assert.Contains(receipt.Decisions, decision => !decision.Included);
         Assert.Contains(receipt.Decisions, decision => decision is
-            { Kind: "observation", RefId: "observation_4", Included: true });
+        { Kind: "observation", RefId: "observation_4", Included: true });
         Assert.Contains(receipt.Decisions, decision => decision is
-            { Kind: "receipt", RefId: "receipt_2", Included: true });
+        { Kind: "receipt", RefId: "receipt_2", Included: true });
         Assert.Contains("evidence_4_", prompt);
         Assert.DoesNotContain("evidence_0_", prompt);
         Assert.Equal(receipt.InputSha256, second.InputCompilationReceipt?.InputSha256);

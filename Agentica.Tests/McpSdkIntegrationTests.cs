@@ -108,7 +108,8 @@ public sealed class McpSdkIntegrationTests
             {
                 await WriteJsonAsync(context.Response, JsonSerializer.SerializeToUtf8Bytes(new
                 {
-                    jsonrpc = "2.0", id = id.Clone(),
+                    jsonrpc = "2.0",
+                    id = id.Clone(),
                     error = new { code = -32601, message = "Method not found" }
                 }));
                 return;
@@ -157,7 +158,9 @@ public sealed class McpSdkIntegrationTests
             }
             var bytes = JsonSerializer.SerializeToUtf8Bytes(new
             {
-                jsonrpc = "2.0", id = id.Clone(), result
+                jsonrpc = "2.0",
+                id = id.Clone(),
+                result
             });
             await WriteJsonAsync(context.Response, bytes);
         }

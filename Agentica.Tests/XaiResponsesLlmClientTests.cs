@@ -47,7 +47,7 @@ public sealed class XaiResponsesLlmClientTests
         Assert.Equal(6, first.Usage?.ThinkingTokens);
         Assert.NotNull(first.NativeContinuation);
         Assert.Contains(events, item => item is
-            { Kind: LlmStreamEventKind.Activity, Text: "reasoning.streaming" });
+        { Kind: LlmStreamEventKind.Activity, Text: "reasoning.streaming" });
         Assert.DoesNotContain("raw-private-reasoning", JsonSerializer.Serialize(events));
         Assert.DoesNotContain("ciphertext", JsonSerializer.Serialize(first));
 
