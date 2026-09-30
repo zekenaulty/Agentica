@@ -6,7 +6,8 @@ namespace Agentica.Clients.Llm;
 /// <summary>
 /// Provider-owned replay state for a stateless follow-up. It is deliberately absent from
 /// ordinary JSON serialization, logs, planner text, and receipts. Only the matching adapter
-/// may interpret its bounded native payload.
+/// may interpret its bounded native payload. It is a continuation carrier, not
+/// canonical task state, an authority grant, or a verified account of reasoning.
 /// </summary>
 public sealed class LlmNativeContinuation
 {
