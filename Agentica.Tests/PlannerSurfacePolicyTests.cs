@@ -12,6 +12,43 @@ namespace Agentica.Tests;
 public sealed class PlannerSurfacePolicyTests
 {
     [Fact]
+    public async Task Host_bound_external_tool_without_extra_grant_is_visible_and_dispatchable()
+    {
+        var plan = new WorkflowPlan(
+            "plan.bound.external", 1,
+            [new PlanStep("step.bound", "external.send", ToolKind.Action,
+                ToolEffect.ExternalSideEffect, EmptyInput())],
+            "Use the installed external capability.");
+        var planner = new CapturingExternalPlanner(plan);
+        var catalog = ToolCatalog.Create(Registration("external.send",
+            ToolEffect.ExternalSideEffect,
+            exposes: [ToolDataBoundary.ExternalUntrusted],
+            requiresApproval: false));
+        var runner = new AgenticaRunner(planner, catalog,
+            new InMemoryEventSink(), new DeterministicOutcomeReporter(),
+            new ExecutionPolicy(
+                PlanningMode: PlanningMode.PlanOnly,
+                EffectPolicy: ToolEffectPolicy.AllowKnown,
+                SecurityPolicy: new ToolSecurityPolicy(
+                    InitialBoundaries: [ToolDataBoundary.UserContent],
+                    ExternalPlannerAllowedBoundaries:
+                    [ToolDataBoundary.UserContent, ToolDataBoundary.Public,
+                     ToolDataBoundary.ExternalUntrusted])),
+            PlanExhaustionCompletionEvaluator.Instance);
+
+        var outcome = await runner.RunAsync(new RunRequest(
+            "Use the installed external capability."));
+
+        Assert.Equal(RunOutcomeStatus.Succeeded, outcome.Outcome.Status);
+        Assert.Equal("external.send", Assert.Single(
+            Assert.Single(planner.Requests).ToolDescriptors).ToolId);
+        Assert.Empty(outcome.Details.GrantConsumptions);
+        Assert.Contains(outcome.Receipts.Items,
+            receipt => receipt.ToolId == "external.send" &&
+                       receipt.Status == ReceiptStatus.Succeeded);
+    }
+
+    [Fact]
     public async Task External_planner_only_sees_tools_dispatchable_under_effect_and_boundary_policy()
     {
         var planner = new CapturingExternalPlanner(new WorkflowPlan(
@@ -56,14 +93,15 @@ public sealed class PlannerSurfacePolicyTests
     private static ToolRegistration Registration(
         string toolId,
         ToolEffect effect,
-        IReadOnlyList<ToolDataBoundary> exposes) =>
+        IReadOnlyList<ToolDataBoundary> exposes,
+        bool? requiresApproval = null) =>
         new(
             new ToolDescriptor(
                 toolId,
                 toolId,
                 effect == ToolEffect.ReadOnly ? ToolKind.Query : ToolKind.Action,
                 effect,
-                RequiresApproval: effect == ToolEffect.ExternalSideEffect,
+                RequiresApproval: requiresApproval ?? effect == ToolEffect.ExternalSideEffect,
                 RetrySafety: effect == ToolEffect.ReadOnly
                     ? ToolRetrySafety.Idempotent
                     : ToolRetrySafety.MutationUnsafe),
@@ -75,7 +113,7 @@ public sealed class PlannerSurfacePolicyTests
                 effect == ToolEffect.ExternalSideEffect
                     ? ToolExternalOutputClassification.UntrustedStructuredData
                     : ToolExternalOutputClassification.None,
-                effect == ToolEffect.ExternalSideEffect
+                (requiresApproval ?? effect == ToolEffect.ExternalSideEffect)
                     ? ToolApprovalRequirement.ExplicitGrant
                     : ToolApprovalRequirement.None,
                 effect == ToolEffect.ReadOnly
