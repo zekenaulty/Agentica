@@ -2,6 +2,8 @@
 
 These slices add a host-bound MCP client tool, streamed Gemini Developer API, OpenAI Responses, Anthropic Messages, and xAI Grok Responses clients, and native Ollama streaming. Agentica's runtime stays independent of provider and MCP SDK types.
 
+The planner's provider-neutral stream observer now receives `Started` before network enumeration, live activity/text/summary deltas, and one terminal completion, failure, or cancellation signal. Lab measures from call start, so first-output timing includes connection and provider wait time. A failed or cancelled stream remains a failed planner call even if earlier deltas were shown. Provider-native signatures, encrypted reasoning, and raw Ollama thinking remain outside generic stream events.
+
 ## Streamed Gemini planning
 
 Set `GEMINI_API_KEY` (or `GOOGLE_API_KEY`), then use Lab `run` or `chat` with `--planner gemini`. Lab selects Interactions by default for Developer API credentials; `AGENTICA_GEMINI_API=legacy` selects the older GenerateContent client. Vertex mode continues to select that SDK path by default, and `AGENTICA_GEMINI_API=interactions` explicitly selects the Developer API. The Interactions client posts `store=false` and `stream=true`. The host supplies full bounded input for each independent request. Lab reports interaction activity, visible text deltas, provider supplied thought summaries when requested, and terminal token usage to stderr while the call is in progress. The planner accepts output only after a completed interaction event.
@@ -97,7 +99,7 @@ The source review informing this boundary used the [Domain of Domains architectu
 ## Next contracts
 
 - Add bounded persistence and lifecycle disposal for provider-native continuations. Gemini, OpenAI, Anthropic, and xAI continuation cover bounded thought/reasoning and text output; provider tool steps and unknown deltas require separate native handling.
-- Add a provider-neutral stream event contract for time-to-first-token, token usage, tool-call phases, and terminal/unknown outcomes; keep provider-specific payloads behind adapters.
+- Extend stream telemetry with explicit tool-call phases and structured timestamps/usage snapshots suitable for a UI; keep provider-specific payloads behind adapters.
 - Add provider token-aware frame compilation: reserve output, reasoning, tool-result and safety capacity, then select representation depth for optional frame entries with omission/degradation receipts.
 - Expand MCP transport authentication beyond host bearer tokens and support additional safe result types. Verify mutation effects with a real host-specific acceptance predicate and test a separately operated MCP server.
 - Run live OpenAI, Anthropic, xAI, and Ollama follow-up smoke calls when credentials or a local Ollama model are available.

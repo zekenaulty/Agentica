@@ -52,8 +52,7 @@ internal sealed class StreamTelemetryReporter(string provider)
 
     public void Report(LlmStreamEvent item)
     {
-        if (!_inCall || item.Kind == LlmStreamEventKind.Activity &&
-            item.Text is "interaction.created" or "response.created" or "message_start")
+        if (item.Kind == LlmStreamEventKind.Started || !_inCall)
         {
             _clock.Restart();
             _outputCharacters = 0;
@@ -62,6 +61,9 @@ internal sealed class StreamTelemetryReporter(string provider)
         }
         switch (item.Kind)
         {
+            case LlmStreamEventKind.Started:
+                Console.Error.WriteLine($"[{provider}] call started");
+                break;
             case LlmStreamEventKind.Activity:
                 Console.Error.WriteLine($"[{provider}] {item.Text}");
                 break;
@@ -92,6 +94,14 @@ internal sealed class StreamTelemetryReporter(string provider)
                     $"output={item.Response?.Usage?.OutputTokens?.ToString() ?? "unknown"}; " +
                     $"thought={item.Response?.Usage?.ThinkingTokens?.ToString() ?? "unknown"}; " +
                     $"finish={item.Response?.FinishReason}");
+                _inCall = false;
+                break;
+            case LlmStreamEventKind.Failed:
+            case LlmStreamEventKind.Cancelled:
+                Console.Error.WriteLine(
+                    $"[{provider}] {item.Kind.ToString().ToLowerInvariant()} " +
+                    $"after {_clock.ElapsedMilliseconds} ms; " +
+                    $"reason={item.Text ?? "unknown"}; plannerChars={_outputCharacters}");
                 _inCall = false;
                 break;
         }

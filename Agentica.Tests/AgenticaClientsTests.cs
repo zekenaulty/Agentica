@@ -663,6 +663,43 @@ public sealed class AgenticaClientsTests
     }
 
     [Fact]
+    public async Task Planner_stream_observer_receives_whole_call_lifecycle()
+    {
+        var events = new List<LlmStreamEvent>();
+        var planner = new LlmWorkflowPlanner(
+            new ScriptedStreamingClient(PlanJson("query_state", "Query", "ReadOnly")),
+            new LlmPlannerOptions(InvalidJsonRepairAttempts: 0), events.Add);
+
+        var plan = await planner.CreatePlanAsync(CreatePlanningRequest());
+
+        Assert.Single(plan.Steps);
+        Assert.Equal([LlmStreamEventKind.Started, LlmStreamEventKind.Activity,
+            LlmStreamEventKind.TextDelta, LlmStreamEventKind.Completed],
+            events.Select(item => item.Kind));
+
+        events.Clear();
+        var failing = new LlmWorkflowPlanner(new ScriptedStreamingClient("", fail: true),
+            new LlmPlannerOptions(InvalidJsonRepairAttempts: 0), events.Add);
+        var failure = await Assert.ThrowsAsync<WorkflowPlannerException>(() =>
+            failing.CreatePlanAsync(CreatePlanningRequest()));
+        Assert.IsType<LlmClientException>(failure.InnerException);
+        Assert.Equal([LlmStreamEventKind.Started, LlmStreamEventKind.Activity,
+            LlmStreamEventKind.Failed], events.Select(item => item.Kind));
+        Assert.Equal("fixture_failure", events[^1].Text);
+
+        events.Clear();
+        var malformed = new LlmWorkflowPlanner(
+            new ScriptedStreamingClient(PlanJson("query_state", "Query", "ReadOnly"),
+                lateData: true),
+            new LlmPlannerOptions(InvalidJsonRepairAttempts: 0), events.Add);
+        await Assert.ThrowsAsync<WorkflowPlannerException>(() =>
+            malformed.CreatePlanAsync(CreatePlanningRequest()));
+        Assert.DoesNotContain(events, item => item.Kind == LlmStreamEventKind.Completed);
+        Assert.Equal(LlmStreamEventKind.Failed, events[^1].Kind);
+        Assert.Equal("data_after_completion", events[^1].Text);
+    }
+
+    [Fact]
     public async Task Missing_gemini_api_key_produces_clear_provider_error_without_network()
     {
         var oldGeminiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
@@ -1118,6 +1155,35 @@ public sealed class AgenticaClientsTests
         {
             Requests.Add(request);
             return Task.FromResult(_responses.Dequeue());
+        }
+    }
+
+    private sealed class ScriptedStreamingClient(string json, bool fail = false,
+        bool lateData = false)
+        : ILlmStreamingClient
+    {
+        public Task<LlmResponse> GenerateAsync(LlmRequest request,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("Planner must consume the stream.");
+
+        public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
+            LlmRequest request,
+            [System.Runtime.CompilerServices.EnumeratorCancellation]
+            CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            yield return new LlmStreamEvent(LlmStreamEventKind.Activity,
+                "response.created");
+            if (fail)
+                throw new LlmClientException("fixture", "Stream failed.",
+                    errorClass: "fixture_failure");
+            yield return new LlmStreamEvent(LlmStreamEventKind.TextDelta, json);
+            yield return new LlmStreamEvent(LlmStreamEventKind.Completed,
+                Response: new LlmResponse("fixture", request.ModelId, json, json,
+                    FinishReason: LlmFinishReason.Stop));
+            if (lateData)
+                yield return new LlmStreamEvent(LlmStreamEventKind.Activity,
+                    "unexpected.trailing.data");
         }
     }
 

@@ -19,21 +19,47 @@ internal static class LlmStreamCompletion
         }
 
         LlmResponse? completed = null;
-        await foreach (var item in streaming.StreamAsync(request, cancellationToken)
-            .ConfigureAwait(false))
+        onEvent(new LlmStreamEvent(LlmStreamEventKind.Started));
+        try
         {
-            if (completed is not null)
+            await foreach (var item in streaming.StreamAsync(request, cancellationToken)
+                .ConfigureAwait(false))
             {
-                throw Incomplete("data_after_completion");
+                if (completed is not null)
+                {
+                    throw Incomplete("data_after_completion");
+                }
+                if (item.Kind == LlmStreamEventKind.Completed)
+                {
+                    completed = item.Response ?? throw Incomplete("missing_terminal_response");
+                }
+                else
+                {
+                    onEvent(item);
+                }
             }
-            onEvent(item);
-            if (item.Kind == LlmStreamEventKind.Completed)
-            {
-                completed = item.Response ?? throw Incomplete("missing_terminal_response");
-            }
+            if (completed is null) throw Incomplete("stream_incomplete");
         }
-
-        return completed ?? throw Incomplete("stream_incomplete");
+        catch (OperationCanceledException)
+        {
+            onEvent(new LlmStreamEvent(LlmStreamEventKind.Cancelled));
+            throw;
+        }
+        catch (LlmClientException exception)
+        {
+            onEvent(new LlmStreamEvent(LlmStreamEventKind.Failed,
+                exception.ErrorClass ?? "provider_failure"));
+            throw;
+        }
+        catch
+        {
+            onEvent(new LlmStreamEvent(LlmStreamEventKind.Failed,
+                "stream_failure"));
+            throw;
+        }
+        onEvent(new LlmStreamEvent(LlmStreamEventKind.Completed,
+            Response: completed));
+        return completed;
     }
 
     private static LlmClientException Incomplete(string code) =>
