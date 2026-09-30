@@ -18,6 +18,8 @@ internal sealed record CliRunOptions(
 
     public int? ContextWindowTokens { get; init; }
 
+    public bool StreamEventsJsonl { get; init; }
+
     public static CliRunOptions Parse(IReadOnlyList<string> args)
     {
         var objectiveParts = new List<string>();
@@ -28,6 +30,7 @@ internal sealed record CliRunOptions(
         int? maxOutputTokens = null;
         int? maxInputCharacters = null;
         int? contextWindowTokens = null;
+        var streamEventsJsonl = false;
         var planningMode = PlanningMode.Stepwise;
         var maxBlockedRetries = 2;
         var logRun = false;
@@ -140,6 +143,10 @@ internal sealed record CliRunOptions(
                     includeThoughts = true;
                     break;
 
+                case "--stream-events-jsonl":
+                    streamEventsJsonl = true;
+                    break;
+
                 case "--log-run":
                     logRun = true;
                     break;
@@ -181,7 +188,8 @@ internal sealed record CliRunOptions(
             Error: null)
         {
             MaxInputCharacters = maxInputCharacters,
-            ContextWindowTokens = contextWindowTokens
+            ContextWindowTokens = contextWindowTokens,
+            StreamEventsJsonl = streamEventsJsonl
         };
     }
 

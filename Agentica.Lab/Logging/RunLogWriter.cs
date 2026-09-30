@@ -42,6 +42,7 @@ public sealed class RunLogWriter
             "--phase",
             "--planner",
             "--planning-mode",
+            "--stream-events-jsonl",
             "--quiet",
             "--run-model",
             "--run-planner",

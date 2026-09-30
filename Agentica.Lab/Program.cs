@@ -325,7 +325,9 @@ static IWorkflowPlanner CreatePlanner(CliRunOptions options)
         onStreamEvent: isStreaming
             ? new StreamTelemetryReporter(isOllama ? "ollama" :
                 isOpenAI ? "openai" : isAnthropic ? "anthropic" :
-                isGrok ? "xai" : "gemini").Report
+                isGrok ? "xai" : "gemini",
+                jsonLines: options.StreamEventsJsonl,
+                includeThoughtSummaries: options.IncludeThoughts).Report
             : null);
 }
 
@@ -347,8 +349,8 @@ static void PrintUsage()
 {
     Console.Error.WriteLine("Usage:");
     Console.Error.WriteLine("  Agentica.Lab mcp-inspect <endpoint> <server-id>");
-    Console.Error.WriteLine("  Agentica.Lab run \"<objective>\" [--planner deterministic|gemini|ollama|openai|anthropic|grok] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--max-input-characters <count>] [--context-window-tokens <count>] [--include-thoughts] [--log-run] [--log-dir <path>]");
-    Console.Error.WriteLine("  Agentica.Lab chat [message] [--planner deterministic|gemini|ollama|openai|anthropic|grok] [--persona agentica|bookforge|mara|nanda|nyx|plain|thal] [--conversation <id>] [--new] [--app-home <path>] [--workspace <path>] [--db <path>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--max-input-characters <count>] [--context-window-tokens <count>] [--include-thoughts] [--verbose-events]");
+    Console.Error.WriteLine("  Agentica.Lab run \"<objective>\" [--planner deterministic|gemini|ollama|openai|anthropic|grok] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--max-input-characters <count>] [--context-window-tokens <count>] [--include-thoughts] [--stream-events-jsonl] [--log-run] [--log-dir <path>]");
+    Console.Error.WriteLine("  Agentica.Lab chat [message] [--planner deterministic|gemini|ollama|openai|anthropic|grok] [--persona agentica|bookforge|mara|nanda|nyx|plain|thal] [--conversation <id>] [--new] [--app-home <path>] [--workspace <path>] [--db <path>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--max-input-characters <count>] [--context-window-tokens <count>] [--include-thoughts] [--stream-events-jsonl] [--verbose-events]");
     Console.Error.WriteLine("  Agentica.Lab quest list");
     Console.Error.WriteLine("  Agentica.Lab quest run <quest-id> [--planner deterministic|gemini] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--route observe|blocked] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--include-thoughts] [--log-run] [--log-dir <path>]");
     Console.Error.WriteLine("  Agentica.Lab mazequest list");

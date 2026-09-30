@@ -24,6 +24,8 @@ internal sealed record ChatOptions(
 
     public int? ContextWindowTokens { get; init; }
 
+    public bool StreamEventsJsonl { get; init; }
+
     public static ChatOptions Parse(IReadOnlyList<string> args)
     {
         var messageParts = new List<string>();
@@ -34,6 +36,7 @@ internal sealed record ChatOptions(
         int? maxOutputTokens = null;
         int? maxInputCharacters = null;
         int? contextWindowTokens = null;
+        var streamEventsJsonl = false;
         var appHome = ChatPaths.DefaultAppHome();
         string? workspaceRootOverride = null;
         string? databasePathOverride = null;
@@ -139,6 +142,10 @@ internal sealed record ChatOptions(
                     includeThoughts = true;
                     break;
 
+                case "--stream-events-jsonl":
+                    streamEventsJsonl = true;
+                    break;
+
                 case "--app-home":
                     if (!TryReadValue(args, ref index, out var appHomeValue))
                     {
@@ -222,7 +229,8 @@ internal sealed record ChatOptions(
             Error: null)
         {
             MaxInputCharacters = maxInputCharacters,
-            ContextWindowTokens = contextWindowTokens
+            ContextWindowTokens = contextWindowTokens,
+            StreamEventsJsonl = streamEventsJsonl
         };
     }
 

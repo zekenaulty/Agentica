@@ -27,4 +27,18 @@ public sealed class PlanningInputCliTests
         Assert.True(AgenticaLab::ChatOptions.Parse(["--context-window-tokens", "8192",
             "--max-output-tokens", "1024"]).IsValid);
     }
+
+    [Fact]
+    public void Run_and_chat_can_emit_structured_live_stream_telemetry()
+    {
+        var run = AgenticaLab::CliRunOptions.Parse([
+            "Inspect", "--planner", "gemini", "--stream-events-jsonl"]);
+        var chat = AgenticaLab::ChatOptions.Parse([
+            "--planner", "anthropic", "--stream-events-jsonl"]);
+
+        Assert.True(run.IsValid);
+        Assert.True(run.StreamEventsJsonl);
+        Assert.True(chat.IsValid);
+        Assert.True(chat.StreamEventsJsonl);
+    }
 }

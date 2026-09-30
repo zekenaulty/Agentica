@@ -4,6 +4,8 @@ These slices add a host-bound MCP client tool, streamed Gemini Developer API, Op
 
 The planner's provider-neutral stream observer now receives `Started` before network enumeration, live activity/text/summary deltas, and one terminal completion, failure, or cancellation signal while the observer is healthy. A recoverable observer exception disables that observer for the call without changing the provider result. Lab measures from call start, so first-output timing includes connection and provider wait time. A failed or cancelled stream remains a failed planner call even if earlier deltas were shown. Provider-native signatures, encrypted reasoning, and raw Ollama thinking remain outside generic stream events.
 
+Lab `run` and `chat` accept `--stream-events-jsonl` to write one schema-versioned telemetry record per emitted progress milestone to stderr. Records carry a per-call ID, sequence, UTC timestamp, elapsed milliseconds, activity code, cumulative visible-output and thought-summary character counts, first-output timing, and terminal usage/finish or failure reason. The JSONL feed omits visible output text, raw reasoning, and native signatures; `--include-thoughts` allows provider-supplied summary deltas in that feed. The ordinary human-readable stderr format remains the default. These records are suitable for a local UI to follow while the planner call is running; each call receives a new ID so refinement and repair calls remain distinguishable.
+
 ## Streamed Gemini planning
 
 Set `GEMINI_API_KEY` (or `GOOGLE_API_KEY`), then use Lab `run` or `chat` with `--planner gemini`. Lab selects Interactions by default for Developer API credentials; `AGENTICA_GEMINI_API=legacy` selects the older GenerateContent client. Vertex mode continues to select that SDK path by default, and `AGENTICA_GEMINI_API=interactions` explicitly selects the Developer API. The Interactions client posts `store=false` and `stream=true`. The host supplies full bounded input for each independent request. Lab reports interaction activity, visible text deltas, provider supplied thought summaries when requested, and terminal token usage to stderr while the call is in progress. The planner accepts output only after a completed interaction event.
@@ -105,7 +107,7 @@ The [Gemini thought-signature thesis](https://docs.google.com/document/d/1UefWYj
 ## Next contracts
 
 - Add bounded persistence and lifecycle disposal for provider-native continuations. Gemini, OpenAI, Anthropic, xAI, and Ollama continuation cover bounded thought/reasoning and text output; provider tool steps and unknown deltas require separate native handling.
-- Extend stream telemetry with explicit tool-call phases and structured timestamps/usage snapshots suitable for a UI; keep provider-specific payloads behind adapters.
+- Add governed provider-native tool-call phases and a UI transport with bounded backpressure. JSONL progress is available now, but native tool steps remain rejected and the current CLI writer is synchronous.
 - Add provider token-aware frame compilation: reserve output, reasoning, tool-result and safety capacity, then select representation depth for optional frame entries with omission/degradation receipts.
 - Expand MCP transport authentication beyond host bearer tokens and support additional safe result types. Verify mutation effects with a real host-specific acceptance predicate and test a separately operated MCP server.
 - Run live OpenAI, Anthropic, xAI, and Ollama follow-up smoke calls when credentials or a local Ollama model are available.
