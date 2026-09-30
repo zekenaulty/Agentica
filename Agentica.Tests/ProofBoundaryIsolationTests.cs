@@ -756,6 +756,49 @@ public sealed class ProofBoundaryIsolationTests
     }
 
     [Fact]
+    public async Task Host_compact_frame_is_detached_before_planner_sees_it()
+    {
+        var compactSource = new Dictionary<string, object?>
+        {
+            ["currentState"] = "ready"
+        };
+        var frame = new PlanningFrame("frame_host", "host.current", "1",
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, object?> { ["full"] = "ready" }, [])
+        {
+            CompactPayload = compactSource
+        };
+        object? plannerValue = null;
+        bool plannerCompactReadOnly = false;
+        var planner = new StaticPlanner(
+            Plan(Step("step_read", "state.read", ToolKind.Query,
+                ToolEffect.ReadOnly)),
+            request =>
+            {
+                compactSource["currentState"] = "mutated";
+                var compact = request.ContextFrames.Single(item =>
+                    item.FrameId == "frame_host").CompactPayload!;
+                plannerValue = compact["currentState"];
+                plannerCompactReadOnly = compact is IDictionary<string, object?>
+                {
+                    IsReadOnly: true
+                };
+            });
+        var runner = Runner(planner,
+            ToolCatalog.Create(Registration("state.read", ToolKind.Query,
+                ToolEffect.ReadOnly, new StatusTool(ReceiptStatus.Succeeded))),
+            new DeterministicOutcomeReporter(),
+            new ExecutionPolicy(PlanningMode: PlanningMode.PlanOnly),
+            planningFrameProjector: new StaticPlanningFrameProjector([frame]));
+
+        var outcome = await runner.RunAsync(new RunRequest("Inspect host state."));
+
+        Assert.Equal(RunOutcomeStatus.Succeeded, outcome.Outcome.Status);
+        Assert.Equal("ready", plannerValue);
+        Assert.True(plannerCompactReadOnly);
+    }
+
+    [Fact]
     public void Evidence_completion_evaluator_snapshots_caller_owned_requirements()
     {
         var requirements = new List<CompletionEvidenceRequirement>
@@ -1182,7 +1225,8 @@ public sealed class ProofBoundaryIsolationTests
         Assert.Throws<NotSupportedException>(() => list.Add(addedValue));
     }
 
-    private sealed class StaticPlanner(WorkflowPlan plan) : IWorkflowPlanner
+    private sealed class StaticPlanner(WorkflowPlan plan,
+        Action<PlanningRequest>? inspect = null) : IWorkflowPlanner
     {
         public int CreatePlanCount { get; private set; }
 
@@ -1191,6 +1235,7 @@ public sealed class ProofBoundaryIsolationTests
             CancellationToken cancellationToken = default)
         {
             CreatePlanCount++;
+            inspect?.Invoke(request);
             return Task.FromResult(plan);
         }
 

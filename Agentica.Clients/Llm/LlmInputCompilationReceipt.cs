@@ -2,7 +2,8 @@ namespace Agentica.Clients.Llm;
 
 /// <summary>Host-side decision record for the bounded provider-facing planner input.
 /// Identities and dispositions stay outside ordinary JSON provider requests.</summary>
-public sealed record LlmInputDecision(string Kind, string RefId, bool Included);
+public sealed record LlmInputDecision(string Kind, string RefId, bool Included,
+    string? Representation = null);
 
 public sealed record LlmInputCompilationReceipt(
     int MaxInputCharacters,

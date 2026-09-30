@@ -37,7 +37,17 @@ internal sealed class ChatPlanningFrameProjector : IPlanningFrameProjector
                 payload,
                 Array.Empty<EvidenceRef>())
             {
-                ToolSurfaceId = request.ToolSurface?.SurfaceId
+                ToolSurfaceId = request.ToolSurface?.SurfaceId,
+                CompactPayload = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["host"] = payload["host"],
+                    ["requiredFinalArtifactKind"] = payload["requiredFinalArtifactKind"],
+                    ["requiredFinalTool"] = payload["requiredFinalTool"],
+                    ["plannerUse"] = payload["plannerUse"],
+                    ["toolGuidance"] = payload["toolGuidance"],
+                    ["representationNote"] =
+                        "Persona, chat history, and workspace remain in request context."
+                }
             }
         ];
     }

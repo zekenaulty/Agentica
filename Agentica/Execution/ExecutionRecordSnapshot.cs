@@ -379,6 +379,13 @@ internal static class ExecutionRecordSnapshot
         budget.Visit(depth);
         var payload = ToolResultNormalizer.SnapshotStructuredData(source.Payload);
         budget.Structured(payload, depth + 1);
+        IReadOnlyDictionary<string, object?>? compactPayload = null;
+        if (source.CompactPayload is not null)
+        {
+            compactPayload = ToolResultNormalizer.SnapshotStructuredData(
+                source.CompactPayload);
+            budget.Structured(compactPayload, depth + 1);
+        }
         return new PlanningFrame(
             budget.Text(source.FrameId, "planning frame id"),
             budget.Text(source.Kind, "planning frame kind"),
@@ -387,7 +394,8 @@ internal static class ExecutionRecordSnapshot
             payload,
             Evidence(source.EvidenceRefs, budget, depth + 1))
         {
-            ToolSurfaceId = budget.OptionalText(source.ToolSurfaceId, "planning frame tool-surface id")
+            ToolSurfaceId = budget.OptionalText(source.ToolSurfaceId, "planning frame tool-surface id"),
+            CompactPayload = compactPayload
         };
     }
 

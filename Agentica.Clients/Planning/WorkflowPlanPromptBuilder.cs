@@ -336,7 +336,10 @@ public static class WorkflowPlanPromptBuilder
             ["agentica.planner.omittedObservations"] = receipt.Decisions.Count(
                 item => item.Kind == "observation" && !item.Included).ToString(),
             ["agentica.planner.omittedReceipts"] = receipt.Decisions.Count(
-                item => item.Kind == "receipt" && !item.Included).ToString()
+                item => item.Kind == "receipt" && !item.Included).ToString(),
+            ["agentica.planner.compactedFrames"] = receipt.Decisions.Count(
+                item => item.Kind == "frame" &&
+                        item.Representation == "compact").ToString()
         };
         if (receipt.InputAllowanceTokens is { } allowance)
         {

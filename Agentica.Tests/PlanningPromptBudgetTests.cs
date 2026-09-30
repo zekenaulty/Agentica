@@ -67,6 +67,104 @@ public sealed class PlanningPromptBudgetTests
     }
 
     [Fact]
+    public void Host_compact_frame_preserves_recent_evidence_and_receipts_representation()
+    {
+        var frame = new PlanningFrame("frame.host", "host.current", "1",
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, object?>
+            {
+                ["currentState"] = "ready",
+                ["olderDetail"] = new string('x', 9_000)
+            },
+            [new EvidenceRef("observation", "observation_latest")])
+        {
+            CompactPayload = new Dictionary<string, object?>
+            {
+                ["currentState"] = "ready"
+            }
+        };
+        var observations = new[]
+        {
+            new Observation("observation_older", "step_older",
+                ObservationKind.ToolResult, new string('o', 1_000),
+                new Dictionary<string, object?>(), []),
+            new Observation("observation_latest", "step_latest",
+                ObservationKind.ToolResult, "The host is ready.",
+                new Dictionary<string, object?>(), [])
+        };
+        var request = new PlanningRequest(
+            new RunRequest("Choose the next action."), [], observations, [])
+        {
+            ContextFrames = [frame]
+        };
+
+        var bounded = WorkflowPlanPromptBuilder.BuildInitialPlanRequest(request,
+            new LlmPlannerOptions(InvalidJsonRepairAttempts: 0,
+                MaxInputCharacters: 12_000));
+        var receipt = Assert.IsType<LlmInputCompilationReceipt>(
+            bounded.InputCompilationReceipt);
+
+        Assert.Contains("currentState", bounded.Messages[^1].Content);
+        Assert.DoesNotContain("olderDetail", bounded.Messages[^1].Content);
+        Assert.Contains("observation_older", bounded.Messages[^1].Content);
+        Assert.Equal("compact", Assert.Single(receipt.Decisions,
+            item => item.Kind == "frame").Representation);
+        Assert.All(receipt.Decisions.Where(item => item.Kind == "observation"),
+            item => Assert.True(item.Included));
+        Assert.Equal("1", bounded.Metadata?["agentica.planner.compactedFrames"]);
+        Assert.DoesNotContain("CompactPayload", JsonSerializer.Serialize(bounded));
+    }
+
+    [Fact]
+    public void Token_window_can_select_compact_frame_while_characters_still_fit()
+    {
+        var frame = new PlanningFrame("frame.multibyte", "host.current", "1",
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, object?>
+            {
+                ["currentState"] = "ready",
+                ["olderDetail"] = new string('é', 2_000)
+            }, [])
+        {
+            CompactPayload = new Dictionary<string, object?>
+            {
+                ["currentState"] = "ready"
+            }
+        };
+        var request = new PlanningRequest(new RunRequest("Plan the next step."),
+            [], [], [])
+        {
+            ContextFrames = [frame]
+        };
+        var options = new LlmPlannerOptions(InvalidJsonRepairAttempts: 0,
+            MaxInputCharacters: 20_000);
+        var full = WorkflowPlanPromptBuilder.BuildInitialPlanRequest(request, options);
+        var compact = WorkflowPlanPromptBuilder.BuildInitialPlanRequest(
+            request with
+            {
+                ContextFrames = [frame with
+                {
+                    Payload = frame.CompactPayload!,
+                    CompactPayload = null
+                }]
+            }, options);
+        var allowance = checked((int)Utf8ByteTokenProxy.Instance.EstimateTokens(
+            compact) + 100);
+        Assert.True(full.Messages.Sum(item => item.Content.Length) < 20_000);
+        Assert.True(Utf8ByteTokenProxy.Instance.EstimateTokens(full) > allowance);
+        var budget = new LlmContextWindowBudget(allowance + 4096, 2048,
+            ReservedToolResultTokens: 1024, SafetyMarginTokens: 1024);
+
+        var bounded = WorkflowPlanPromptBuilder.BuildInitialPlanRequest(request,
+            options with { ContextWindowBudget = budget });
+
+        Assert.Equal("compact", Assert.Single(
+            bounded.InputCompilationReceipt!.Decisions,
+            item => item.Kind == "frame").Representation);
+        Assert.True(bounded.InputCompilationReceipt.EstimatedInputTokens <= allowance);
+    }
+
+    [Fact]
     public void Repair_retains_ceiling_or_fails_before_dispatch()
     {
         var request = new PlanningRequest(new RunRequest("Use a bounded tool"),
