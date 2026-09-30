@@ -14,6 +14,7 @@ public sealed class PlannerSurfacePolicyTests
     [Fact]
     public async Task Host_bound_external_tool_without_extra_grant_is_visible_and_dispatchable()
     {
+        var tool = new SuccessTool();
         var plan = new WorkflowPlan(
             "plan.bound.external", 1,
             [new PlanStep("step.bound", "external.send", ToolKind.Action,
@@ -23,7 +24,7 @@ public sealed class PlannerSurfacePolicyTests
         var catalog = ToolCatalog.Create(Registration("external.send",
             ToolEffect.ExternalSideEffect,
             exposes: [ToolDataBoundary.ExternalUntrusted],
-            requiresApproval: false));
+            requiresApproval: false, tool: tool));
         var runner = new AgenticaRunner(planner, catalog,
             new InMemoryEventSink(), new DeterministicOutcomeReporter(),
             new ExecutionPolicy(
@@ -37,12 +38,14 @@ public sealed class PlannerSurfacePolicyTests
             PlanExhaustionCompletionEvaluator.Instance);
 
         var outcome = await runner.RunAsync(new RunRequest(
-            "Use the installed external capability."));
+            "Use the installed external capability.",
+            AuthorizationScopeId: "lab.objective.001"));
 
         Assert.Equal(RunOutcomeStatus.Succeeded, outcome.Outcome.Status);
         Assert.Equal("external.send", Assert.Single(
             Assert.Single(planner.Requests).ToolDescriptors).ToolId);
         Assert.Empty(outcome.Details.GrantConsumptions);
+        Assert.Equal("lab.objective.001", tool.LastInvocation?.AuthorizationScopeId);
         Assert.Contains(outcome.Receipts.Items,
             receipt => receipt.ToolId == "external.send" &&
                        receipt.Status == ReceiptStatus.Succeeded);
@@ -94,7 +97,8 @@ public sealed class PlannerSurfacePolicyTests
         string toolId,
         ToolEffect effect,
         IReadOnlyList<ToolDataBoundary> exposes,
-        bool? requiresApproval = null) =>
+        bool? requiresApproval = null,
+        ITool? tool = null) =>
         new(
             new ToolDescriptor(
                 toolId,
@@ -105,7 +109,7 @@ public sealed class PlannerSurfacePolicyTests
                 RetrySafety: effect == ToolEffect.ReadOnly
                     ? ToolRetrySafety.Idempotent
                     : ToolRetrySafety.MutationUnsafe),
-            new SuccessTool(),
+            tool ?? new SuccessTool(),
             new ToolSecurityDeclaration(
                 effect,
                 [ToolDataBoundary.Public],
@@ -126,8 +130,11 @@ public sealed class PlannerSurfacePolicyTests
 
     private sealed class SuccessTool : ITool
     {
+        public ToolInvocation? LastInvocation { get; private set; }
+
         public Task<ToolResult> ExecuteAsync(ToolInvocation invocation, CancellationToken cancellationToken)
         {
+            LastInvocation = invocation;
             var receipt = new Receipt(
                 AgenticaIds.New("receipt"),
                 invocation.StepId,

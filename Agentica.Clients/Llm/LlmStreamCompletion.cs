@@ -19,7 +19,23 @@ internal static class LlmStreamCompletion
         }
 
         LlmResponse? completed = null;
-        onEvent(new LlmStreamEvent(LlmStreamEventKind.Started));
+        var observerHealthy = true;
+        void Report(LlmStreamEvent item)
+        {
+            if (!observerHealthy) return;
+            try
+            {
+                onEvent(item);
+            }
+            catch (Exception exception) when (ClientExceptionBoundary.IsRecoverable(exception))
+            {
+                // Telemetry is observational. A broken callback must not change provider
+                // completion or mask the provider failure; stop using it for this call.
+                observerHealthy = false;
+            }
+        }
+
+        Report(new LlmStreamEvent(LlmStreamEventKind.Started));
         try
         {
             await foreach (var item in streaming.StreamAsync(request, cancellationToken)
@@ -35,29 +51,29 @@ internal static class LlmStreamCompletion
                 }
                 else
                 {
-                    onEvent(item);
+                    Report(item);
                 }
             }
             if (completed is null) throw Incomplete("stream_incomplete");
         }
         catch (OperationCanceledException)
         {
-            onEvent(new LlmStreamEvent(LlmStreamEventKind.Cancelled));
+            Report(new LlmStreamEvent(LlmStreamEventKind.Cancelled));
             throw;
         }
         catch (LlmClientException exception)
         {
-            onEvent(new LlmStreamEvent(LlmStreamEventKind.Failed,
+            Report(new LlmStreamEvent(LlmStreamEventKind.Failed,
                 exception.ErrorClass ?? "provider_failure"));
             throw;
         }
         catch
         {
-            onEvent(new LlmStreamEvent(LlmStreamEventKind.Failed,
+            Report(new LlmStreamEvent(LlmStreamEventKind.Failed,
                 "stream_failure"));
             throw;
         }
-        onEvent(new LlmStreamEvent(LlmStreamEventKind.Completed,
+        Report(new LlmStreamEvent(LlmStreamEventKind.Completed,
             Response: completed));
         return completed;
     }

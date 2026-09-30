@@ -700,6 +700,40 @@ public sealed class AgenticaClientsTests
     }
 
     [Fact]
+    public async Task Broken_stream_observer_does_not_change_completed_plan_or_provider_failure()
+    {
+        var planJson = PlanJson("query_state", "Query", "ReadOnly");
+        var seen = new List<LlmStreamEventKind>();
+        var planner = new LlmWorkflowPlanner(
+            new ScriptedStreamingClient(planJson),
+            new LlmPlannerOptions(InvalidJsonRepairAttempts: 0),
+            item =>
+            {
+                seen.Add(item.Kind);
+                throw new InvalidOperationException("telemetry sink unavailable");
+            });
+
+        var plan = await planner.CreatePlanAsync(CreatePlanningRequest());
+
+        Assert.Single(plan.Steps);
+        Assert.Equal([LlmStreamEventKind.Started], seen);
+
+        var failing = new LlmWorkflowPlanner(
+            new ScriptedStreamingClient("", fail: true),
+            new LlmPlannerOptions(InvalidJsonRepairAttempts: 0),
+            item =>
+            {
+                if (item.Kind == LlmStreamEventKind.Failed)
+                    throw new InvalidOperationException("telemetry sink unavailable");
+            });
+        var failure = await Assert.ThrowsAsync<WorkflowPlannerException>(() =>
+            failing.CreatePlanAsync(CreatePlanningRequest()));
+
+        Assert.Equal("fixture_failure",
+            Assert.IsType<LlmClientException>(failure.InnerException).ErrorClass);
+    }
+
+    [Fact]
     public async Task Missing_gemini_api_key_produces_clear_provider_error_without_network()
     {
         var oldGeminiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");

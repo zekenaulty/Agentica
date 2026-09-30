@@ -1202,7 +1202,8 @@ public sealed class AgenticaRunner
                 run.RunId,
                 step.StepId,
                 step.ToolId,
-                dispatchInput);
+                dispatchInput,
+                run.Request.AuthorizationScopeId);
             if (consumedGrant is not null && consumedGrant.ExpiresAt <= DateTimeOffset.UtcNow)
             {
                 var refusal = CreateSecurityRefusal(

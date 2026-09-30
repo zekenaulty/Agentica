@@ -2,7 +2,7 @@
 
 These slices add a host-bound MCP client tool, streamed Gemini Developer API, OpenAI Responses, Anthropic Messages, and xAI Grok Responses clients, and native Ollama streaming. Agentica's runtime stays independent of provider and MCP SDK types.
 
-The planner's provider-neutral stream observer now receives `Started` before network enumeration, live activity/text/summary deltas, and one terminal completion, failure, or cancellation signal. Lab measures from call start, so first-output timing includes connection and provider wait time. A failed or cancelled stream remains a failed planner call even if earlier deltas were shown. Provider-native signatures, encrypted reasoning, and raw Ollama thinking remain outside generic stream events.
+The planner's provider-neutral stream observer now receives `Started` before network enumeration, live activity/text/summary deltas, and one terminal completion, failure, or cancellation signal while the observer is healthy. A recoverable observer exception disables that observer for the call without changing the provider result. Lab measures from call start, so first-output timing includes connection and provider wait time. A failed or cancelled stream remains a failed planner call even if earlier deltas were shown. Provider-native signatures, encrypted reasoning, and raw Ollama thinking remain outside generic stream events.
 
 ## Streamed Gemini planning
 
