@@ -34,12 +34,14 @@ public static class WorkflowPlanPromptBuilder
         PlanningRequest request,
         LlmPlannerOptions options)
     {
+        var compiled = PlanningPromptCompiler.Compile(request,
+            EffectivePlanningCeiling(options), SystemInstruction, BuildInitialPrompt);
         return new LlmRequest(
             ModelId: options.ModelId,
             Messages:
             [
                 new LlmMessage(LlmMessageRole.System, SystemInstruction),
-                new LlmMessage(LlmMessageRole.User, BuildInitialPrompt(request))
+                new LlmMessage(LlmMessageRole.User, compiled.Prompt)
             ],
             GenerationOptions: options.GenerationOptions,
             StructuredOutput: new LlmStructuredOutputOptions(
@@ -47,7 +49,11 @@ public static class WorkflowPlanPromptBuilder
             Metadata: CreateRequestMetadata(
                 InitialPromptVersion,
                 InitialSchemaVersion,
-                InitialRequestKind));
+                InitialRequestKind,
+                compiled.Receipt))
+        {
+            InputCompilationReceipt = compiled.Receipt
+        };
     }
 
     public static LlmRequest BuildRefinementRequest(
@@ -55,12 +61,15 @@ public static class WorkflowPlanPromptBuilder
         Observation observation,
         LlmPlannerOptions options)
     {
+        var compiled = PlanningPromptCompiler.Compile(request,
+            EffectivePlanningCeiling(options), SystemInstruction,
+            value => BuildRefinementPrompt(value, observation));
         return new LlmRequest(
             ModelId: options.ModelId,
             Messages:
             [
                 new LlmMessage(LlmMessageRole.System, SystemInstruction),
-                new LlmMessage(LlmMessageRole.User, BuildRefinementPrompt(request, observation))
+                new LlmMessage(LlmMessageRole.User, compiled.Prompt)
             ],
             GenerationOptions: options.GenerationOptions,
             StructuredOutput: new LlmStructuredOutputOptions(
@@ -68,7 +77,11 @@ public static class WorkflowPlanPromptBuilder
             Metadata: CreateRequestMetadata(
                 RefinementPromptVersion,
                 RefinementSchemaVersion,
-                RefinementRequestKind));
+                RefinementRequestKind,
+                compiled.Receipt))
+        {
+            InputCompilationReceipt = compiled.Receipt
+        };
     }
 
     public static LlmRequest BuildInitialPlanRepairRequest(
@@ -306,13 +319,33 @@ public static class WorkflowPlanPromptBuilder
     private static IReadOnlyDictionary<string, string> CreateRequestMetadata(
         string promptVersion,
         string schemaVersion,
-        string requestKind) =>
+        string requestKind,
+        LlmInputCompilationReceipt receipt) =>
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [PromptVersionMetadataKey] = promptVersion,
             [SchemaVersionMetadataKey] = schemaVersion,
-            [RequestKindMetadataKey] = requestKind
+            [RequestKindMetadataKey] = requestKind,
+            ["agentica.planner.inputSha256"] = receipt.InputSha256,
+            ["agentica.planner.inputCharacters"] = receipt.InputCharacters.ToString(),
+            ["agentica.planner.omittedObservations"] = receipt.Decisions.Count(
+                item => item.Kind == "observation" && !item.Included).ToString(),
+            ["agentica.planner.omittedReceipts"] = receipt.Decisions.Count(
+                item => item.Kind == "receipt" && !item.Included).ToString()
         };
+
+    private static int EffectivePlanningCeiling(LlmPlannerOptions options)
+    {
+        if (options.MaxInputCharacters < 8192 || options.MaxRepairPayloadCharacters < 0)
+            throw new LlmPlannerException("Planner input and repair ceilings are invalid.");
+        var reserve = options.InvalidJsonRepairAttempts > 0
+            ? (long)options.MaxRepairPayloadCharacters * 2 + 2048
+            : 0;
+        if (options.MaxInputCharacters - reserve < 8192)
+            throw new LlmPlannerException(
+                "Planner input ceiling cannot preserve mandatory context and repair reserve.");
+        return (int)(options.MaxInputCharacters - reserve);
+    }
 
     private static LlmRequest BuildRepairRequest(
         LlmRequest originalRequest,
@@ -363,6 +396,9 @@ public static class WorkflowPlanPromptBuilder
                 repairMessage
             ]))
             .ToArray();
+        if (messages.Sum(message => (long)message.Content.Length) > options.MaxInputCharacters)
+            throw new LlmPlannerException(
+                "Planner repair context exceeds the configured input ceiling.");
 
         var metadata = originalRequest.Metadata?.ToDictionary(
                 pair => pair.Key,
@@ -381,7 +417,12 @@ public static class WorkflowPlanPromptBuilder
 
     private static string TruncateForRepair(string value, int maxCharacters)
     {
-        if (maxCharacters <= 0 || value.Length <= maxCharacters)
+        if (maxCharacters == 0)
+        {
+            return "...[truncated]";
+        }
+
+        if (value.Length <= maxCharacters)
         {
             return value;
         }

@@ -84,12 +84,20 @@ Lab `run` and `chat` accept `--planner ollama` with `--model <installed-model>` 
 
 The host's deliberate installation of a tool into an active execution surface is a standing, scoped grant for that capability. Agentica no longer infers an extra one-shot approval from `ExternalSideEffect` alone. An installed declaration may still explicitly require a per-invocation grant; effect policy, schema validation, manifest identity, and host resource fences continue to constrain dispatch. Mere MCP discovery does not install a tool. The originating objective and valid delegated descendants supply purpose; installation alone does not authorize an unrelated objective. See `host-binding-authority.md` for the bounded-context contract and current implementation gap.
 
+## Bounded planning input
+
+The workflow planner now compiles each provider-facing initial or refinement request under `LlmPlannerOptions.MaxInputCharacters` (default 131,072 characters). It keeps the objective, host request context, projected frames, planning constraints, tool catalog, and newest observation and receipt. If the assembled input exceeds the ceiling, it removes older observations and receipts, larger oldest entry first. Each original evidence item gets an include/omit decision in an in-memory compilation receipt, alongside the exact input character count and SHA-256. The request metadata includes the hash and omission counts without copying omitted content. When mandatory material cannot fit, compilation fails before provider dispatch. Repair turns reserve room for quoted invalid output and fail if their assembled messages still exceed the ceiling.
+
+This is an exact character guard, not a provider token count. It does not yet choose representation depth for frame entries or reserve a model-specific token budget for output, reasoning, tool results, and safety margin. Hosts can set a lower ceiling through planner options. Provider-native continuation has a separate size/lifecycle concern.
+
+The source review informing this boundary used the [Domain of Domains architectural thesis](https://docs.google.com/document/d/1_QI28ViQ0MFmf0HLvCNTfZOmmTbzuH9EXuZZhYrfEq4), [Domain Context Allocation](https://docs.google.com/document/d/1dS1dq_C5a4vVy2GukkokSJh1mGPE2HaIyMjv0DcgOOE), [Nyx cognition loops](https://docs.google.com/document/d/1gFNO5HjeNbx4TH2k10aywJm1UsK5Z8X57syl4LDgGbw), and [Nyx provider trace decision](https://docs.google.com/document/d/1_TDRUkvg1hv-tKf4xVo4fOl_rT1vs3NOhXY7Sai3EWs). Semantic scope and authority stay separate; native provider thought/signature records remain private continuation data, while normalized stream activity can be shown live.
+
 ## Next contracts
 
 - Add bounded persistence and lifecycle disposal for provider-native continuations. Gemini, OpenAI, Anthropic, and xAI continuation cover bounded thought/reasoning and text output; provider tool steps and unknown deltas require separate native handling.
 - Add a provider-neutral stream event contract for time-to-first-token, token usage, tool-call phases, and terminal/unknown outcomes; keep provider-specific payloads behind adapters.
-- Add context-window budgeting at frame compilation: reserve output and safety margin, then account for mandatory layers and candidate selection with omission receipts.
+- Add provider token-aware frame compilation: reserve output, reasoning, tool-result and safety capacity, then select representation depth for optional frame entries with omission/degradation receipts.
 - Expand MCP transport authentication beyond host bearer tokens, safe result types, and integration testing against a live local MCP server. Verify mutation effects with a real host-specific acceptance predicate.
 - Extend Ollama with native continuation if the transcript model can preserve every required provider field. Run live OpenAI, Anthropic, and xAI smoke calls when credentials are provided.
 
-The user has supplied the Bounded Context Envelope and Host/Application Authority synthesis directly. The referenced original Google Domain of Domains thesis and Nyx cognition-loop source still need direct review before their additional claims become core contracts.
+The user supplied the Bounded Context Envelope and Host/Application Authority synthesis directly; the four linked Google source documents were also reviewed for the contracts above.

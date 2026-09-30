@@ -8,4 +8,8 @@ public sealed record LlmRequest(
     LlmGenerationOptions? GenerationOptions = null,
     LlmStructuredOutputOptions? StructuredOutput = null,
     IReadOnlyDictionary<string, string>? Metadata = null,
-    [property: JsonIgnore] LlmNativeContinuation? NativeContinuation = null);
+    [property: JsonIgnore] LlmNativeContinuation? NativeContinuation = null)
+{
+    [JsonIgnore]
+    public LlmInputCompilationReceipt? InputCompilationReceipt { get; init; }
+}

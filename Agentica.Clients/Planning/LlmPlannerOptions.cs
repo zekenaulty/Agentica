@@ -8,9 +8,11 @@ public sealed record LlmPlannerOptions(
     LlmGenerationOptions? GenerationOptions = null,
     int InvalidJsonRepairAttempts = 2,
     int MaxRepairPayloadCharacters = 8000,
-    bool StatelessRepair = false)
+    bool StatelessRepair = false,
+    int MaxInputCharacters = 131_072)
 {
     public const int DefaultMaxOutputTokens = 12_288;
+    public const int DefaultMaxInputCharacters = 131_072;
 
     public static LlmPlannerOptions Default { get; } =
         new(GenerationOptions: new LlmGenerationOptions(Temperature: 0, MaxOutputTokens: DefaultMaxOutputTokens));
