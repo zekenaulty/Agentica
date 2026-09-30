@@ -1,5 +1,6 @@
 internal enum PlannerKind
 {
     Deterministic,
-    Gemini
+    Gemini,
+    Ollama
 }

@@ -28,12 +28,20 @@ Run `Agentica.Lab mcp-inspect <endpoint> <server-id>` to list remote tool names,
 
 The first SDK transport uses unauthenticated Streamable HTTP. Result content currently accepts text blocks and optional structured JSON, with a 65,536-character limit per channel. Unsupported binary/image/resource blocks fail. The receipt carries server/tool/schema identities, a content digest, and success/error status. The observation carries the remote result as untrusted data. The MCP server's actual behavior must still be checked by the host; this adapter cannot prove that a remote operation is read-only.
 
+## Native Ollama streaming
+
+Lab `run` and `chat` accept `--planner ollama` with `--model <installed-model>` or `OLLAMA_MODEL`. `AGENTICA_OLLAMA_ENDPOINT` may set the full `/api/chat` URL; otherwise `OLLAMA_HOST` or local loopback is used. The native adapter consumes Ollama's streamed newline-delimited JSON, reports live output and thinking activity, and waits for a terminal `done` record before accepting a response. Raw `message.thinking` stays out of planner text and receipts. Ollama does not supply a portable signed thought continuation in this protocol, so native assistant/tool history and numeric thinking budgets are rejected rather than silently flattened.
+
+## Host binding and authority
+
+The host's deliberate installation of a tool into an active execution surface is a standing, scoped grant for that capability. Agentica no longer infers an extra one-shot approval from `ExternalSideEffect` alone. An installed declaration may still explicitly require a per-invocation grant; effect policy, schema validation, manifest identity, and host resource fences continue to constrain dispatch. Mere MCP discovery does not install a tool. The originating objective and valid delegated descendants supply purpose; installation alone does not authorize an unrelated objective. See `host-binding-authority.md` for the bounded-context contract and current implementation gap.
+
 ## Next contracts
 
 - Preserve provider-native continuation artifacts, including Gemini thought signatures, OpenAI encrypted reasoning, Anthropic signatures, and xAI reasoning items, without exposing opaque internals in generic narration.
 - Add a provider-neutral stream event contract for time-to-first-token, token usage, tool-call phases, and terminal/unknown outcomes; keep provider-specific payloads behind adapters.
 - Add context-window budgeting at frame compilation: reserve output and safety margin, then account for mandatory layers and candidate selection with omission receipts.
 - Expand MCP transport authentication, safe result types, explicit mutation authorization, and integration testing against a live local MCP server.
-- Add OpenAI, Anthropic, xAI Grok, and Ollama adapters using the same bounded streaming contract and provider-specific continuation tests.
+- Add OpenAI, Anthropic, and xAI Grok adapters using the same bounded streaming contract and provider-specific continuation tests; extend Ollama with native continuation if the transcript model can preserve every required provider field.
 
-The Google Domain of Domains thesis and Nyx cognition-loop source must be read directly before turning their design into core contracts. Local summaries suggest keeping semantic domain scope separate from authorization and treating thought-test conclusions as evidence rather than authority.
+The user has supplied the Bounded Context Envelope and Host/Application Authority synthesis directly. The referenced original Google Domain of Domains thesis and Nyx cognition-loop source still need direct review before their additional claims become core contracts.

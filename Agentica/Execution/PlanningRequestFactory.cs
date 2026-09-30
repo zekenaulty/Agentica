@@ -131,8 +131,7 @@ internal sealed class PlanningRequestFactory
         DateTimeOffset now)
     {
         var security = registration.Security;
-        var requiresGrant = security.Effect == ToolEffect.ExternalSideEffect ||
-            security.ApprovalRequirement != ToolApprovalRequirement.None;
+        var requiresGrant = security.ApprovalRequirement != ToolApprovalRequirement.None;
         if (!requiresGrant)
         {
             return true;

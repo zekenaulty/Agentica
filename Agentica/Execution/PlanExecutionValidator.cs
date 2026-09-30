@@ -425,8 +425,7 @@ internal sealed class PlanExecutionValidator
 
             var hasIncompleteDependencies = step.DependsOn.Any(
                 dependency => !completedStepIdSet.Contains(dependency));
-            if ((security.Effect == ToolEffect.ExternalSideEffect ||
-                 security.ApprovalRequirement != ToolApprovalRequirement.None) &&
+            if (security.ApprovalRequirement != ToolApprovalRequirement.None &&
                 !validationWork.TryConsume(
                     issues,
                     GrantEvaluationWorkUnits(

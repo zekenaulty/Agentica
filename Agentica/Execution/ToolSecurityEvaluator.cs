@@ -35,8 +35,7 @@ internal static class ToolSecurityEvaluator
         string? operationalInputDigest = null)
     {
         var security = registration.Security;
-        var requiresGrant = security.Effect == ToolEffect.ExternalSideEffect ||
-            security.ApprovalRequirement != ToolApprovalRequirement.None;
+        var requiresGrant = security.ApprovalRequirement != ToolApprovalRequirement.None;
         if (!requiresGrant)
         {
             return ToolGrantEvaluation.Allow;
@@ -146,8 +145,7 @@ internal static class ToolSecurityEvaluator
         IReadOnlySet<string>? reservedGrantIds = null)
     {
         var security = registration.Security;
-        var requiresGrant = security.Effect == ToolEffect.ExternalSideEffect ||
-            security.ApprovalRequirement != ToolApprovalRequirement.None;
+        var requiresGrant = security.ApprovalRequirement != ToolApprovalRequirement.None;
         if (!requiresGrant)
         {
             return ToolGrantEvaluation.Allow;

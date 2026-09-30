@@ -1,4 +1,8 @@
 using Agentica.Execution;
+using Agentica.Clients.Gemini;
+using Agentica.Clients.Images;
+using Agentica.Clients.Llm;
+using Agentica.Clients.Ollama;
 using Agentica.Lab.Configuration;
 using Agentica.Outcomes;
 using Agentica.Planning;
@@ -48,6 +52,12 @@ internal static class ChatCommand
         if (selectedPlanner == PlannerKind.Gemini && !services.GeminiCredentialsAvailable())
         {
             Console.Error.WriteLine("Gemini planner requested, but no Gemini API key was configured. Set GEMINI_API_KEY or GOOGLE_API_KEY.");
+            return 2;
+        }
+        if (selectedPlanner == PlannerKind.Ollama &&
+            string.IsNullOrWhiteSpace(options.ModelId ?? Environment.GetEnvironmentVariable("OLLAMA_MODEL")))
+        {
+            Console.Error.WriteLine("Ollama planner requires --model or OLLAMA_MODEL.");
             return 2;
         }
 
@@ -140,10 +150,16 @@ internal static class ChatCommand
         var planner = CreatePlanner(selectedPlanner, options, services);
         await using var mcp = await McpLabRuntime.OpenFromEnvironmentAsync(cancellationToken)
             .ConfigureAwait(false);
+        ILlmClient promptComposer = selectedPlanner == PlannerKind.Ollama
+            ? new OllamaLlmClient(OllamaClientOptions.FromEnvironment(
+                options.ModelId ?? Environment.GetEnvironmentVariable("OLLAMA_MODEL")))
+            : new GeminiLlmClient();
         var runner = new AgenticaRunner(
             planner,
             ChatTools.CreateCatalog(store, conversation, persona,
-                conversation.WorkspaceRoot, mcp?.Registrations),
+                conversation.WorkspaceRoot,
+                new ChatToolDependencies(promptComposer, new GeminiImageGenerationClient()),
+                mcp?.Registrations),
             eventSink,
             new ChatOutcomeReporter(),
             policy: new ExecutionPolicy(
@@ -192,7 +208,7 @@ internal static class ChatCommand
             ToolDataBoundary.ConversationContent,
             ToolDataBoundary.HostState
         ];
-        return selectedPlanner == PlannerKind.Gemini
+        return selectedPlanner != PlannerKind.Deterministic
             ? new ToolSecurityPolicy(
                 InitialBoundaries: initialBoundaries,
                 ExternalPlannerAllowedBoundaries:
@@ -217,7 +233,7 @@ internal static class ChatCommand
 
         return services.CreatePlanner(new CliRunOptions(
             Objective: "chat",
-            Planner: PlannerKind.Gemini,
+            Planner: selectedPlanner,
             ModelId: options.ModelId,
             ThinkingBudget: options.ThinkingBudget,
             IncludeThoughts: options.IncludeThoughts,
@@ -620,7 +636,7 @@ internal static class ChatCommand
     private static void PrintUsage()
     {
         Console.Error.WriteLine("Usage:");
-        Console.Error.WriteLine("  Agentica.Lab chat [message] [--planner deterministic|gemini] [--persona agentica|bookforge|mara|nanda|nyx|plain|thal] [--conversation <id>] [--new] [--app-home <path>] [--workspace <path>] [--db <path>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--include-thoughts] [--verbose-events]");
+        Console.Error.WriteLine("  Agentica.Lab chat [message] [--planner deterministic|gemini|ollama] [--persona agentica|bookforge|mara|nanda|nyx|plain|thal] [--conversation <id>] [--new] [--app-home <path>] [--workspace <path>] [--db <path>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--include-thoughts] [--verbose-events]");
         Console.Error.WriteLine("  Agentica.Lab chat --personas");
     }
 

@@ -507,6 +507,42 @@ public sealed class ToolSecurityManifestTests
     }
 
     [Fact]
+    public async Task InstalledExternalToolWithoutExplicitGrantRequirementCanAct()
+    {
+        var tool = new CountingTool();
+        var registration = new ToolRegistration(
+            new ToolDescriptor(
+                "external.bound", "Bound external tool", ToolKind.Action,
+                ToolEffect.ExternalSideEffect,
+                RequiresApproval: false,
+                RetrySafety: ToolRetrySafety.MutationUnsafe),
+            tool,
+            new ToolSecurityDeclaration(
+                ToolEffect.ExternalSideEffect,
+                [ToolDataBoundary.WorkspaceContent],
+                [ToolDataBoundary.ExternalUntrusted],
+                ToolExternalOutputClassification.UntrustedStructuredData,
+                ToolApprovalRequirement.None,
+                ToolRetrySafety.MutationUnsafe,
+                BuiltInProvenance()));
+        var catalog = ToolCatalog.Create(registration);
+        var plan = OneStepPlan("external.bound", ToolKind.Action,
+            ToolEffect.ExternalSideEffect);
+        var runner = CreateRunner(new StaticPlanner(plan), catalog,
+            SensitivePolicy([]), new InMemoryEventSink());
+
+        Assert.DoesNotContain(runner.ValidatePlan(plan, TestAuthorizationScopeId),
+            issue => issue.Code == "tool.security.grant_required");
+        var outcome = await runner.RunAsync(new RunRequest(
+            "Use the installed external capability.",
+            AuthorizationScopeId: TestAuthorizationScopeId));
+
+        Assert.Equal(RunOutcomeStatus.Succeeded, outcome.Outcome.Status);
+        Assert.Equal(1, tool.Calls);
+        Assert.Empty(outcome.Details.GrantConsumptions);
+    }
+
+    [Fact]
     public void PublicPlanValidationNeverInfersAnAuthorizationScope()
     {
         var catalog = ToolCatalog.Create(ExternalRegistration(new CountingTool()));

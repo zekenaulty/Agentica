@@ -32,9 +32,9 @@ internal static class GeminiTransportSelection
 
 }
 
-internal sealed class GeminiStreamTelemetryReporter
+internal sealed class StreamTelemetryReporter(string provider)
 {
-    private readonly System.Diagnostics.Stopwatch _clock = new();
+    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
     private int _outputCharacters;
     private bool _firstOutputSeen;
 
@@ -49,7 +49,7 @@ internal sealed class GeminiStreamTelemetryReporter
                     _outputCharacters = 0;
                     _firstOutputSeen = false;
                 }
-                Console.Error.WriteLine($"[gemini] {item.Text}");
+                Console.Error.WriteLine($"[{provider}] {item.Text}");
                 break;
             case LlmStreamEventKind.TextDelta:
                 _outputCharacters += item.Text?.Length ?? 0;
@@ -57,22 +57,22 @@ internal sealed class GeminiStreamTelemetryReporter
                 {
                     _firstOutputSeen = true;
                     Console.Error.WriteLine(
-                        $"[gemini] first output at {_clock.ElapsedMilliseconds} ms");
+                        $"[{provider}] first output at {_clock.ElapsedMilliseconds} ms");
                 }
                 else if (_outputCharacters / 512 !=
                          (_outputCharacters - (item.Text?.Length ?? 0)) / 512)
                 {
                     Console.Error.WriteLine(
-                        $"[gemini] streaming {_outputCharacters} planner characters; " +
+                        $"[{provider}] streaming {_outputCharacters} planner characters; " +
                         $"elapsed={_clock.ElapsedMilliseconds} ms");
                 }
                 break;
             case LlmStreamEventKind.ThoughtSummaryDelta:
-                Console.Error.WriteLine($"[gemini] thought summary: {item.Text}");
+                Console.Error.WriteLine($"[{provider}] thought summary: {item.Text}");
                 break;
             case LlmStreamEventKind.Completed:
                 Console.Error.WriteLine(
-                    $"[gemini] completed in {_clock.ElapsedMilliseconds} ms; " +
+                    $"[{provider}] completed in {_clock.ElapsedMilliseconds} ms; " +
                     $"plannerChars={_outputCharacters}; " +
                     $"input={item.Response?.Usage?.PromptTokens?.ToString() ?? "unknown"}; " +
                     $"output={item.Response?.Usage?.OutputTokens?.ToString() ?? "unknown"}; " +
