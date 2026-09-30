@@ -14,8 +14,7 @@ public static class GeminiResponseMapper
             .Where(part => part.Thought == true && !string.IsNullOrWhiteSpace(part.Text))
             .Select(part => new LlmThoughtSummary(
                 Text: part.Text!,
-                Provider: GeminiLlmClient.ProviderName,
-                Signature: part.ThoughtSignature is null ? null : Convert.ToBase64String(part.ThoughtSignature)))
+                Provider: GeminiLlmClient.ProviderName))
             .ToArray();
 
         if (string.IsNullOrWhiteSpace(text))

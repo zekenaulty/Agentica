@@ -94,6 +94,171 @@ public sealed class GeminiInteractionsLlmClientTests
     }
 
     [Fact]
+    public async Task Stateless_follow_up_replays_signed_native_steps_without_serializing_them()
+    {
+        var sent = new List<string>();
+        var handler = new StubHandler(async request =>
+        {
+            sent.Add(await request.Content!.ReadAsStringAsync());
+            return sent.Count == 1
+                ? StreamResponse(
+                    """
+                    event: step.start
+                    data: {"event_type":"step.start","index":0,"step":{"type":"thought"}}
+
+                    event: step.delta
+                    data: {"event_type":"step.delta","index":0,"delta":{"type":"thought_signature","signature":"secret-signature"}}
+
+                    event: step.start
+                    data: {"event_type":"step.start","index":1,"step":{"type":"model_output"}}
+
+                    event: step.delta
+                    data: {"event_type":"step.delta","index":1,"delta":{"type":"text","text":"eight"}}
+
+                    event: interaction.completed
+                    data: {"event_type":"interaction.completed","interaction":{"id":"int_first","status":"completed","steps":[{"type":"thought","signature":"secret-signature","summary":[]},{"type":"model_output","content":[{"type":"text","text":"eight"}]}]}}
+
+                    """)
+                : StreamResponse(
+                    """
+                    event: step.start
+                    data: {"event_type":"step.start","index":0,"step":{"type":"model_output"}}
+
+                    event: step.delta
+                    data: {"event_type":"step.delta","index":0,"delta":{"type":"text","text":"four"}}
+
+                    event: interaction.completed
+                    data: {"event_type":"interaction.completed","interaction":{"id":"int_second","status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":"four"}]}]}}
+
+                    """);
+        });
+        var client = CreateClient(handler);
+        var first = await client.GenerateAsync(new LlmRequest("gemini-3.8-flash",
+            [new LlmMessage(LlmMessageRole.System, "Keep the same rules."),
+             new LlmMessage(LlmMessageRole.User, "How many paws?")]));
+        var continuation = Assert.IsType<LlmNativeContinuation>(first.NativeContinuation);
+        Assert.Equal("eight", first.Text);
+        Assert.DoesNotContain("secret-signature", JsonSerializer.Serialize(first));
+        Assert.DoesNotContain("secret-signature", continuation.ToString());
+
+        var followUp = new LlmRequest("gemini-3.8-flash",
+            [new LlmMessage(LlmMessageRole.System, "Keep the same rules."),
+             new LlmMessage(LlmMessageRole.User, "How many dogs?")],
+            NativeContinuation: continuation);
+        Assert.DoesNotContain("secret-signature", JsonSerializer.Serialize(followUp));
+        var second = await client.GenerateAsync(followUp);
+
+        Assert.Equal("four", second.Text);
+        Assert.Equal(2, sent.Count);
+        using var next = JsonDocument.Parse(sent[1]);
+        var body = next.RootElement;
+        Assert.False(body.GetProperty("store").GetBoolean());
+        var steps = body.GetProperty("input");
+        Assert.Equal(4, steps.GetArrayLength());
+        Assert.Equal("user_input", steps[0].GetProperty("type").GetString());
+        Assert.Equal("secret-signature", steps[1].GetProperty("signature").GetString());
+        Assert.Equal("model_output", steps[2].GetProperty("type").GetString());
+        Assert.Equal("How many dogs?", steps[3].GetProperty("content")[0]
+            .GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public async Task Continuation_cannot_cross_model_or_instruction_boundary()
+    {
+        var handler = new StubHandler(_ => Task.FromResult(StreamResponse(
+            """
+            event: interaction.completed
+            data: {"event_type":"interaction.completed","interaction":{"status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":"hello"}]}]}}
+
+            """)));
+        var client = CreateClient(handler);
+        var first = await client.GenerateAsync(TextRequest());
+        var continuation = Assert.IsType<LlmNativeContinuation>(first.NativeContinuation);
+        var modelChanged = new LlmRequest("other-model",
+            [new LlmMessage(LlmMessageRole.User, "next")],
+            NativeContinuation: continuation);
+        var instructionChanged = new LlmRequest("gemini-3.8-flash",
+            [new LlmMessage(LlmMessageRole.System, "new instruction"),
+             new LlmMessage(LlmMessageRole.User, "next")],
+            NativeContinuation: continuation);
+
+        Assert.Equal("continuation_binding_mismatch",
+            (await Assert.ThrowsAsync<LlmClientException>(() =>
+                client.GenerateAsync(modelChanged))).ErrorClass);
+        Assert.Equal("continuation_binding_mismatch",
+            (await Assert.ThrowsAsync<LlmClientException>(() =>
+                client.GenerateAsync(instructionChanged))).ErrorClass);
+        Assert.Equal(1, handler.CallCount);
+    }
+
+    [Fact]
+    public async Task Missing_terminal_signature_withholds_native_continuation()
+    {
+        var client = CreateClient(new StubHandler(_ => Task.FromResult(StreamResponse(
+            """
+            event: step.start
+            data: {"event_type":"step.start","index":0,"step":{"type":"thought"}}
+
+            event: step.delta
+            data: {"event_type":"step.delta","index":0,"delta":{"type":"thought_signature","signature":"secret-signature"}}
+
+            event: interaction.completed
+            data: {"event_type":"interaction.completed","interaction":{"status":"completed","steps":[{"type":"thought","summary":[]},{"type":"model_output","content":[{"type":"text","text":"hello"}]}]}}
+
+            """))));
+
+        var response = await client.GenerateAsync(TextRequest());
+
+        Assert.Null(response.NativeContinuation);
+        Assert.Equal("False", response.Metadata?["gemini.continuation.available"]);
+    }
+
+    [Fact]
+    public async Task Stream_steps_reconstruct_signed_continuation_when_terminal_omits_steps()
+    {
+        var client = CreateClient(new StubHandler(_ => Task.FromResult(StreamResponse(
+            """
+            event: step.start
+            data: {"event_type":"step.start","index":0,"step":{"type":"thought","summary":[]}}
+
+            event: step.delta
+            data: {"event_type":"step.delta","index":0,"delta":{"type":"thought_signature","signature":"stream-only-signature"}}
+
+            event: step.stop
+            data: {"event_type":"step.stop","index":0}
+
+            event: step.start
+            data: {"event_type":"step.start","index":1,"step":{"type":"model_output","content":[]}}
+
+            event: step.delta
+            data: {"event_type":"step.delta","index":1,"delta":{"type":"text","text":"hello"}}
+
+            event: step.stop
+            data: {"event_type":"step.stop","index":1}
+
+            event: interaction.completed
+            data: {"event_type":"interaction.completed","interaction":{"status":"completed"}}
+
+            """))));
+
+        var response = await client.GenerateAsync(TextRequest());
+
+        Assert.Equal("hello", response.Text);
+        var continuation = Assert.IsType<LlmNativeContinuation>(response.NativeContinuation);
+        Assert.Equal("True", response.Metadata?["gemini.continuation.available"]);
+        Assert.DoesNotContain("stream-only-signature", JsonSerializer.Serialize(response));
+
+        var body = GeminiInteractionsLlmClient.BuildRequestBody(new LlmRequest(
+            "gemini-3.8-flash", [new LlmMessage(LlmMessageRole.User, "next")],
+            NativeContinuation: continuation), "gemini-3.8-flash");
+        using var sent = JsonDocument.Parse(JsonSerializer.Serialize(body));
+        Assert.Equal("stream-only-signature", sent.RootElement.GetProperty("input")[1]
+            .GetProperty("signature").GetString());
+        Assert.Equal("hello", sent.RootElement.GetProperty("input")[2]
+            .GetProperty("content")[0].GetProperty("text").GetString());
+    }
+
+    [Fact]
     public async Task Truncated_stream_cannot_become_a_successful_response()
     {
         var client = CreateClient(new StubHandler(_ => Task.FromResult(StreamResponse(

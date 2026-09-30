@@ -20,6 +20,15 @@ public sealed class GeminiLlmClient : ILlmClient
         LlmRequest request,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.NativeContinuation is not null || request.Messages.Any(message =>
+                message.Role is LlmMessageRole.Assistant or LlmMessageRole.Tool))
+        {
+            throw new LlmClientException(ProviderName,
+                "Native Gemini history requires exact provider steps; use the Interactions adapter.",
+                errorKind: LlmClientErrorKind.BadRequest,
+                errorClass: "native_history_required");
+        }
         var modelId = string.IsNullOrWhiteSpace(request.ModelId)
             ? _options.DefaultModelId
             : request.ModelId;

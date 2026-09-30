@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Agentica.Clients.Llm;
 
 public sealed record LlmRequest(
@@ -5,4 +7,5 @@ public sealed record LlmRequest(
     IReadOnlyList<LlmMessage> Messages,
     LlmGenerationOptions? GenerationOptions = null,
     LlmStructuredOutputOptions? StructuredOutput = null,
-    IReadOnlyDictionary<string, string>? Metadata = null);
+    IReadOnlyDictionary<string, string>? Metadata = null,
+    [property: JsonIgnore] LlmNativeContinuation? NativeContinuation = null);

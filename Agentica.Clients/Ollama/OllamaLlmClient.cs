@@ -201,6 +201,10 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
 
     internal static Dictionary<string, object?> BuildRequestBody(LlmRequest request, string model)
     {
+        if (request.NativeContinuation is not null)
+        {
+            throw Failure("unsupported_native_continuation", LlmClientErrorKind.BadRequest);
+        }
         if (request.Messages.Any(message =>
             message.Role is LlmMessageRole.Assistant or LlmMessageRole.Tool))
         {

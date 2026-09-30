@@ -2,6 +2,7 @@ using System.Net;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Agentica.Clients.Llm;
 
 namespace Agentica.Clients.Gemini;
@@ -110,6 +111,8 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
             var summaries = new List<LlmThoughtSummary>();
             var summaryCharacters = 0;
             var stepKinds = new Dictionary<int, string>();
+            var signedStepIndexes = new HashSet<int>();
+            var replaySteps = new Dictionary<int, GeminiReplayStep>();
             string? interactionId = null;
             string? eventName = null;
             var data = new StringBuilder();
@@ -150,7 +153,14 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
                                 var stepKind = GetString(GetObject(root, "step"), "type");
                                 if (index is not null && stepKind is not null)
                                 {
+                                    if (replaySteps.ContainsKey(index.Value))
+                                    {
+                                        throw Failure("duplicate_step_start",
+                                            LlmClientErrorKind.Transient);
+                                    }
                                     stepKinds[index.Value] = stepKind;
+                                    replaySteps[index.Value] = new GeminiReplayStep(
+                                        GetObject(root, "step"), stepKind);
                                 }
                                 if (stepKind == "function_call")
                                 {
@@ -167,10 +177,20 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
                                 var stepIndex = GetInt(root, "index");
                                 var delta = GetObject(root, "delta");
                                 var deltaKind = GetString(delta, "type");
+                                if (stepIndex is null || !replaySteps.ContainsKey(stepIndex.Value))
+                                {
+                                    throw Failure("unknown_step_delta",
+                                        LlmClientErrorKind.Transient);
+                                }
                                 var currentStep = stepIndex is not null &&
                                     stepKinds.TryGetValue(stepIndex.Value, out var found)
                                         ? found
                                         : null;
+                                if (stepIndex is not null &&
+                                    replaySteps.TryGetValue(stepIndex.Value, out var replayStep))
+                                {
+                                    replayStep.Apply(delta);
+                                }
                                 if (currentStep == "model_output" && deltaKind == "text")
                                 {
                                     var chunk = GetString(delta, "text");
@@ -207,7 +227,21 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
                                 {
                                     throw Failure("unexpected_function_call", LlmClientErrorKind.BadRequest);
                                 }
+                                else if (deltaKind == "thought_signature" && stepIndex is not null)
+                                {
+                                    signedStepIndexes.Add(stepIndex.Value);
+                                }
                                 // Opaque thought signatures are not projected into generic text or receipts.
+                                break;
+                            case "step.stop":
+                                var stoppedIndex = GetInt(root, "index");
+                                if (stoppedIndex is null ||
+                                    !replaySteps.TryGetValue(stoppedIndex.Value, out var stoppedStep))
+                                {
+                                    throw Failure("unknown_step_stop",
+                                        LlmClientErrorKind.Transient);
+                                }
+                                stoppedStep.Stop();
                                 break;
                             case "interaction.completed":
                                 if (completed)
@@ -227,6 +261,16 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
                                     ? LlmFinishReason.MaxTokens
                                     : LlmFinishReason.Stop;
                                 var usage = GetObject(interaction, "usage");
+                                var completedSteps = GetObject(interaction, "steps");
+                                if (completedSteps.ValueKind != JsonValueKind.Array)
+                                {
+                                    completedSteps = ReconstructCompletedSteps(replaySteps);
+                                }
+                                var nativeContinuation = status == "completed"
+                                    ? CreateContinuation(request, modelId,
+                                        completedSteps,
+                                        signedStepIndexes)
+                                    : null;
                                 var result = new LlmResponse(
                                     GeminiLlmClient.ProviderName,
                                     modelId,
@@ -245,8 +289,11 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
                                     {
                                         ["gemini.interaction.id"] = interactionId ?? string.Empty,
                                         ["gemini.interaction.status"] = status,
-                                        ["gemini.interaction.store"] = "false"
-                                    });
+                                        ["gemini.interaction.store"] = "false",
+                                        ["gemini.continuation.available"] =
+                                            (nativeContinuation is not null).ToString()
+                                    },
+                                    nativeContinuation);
                                 completed = true;
                                 yield return new LlmStreamEvent(
                                     LlmStreamEventKind.Completed,
@@ -314,6 +361,21 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
             throw Failure("empty_input", LlmClientErrorKind.BadRequest);
         }
 
+        object inputPayload = input;
+        if (request.NativeContinuation is { } continuation)
+        {
+            if (!string.Equals(continuation.ProviderName,
+                    GeminiLlmClient.ProviderName, StringComparison.Ordinal) ||
+                !string.Equals(continuation.ModelId, modelId, StringComparison.Ordinal) ||
+                !string.Equals(continuation.SystemInstruction, instruction,
+                    StringComparison.Ordinal) ||
+                request.Messages.Count(message => message.Role == LlmMessageRole.User) != 1)
+            {
+                throw Failure("continuation_binding_mismatch", LlmClientErrorKind.BadRequest);
+            }
+            inputPayload = AppendUserStep(continuation.HistoryStepsJson, input);
+        }
+
         var config = new Dictionary<string, object?>(StringComparer.Ordinal);
         if (request.GenerationOptions?.MaxOutputTokens is { } maxTokens)
         {
@@ -331,7 +393,7 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
         var body = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["model"] = modelId,
-            ["input"] = input,
+            ["input"] = inputPayload,
             ["stream"] = true,
             ["store"] = false
         };
@@ -373,6 +435,188 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
             body["response_format"] = format;
         }
         return body;
+    }
+
+    private static LlmNativeContinuation? CreateContinuation(
+        LlmRequest request, string modelId, JsonElement modelSteps,
+        IReadOnlySet<int> signedStepIndexes)
+    {
+        if (modelSteps.ValueKind != JsonValueKind.Array ||
+            modelSteps.GetArrayLength() == 0)
+        {
+            return null;
+        }
+        var steps = modelSteps.EnumerateArray().ToArray();
+        if (signedStepIndexes.Any(index => index < 0 || index >= steps.Length))
+        {
+            return null;
+        }
+        for (var index = 0; index < steps.Length; index++)
+        {
+            var kind = GetString(steps[index], "type");
+            if (kind == "function_call")
+            {
+                throw Failure("unsupported_native_step", LlmClientErrorKind.BadRequest);
+            }
+            if (kind is not ("thought" or "model_output") ||
+                (signedStepIndexes.Contains(index) &&
+                 string.IsNullOrWhiteSpace(GetString(steps[index], "signature"))))
+            {
+                return null;
+            }
+        }
+
+        var instruction = string.Join("\n\n", request.Messages
+            .Where(message => message.Role is LlmMessageRole.System or LlmMessageRole.Developer)
+            .Select(message => message.Content)
+            .Where(content => !string.IsNullOrWhiteSpace(content)));
+        var input = string.Join("\n\n", request.Messages
+            .Where(message => message.Role == LlmMessageRole.User)
+            .Select(message => message.Content)
+            .Where(content => !string.IsNullOrWhiteSpace(content)));
+        var history = request.NativeContinuation is { } previous
+            ? AppendUserStep(previous.HistoryStepsJson, input)
+            : AppendUserStep("[]", input);
+        foreach (var step in steps)
+        {
+            history.Add(step.Clone());
+        }
+        var payloadJson = JsonSerializer.Serialize(history);
+        return payloadJson.Length <= LlmNativeContinuation.MaxPayloadCharacters
+            ? new LlmNativeContinuation(GeminiLlmClient.ProviderName,
+                modelId, instruction, payloadJson)
+            : null;
+    }
+
+    private static List<object> AppendUserStep(string historyJson, string input)
+    {
+        using var document = JsonDocument.Parse(historyJson);
+        var history = document.RootElement.EnumerateArray()
+            .Select(step => (object)step.Clone()).ToList();
+        history.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["type"] = "user_input",
+            ["content"] = new[]
+            {
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["type"] = "text",
+                    ["text"] = input
+                }
+            }
+        });
+        if (JsonSerializer.Serialize(history).Length >
+            LlmNativeContinuation.MaxPayloadCharacters)
+        {
+            throw Failure("continuation_too_large", LlmClientErrorKind.BadRequest);
+        }
+        return history;
+    }
+
+    private static JsonElement ReconstructCompletedSteps(
+        IReadOnlyDictionary<int, GeminiReplayStep> replaySteps)
+    {
+        if (replaySteps.Count == 0 ||
+            replaySteps.Keys.OrderBy(index => index)
+                .Where((index, position) => index != position).Any() ||
+            replaySteps.Values.Any(step => !step.IsStopped || !step.IsSupported))
+        {
+            return default;
+        }
+        var steps = replaySteps.OrderBy(pair => pair.Key)
+            .Select(pair => pair.Value.Complete())
+            .ToArray();
+        return JsonSerializer.SerializeToElement(steps);
+    }
+
+    private sealed class GeminiReplayStep
+    {
+        private readonly JsonObject _step;
+        private readonly string _kind;
+        private readonly StringBuilder _text = new();
+
+        public GeminiReplayStep(JsonElement step, string kind)
+        {
+            _step = JsonNode.Parse(step.GetRawText()) as JsonObject
+                ?? throw Failure("invalid_native_step", LlmClientErrorKind.Transient);
+            _kind = kind;
+            IsSupported = kind is "thought" or "model_output";
+        }
+
+        public bool IsSupported { get; private set; }
+        public bool IsStopped { get; private set; }
+
+        public void Apply(JsonElement delta)
+        {
+            if (!IsSupported || IsStopped)
+            {
+                IsSupported = false;
+                return;
+            }
+            var type = GetString(delta, "type");
+            if (_kind == "model_output" && type == "text")
+            {
+                var text = GetString(delta, "text");
+                if (text is null || text.Length > MaxOutputCharacters - _text.Length)
+                {
+                    IsSupported = false;
+                    return;
+                }
+                _text.Append(text);
+            }
+            else if (_kind == "thought" && type == "thought_signature")
+            {
+                var signature = GetString(delta, "signature");
+                if (string.IsNullOrWhiteSpace(signature) ||
+                    signature.Length > LlmNativeContinuation.MaxPayloadCharacters)
+                {
+                    IsSupported = false;
+                    return;
+                }
+                _step["signature"] = signature;
+            }
+            else if (_kind == "thought" && type == "thought_summary")
+            {
+                var content = GetObject(delta, "content");
+                if (content.ValueKind != JsonValueKind.Object)
+                {
+                    IsSupported = false;
+                    return;
+                }
+                var summaries = _step["summary"] as JsonArray;
+                if (summaries is null)
+                {
+                    summaries = new JsonArray();
+                    _step["summary"] = summaries;
+                }
+                summaries.Add(JsonNode.Parse(content.GetRawText()));
+            }
+            else
+            {
+                IsSupported = false;
+            }
+        }
+
+        public void Stop() => IsStopped = true;
+
+        public JsonObject Complete()
+        {
+            if (_kind == "model_output")
+            {
+                var content = _step["content"] as JsonArray;
+                if (content is null)
+                {
+                    content = new JsonArray();
+                    _step["content"] = content;
+                }
+                content.Add(new JsonObject
+                {
+                    ["type"] = "text",
+                    ["text"] = _text.ToString()
+                });
+            }
+            return _step;
+        }
     }
 
     private static JsonDocument ParseEvent(string json)

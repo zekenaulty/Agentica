@@ -594,6 +594,21 @@ public sealed class AgenticaClientsTests
     }
 
     [Fact]
+    public async Task Legacy_Gemini_refuses_assistant_history_without_native_steps()
+    {
+        var client = new GeminiLlmClient(new GeminiClientOptions(ApiKey: "test-key"));
+        var request = new LlmRequest(GeminiModelId.Flash25,
+            [new LlmMessage(LlmMessageRole.User, "first"),
+             new LlmMessage(LlmMessageRole.Assistant, "prior output"),
+             new LlmMessage(LlmMessageRole.User, "next")]);
+
+        var error = await Assert.ThrowsAsync<LlmClientException>(() =>
+            client.GenerateAsync(request));
+
+        Assert.Equal("native_history_required", error.ErrorClass);
+    }
+
+    [Fact]
     public void Gemini_image_config_maps_generation_options()
     {
         var config = GeminiImageGenerationClient.CreateConfig(new ImageGenerationRequest(

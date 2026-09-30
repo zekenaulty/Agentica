@@ -6,7 +6,9 @@ This slice adds a host-approved MCP client tool and an opt-in streamed Gemini De
 
 Set `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) and `AGENTICA_GEMINI_API=interactions`, then use Lab `run` or `chat` with `--planner gemini`. The client posts to the Gemini Interactions Developer API with `store=false` and `stream=true`. The host supplies full bounded input for each independent request. Lab reports interaction activity, visible text deltas, provider supplied thought summaries when requested, and terminal token usage to stderr while the call is in progress. The planner accepts output only after a completed interaction event.
 
-This client supports one text generation at a time. It rejects native assistant/tool history because replaying Gemini thought signatures requires exact typed steps. It also rejects numeric thinking budgets and temperature until the Interactions mapping is specified and tested. Provider function calls are rejected. Raw thought signatures are never projected as ordinary text or placed in receipts. Legacy Gemini generation remains the default.
+The streaming client can return a private native continuation from complete terminal model steps or reconstruct supported thought and model-output steps from `step.start`, `step.delta`, and `step.stop` events. A follow-up request replays those steps with the next user input under the same model and system instruction while keeping `store=false`. Signed thought steps retain their signature; signatures are absent from ordinary response/request serialization, planner text, and receipts. Missing signed steps, incomplete stream steps, and unknown delta types withhold continuation. Provider function calls are rejected. Numeric thinking budgets and temperature remain unsupported. Legacy Gemini generation remains the Lab default and now refuses assistant/tool history rather than flattening it without signatures.
+
+On 2026-09-30, a live Gemini 2.5 Flash smoke call showed that `interaction.completed` omitted `steps` while streamed `thought_signature` and model-output deltas were present. After implementing step reconstruction, two consecutive Developer API calls with `store=false` both completed and produced private native continuations. Only event counts, usage, completion, and continuation availability were printed; response text and signatures were not logged. This verifies the text/thought path for that model, not function-call or multimodal replay.
 
 ## Host-approved MCP tool
 
@@ -38,7 +40,7 @@ The host's deliberate installation of a tool into an active execution surface is
 
 ## Next contracts
 
-- Preserve provider-native continuation artifacts, including Gemini thought signatures, OpenAI encrypted reasoning, Anthropic signatures, and xAI reasoning items, without exposing opaque internals in generic narration.
+- Extend the private native continuation contract to OpenAI encrypted reasoning, Anthropic signatures, and xAI reasoning items, with exact replay tests and bounded persistence. Gemini continuation currently covers thought and text model-output steps; provider tool steps and unknown deltas require separate native handling.
 - Add a provider-neutral stream event contract for time-to-first-token, token usage, tool-call phases, and terminal/unknown outcomes; keep provider-specific payloads behind adapters.
 - Add context-window budgeting at frame compilation: reserve output and safety margin, then account for mandatory layers and candidate selection with omission receipts.
 - Expand MCP transport authentication, safe result types, explicit mutation authorization, and integration testing against a live local MCP server.
