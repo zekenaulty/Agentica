@@ -1,6 +1,6 @@
 # MCP and streaming providers: first runtime slices
 
-These slices add a host-bound MCP client tool, streamed Gemini Developer API, OpenAI Responses, and Anthropic Messages clients, and native Ollama streaming. Agentica's runtime stays independent of provider and MCP SDK types.
+These slices add a host-bound MCP client tool, streamed Gemini Developer API, OpenAI Responses, Anthropic Messages, and xAI Grok Responses clients, and native Ollama streaming. Agentica's runtime stays independent of provider and MCP SDK types.
 
 ## Streamed Gemini planning
 
@@ -21,6 +21,10 @@ For a stateless follow-up, the adapter privately retains the complete native out
 Set `ANTHROPIC_API_KEY`, then use Lab `run` or `chat` with `--planner anthropic` and optionally `--model <model-id>`. The default model is `claude-sonnet-4-6`. The adapter reconstructs text, thinking, and redacted-thinking content blocks from SSE, reporting text and provider-supplied thinking summaries as they arrive. It accepts output only after `message_stop`, complete content blocks, and an `end_turn` or `max_tokens` stop reason. A `max_tokens` result has no continuation and is identified as truncated.
 
 For a follow-up, the private continuation holds the previous user turn and complete assistant blocks, including opaque thinking signatures and redacted-thinking data. A missing signature withholds continuation. Provider tool-use blocks are rejected until their native execution cycle has a governed contract. The adapter maps dynamic thinking to adaptive mode and explicit numeric budgets to manual mode with the provider's minimum and output-limit checks. It validates JSON schema syntax but does not send Agentica's workflow schema as a provider constraint because its free-form tool-input objects exceed the provider's constrained schema subset; Agentica still validates the plan. Contract tests pass, but no Anthropic credential was available for a live provider test.
+
+## xAI Grok Responses streaming
+
+Set `XAI_API_KEY`, then use Lab `run` or `chat` with `--planner grok` and optionally `--model <model-id>`. The default model is `grok-4.7`. The adapter shares the bounded Responses SSE parser with OpenAI, but has its own endpoint, credential, provider identity, and continuation binding. It sends `store=false`, `stream=true`, and `include=["reasoning.encrypted_content"]`. The stream reports visible text and timing; raw reasoning text is represented only by a non-content activity event. The native output array, including encrypted reasoning, is privately replayed on a same-provider follow-up. Contract tests cover ciphertext replay and cross-provider rejection; no xAI credential was available for a live provider test.
 
 ## Host-approved MCP tool
 
@@ -52,10 +56,10 @@ The host's deliberate installation of a tool into an active execution surface is
 
 ## Next contracts
 
-- Extend the private native continuation contract to xAI reasoning items, with exact replay tests and bounded persistence. Gemini, OpenAI, and Anthropic continuation cover bounded thought/reasoning and text output; provider tool steps and unknown deltas require separate native handling.
+- Add bounded persistence and lifecycle disposal for provider-native continuations. Gemini, OpenAI, Anthropic, and xAI continuation cover bounded thought/reasoning and text output; provider tool steps and unknown deltas require separate native handling.
 - Add a provider-neutral stream event contract for time-to-first-token, token usage, tool-call phases, and terminal/unknown outcomes; keep provider-specific payloads behind adapters.
 - Add context-window budgeting at frame compilation: reserve output and safety margin, then account for mandatory layers and candidate selection with omission receipts.
 - Expand MCP transport authentication, safe result types, explicit mutation authorization, and integration testing against a live local MCP server.
-- Add an xAI Grok adapter using the same bounded streaming contract and provider-specific continuation tests; extend Ollama with native continuation if the transcript model can preserve every required provider field. Run live OpenAI and Anthropic smoke calls when credentials are provided.
+- Extend Ollama with native continuation if the transcript model can preserve every required provider field. Run live OpenAI, Anthropic, and xAI smoke calls when credentials are provided.
 
 The user has supplied the Bounded Context Envelope and Host/Application Authority synthesis directly. The referenced original Google Domain of Domains thesis and Nyx cognition-loop source still need direct review before their additional claims become core contracts.

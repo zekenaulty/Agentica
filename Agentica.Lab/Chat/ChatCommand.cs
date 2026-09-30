@@ -5,6 +5,7 @@ using Agentica.Clients.Llm;
 using Agentica.Clients.Ollama;
 using Agentica.Clients.OpenAI;
 using Agentica.Clients.Anthropic;
+using Agentica.Clients.Xai;
 using Agentica.Lab.Configuration;
 using Agentica.Outcomes;
 using Agentica.Planning;
@@ -72,6 +73,12 @@ internal static class ChatCommand
             string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")))
         {
             Console.Error.WriteLine("Anthropic planner requested, but no ANTHROPIC_API_KEY was configured.");
+            return 2;
+        }
+        if (selectedPlanner == PlannerKind.Grok &&
+            string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("XAI_API_KEY")))
+        {
+            Console.Error.WriteLine("Grok planner requested, but no XAI_API_KEY was configured.");
             return 2;
         }
 
@@ -173,6 +180,9 @@ internal static class ChatCommand
             : selectedPlanner == PlannerKind.Anthropic
                 ? new AnthropicMessagesLlmClient(AnthropicMessagesClientOptions.FromEnvironment(
                     options.ModelId ?? "claude-sonnet-4-6"))
+            : selectedPlanner == PlannerKind.Grok
+                ? new XaiResponsesLlmClient(XaiResponsesClientOptions.FromEnvironment(
+                    options.ModelId ?? "grok-4.7"))
             : new GeminiLlmClient();
         var runner = new AgenticaRunner(
             planner,
@@ -656,7 +666,7 @@ internal static class ChatCommand
     private static void PrintUsage()
     {
         Console.Error.WriteLine("Usage:");
-        Console.Error.WriteLine("  Agentica.Lab chat [message] [--planner deterministic|gemini|ollama|openai|anthropic] [--persona agentica|bookforge|mara|nanda|nyx|plain|thal] [--conversation <id>] [--new] [--app-home <path>] [--workspace <path>] [--db <path>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--include-thoughts] [--verbose-events]");
+        Console.Error.WriteLine("  Agentica.Lab chat [message] [--planner deterministic|gemini|ollama|openai|anthropic|grok] [--persona agentica|bookforge|mara|nanda|nyx|plain|thal] [--conversation <id>] [--new] [--app-home <path>] [--workspace <path>] [--db <path>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--include-thoughts] [--verbose-events]");
         Console.Error.WriteLine("  Agentica.Lab chat --personas");
     }
 

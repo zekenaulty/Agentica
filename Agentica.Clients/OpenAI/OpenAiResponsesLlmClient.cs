@@ -9,7 +9,7 @@ namespace Agentica.Clients.OpenAI;
 
 /// <summary>Streaming, stateless Responses API text adapter. Native output items stay in the
 /// private continuation channel; provider tool calls require a separate execution contract.</summary>
-public sealed class OpenAiResponsesLlmClient : ILlmStreamingClient
+public class OpenAiResponsesLlmClient : ILlmStreamingClient
 {
     public const string ProviderName = "openai";
     private const int MaxEventCharacters = 4_194_304;
@@ -18,12 +18,29 @@ public sealed class OpenAiResponsesLlmClient : ILlmStreamingClient
     private static readonly HttpClient SharedHttpClient = new();
     private readonly OpenAiResponsesClientOptions _options;
     private readonly HttpClient _httpClient;
+    private readonly string _providerName;
+    private readonly string _keyEnvironmentVariable;
+    private readonly bool _includeEncryptedReasoning;
+    private readonly string _metadataPrefix;
 
     public OpenAiResponsesLlmClient(
         OpenAiResponsesClientOptions? options = null, HttpClient? httpClient = null)
+        : this(options ?? OpenAiResponsesClientOptions.FromEnvironment(), httpClient,
+            ProviderName, "OPENAI_API_KEY", includeEncryptedReasoning: false)
     {
-        _options = options ?? OpenAiResponsesClientOptions.FromEnvironment();
+    }
+
+    protected OpenAiResponsesLlmClient(
+        OpenAiResponsesClientOptions options, HttpClient? httpClient,
+        string providerName, string keyEnvironmentVariable,
+        bool includeEncryptedReasoning)
+    {
+        _options = options;
         _httpClient = httpClient ?? SharedHttpClient;
+        _providerName = providerName;
+        _keyEnvironmentVariable = keyEnvironmentVariable;
+        _includeEncryptedReasoning = includeEncryptedReasoning;
+        _metadataPrefix = providerName;
     }
 
     public async Task<LlmResponse> GenerateAsync(
@@ -45,7 +62,7 @@ public sealed class OpenAiResponsesLlmClient : ILlmStreamingClient
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var key = _options.ApiKey ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+        var key = _options.ApiKey ?? Environment.GetEnvironmentVariable(_keyEnvironmentVariable);
         if (string.IsNullOrWhiteSpace(key))
         {
             throw Failure("missing_api_key", LlmClientErrorKind.Authentication);
@@ -70,15 +87,15 @@ public sealed class OpenAiResponsesLlmClient : ILlmStreamingClient
         }
         catch (HttpRequestException exception)
         {
-            throw new LlmClientException(ProviderName, "OpenAI Responses transport failed.",
+            throw new LlmClientException(_providerName, "Responses transport failed.",
                 exception, LlmClientErrorKind.Network, errorClass: "transport_failure");
         }
         using (response)
         {
             if (!response.IsSuccessStatusCode)
             {
-                throw new LlmClientException(ProviderName,
-                    $"OpenAI Responses returned HTTP {(int)response.StatusCode}.",
+                throw new LlmClientException(_providerName,
+                    $"Responses returned HTTP {(int)response.StatusCode}.",
                     errorKind: ClassifyStatus(response.StatusCode),
                     statusCode: (int)response.StatusCode, errorClass: "http_status");
             }
@@ -90,6 +107,7 @@ public sealed class OpenAiResponsesLlmClient : ILlmStreamingClient
             var summaries = new List<LlmThoughtSummary>();
             var summarySize = 0;
             var outputItems = new SortedDictionary<int, JsonElement>();
+            var reasoningActivitySent = false;
             string? eventName = null;
             var data = new StringBuilder();
             var completed = false;
@@ -137,9 +155,17 @@ public sealed class OpenAiResponsesLlmClient : ILlmStreamingClient
                                     if (summary.Length > MaxSummaryCharacters - summarySize)
                                         throw Failure("summary_too_large", LlmClientErrorKind.BadRequest);
                                     summarySize += summary.Length;
-                                    summaries.Add(new LlmThoughtSummary(summary, ProviderName));
+                                    summaries.Add(new LlmThoughtSummary(summary, _providerName));
                                     yield return new LlmStreamEvent(
                                         LlmStreamEventKind.ThoughtSummaryDelta, summary);
+                                }
+                                break;
+                            case "response.reasoning_text.delta":
+                                if (!reasoningActivitySent)
+                                {
+                                    reasoningActivitySent = true;
+                                    yield return new LlmStreamEvent(
+                                        LlmStreamEventKind.Activity, "reasoning.streaming");
                                 }
                                 break;
                             case "response.output_item.done":
@@ -174,7 +200,7 @@ public sealed class OpenAiResponsesLlmClient : ILlmStreamingClient
                                 var native = CreateContinuation(request, modelId, output);
                                 completed = true;
                                 yield return new LlmStreamEvent(LlmStreamEventKind.Completed,
-                                    Response: new LlmResponse(ProviderName, modelId, finalText,
+                                    Response: new LlmResponse(_providerName, modelId, finalText,
                                         request.StructuredOutput is null ? null : finalText,
                                         summaries.AsReadOnly(),
                                         new LlmUsage(GetInt(usage, "input_tokens"),
@@ -185,10 +211,10 @@ public sealed class OpenAiResponsesLlmClient : ILlmStreamingClient
                                         LlmFinishReason.Stop,
                                         new Dictionary<string, string>(StringComparer.Ordinal)
                                         {
-                                            ["openai.response.id"] = GetString(terminal, "id") ?? string.Empty,
-                                            ["openai.response.status"] = "completed",
-                                            ["openai.response.store"] = "false",
-                                            ["openai.continuation.available"] =
+                                            [$"{_metadataPrefix}.response.id"] = GetString(terminal, "id") ?? string.Empty,
+                                            [$"{_metadataPrefix}.response.status"] = "completed",
+                                            [$"{_metadataPrefix}.response.store"] = "false",
+                                            [$"{_metadataPrefix}.continuation.available"] =
                                                 (native is not null).ToString()
                                         }, native));
                                 break;
@@ -215,7 +241,7 @@ public sealed class OpenAiResponsesLlmClient : ILlmStreamingClient
         }
     }
 
-    internal static Dictionary<string, object?> BuildRequestBody(LlmRequest request, string modelId)
+    internal Dictionary<string, object?> BuildRequestBody(LlmRequest request, string modelId)
     {
         if (request.Messages.Any(message => message.Role is LlmMessageRole.Assistant or LlmMessageRole.Tool))
             throw Failure("native_history_required", LlmClientErrorKind.BadRequest);
@@ -233,7 +259,7 @@ public sealed class OpenAiResponsesLlmClient : ILlmStreamingClient
         var input = new List<object>();
         if (request.NativeContinuation is { } continuation)
         {
-            if (continuation.ProviderName != ProviderName || continuation.ModelId != modelId ||
+            if (continuation.ProviderName != _providerName || continuation.ModelId != modelId ||
                 continuation.SystemInstruction != instruction || userMessages.Length != 1)
                 throw Failure("continuation_binding_mismatch", LlmClientErrorKind.BadRequest);
             using var history = JsonDocument.Parse(continuation.HistoryStepsJson);
@@ -249,6 +275,8 @@ public sealed class OpenAiResponsesLlmClient : ILlmStreamingClient
             ["model"] = modelId, ["input"] = input, ["stream"] = true, ["store"] = false
         };
         if (instruction.Length > 0) body["instructions"] = instruction;
+        if (_includeEncryptedReasoning)
+            body["include"] = new[] { "reasoning.encrypted_content" };
         if (request.GenerationOptions?.MaxOutputTokens is { } maxTokens)
         {
             if (maxTokens <= 0) throw Failure("invalid_max_output_tokens", LlmClientErrorKind.BadRequest);
@@ -265,7 +293,7 @@ public sealed class OpenAiResponsesLlmClient : ILlmStreamingClient
                 try { using var _ = JsonDocument.Parse(structured.JsonSchema); }
                 catch (JsonException exception)
                 {
-                    throw new LlmClientException(ProviderName, "OpenAI schema must be valid JSON.",
+                    throw new LlmClientException(_providerName, "Responses schema must be valid JSON.",
                         exception, LlmClientErrorKind.BadRequest, errorClass: "invalid_json_schema");
                 }
             }
@@ -274,7 +302,7 @@ public sealed class OpenAiResponsesLlmClient : ILlmStreamingClient
         return body;
     }
 
-    private static string ExtractTextAndValidate(JsonElement output)
+    private string ExtractTextAndValidate(JsonElement output)
     {
         if (output.ValueKind != JsonValueKind.Array)
             throw Failure("missing_output", LlmClientErrorKind.Transient);
@@ -305,7 +333,7 @@ public sealed class OpenAiResponsesLlmClient : ILlmStreamingClient
         return text.ToString();
     }
 
-    private static LlmNativeContinuation? CreateContinuation(
+    private LlmNativeContinuation? CreateContinuation(
         LlmRequest request, string modelId, JsonElement output)
     {
         if (output.GetArrayLength() == 0) return null;
@@ -330,16 +358,16 @@ public sealed class OpenAiResponsesLlmClient : ILlmStreamingClient
         history.AddRange(output.EnumerateArray().Select(item => (object)item.Clone()));
         var json = JsonSerializer.Serialize(history);
         return json.Length <= LlmNativeContinuation.MaxPayloadCharacters
-            ? new LlmNativeContinuation(ProviderName, modelId, instruction, json)
+            ? new LlmNativeContinuation(_providerName, modelId, instruction, json)
             : null;
     }
 
-    private static JsonDocument ParseEvent(string json)
+    private JsonDocument ParseEvent(string json)
     {
         try { return JsonDocument.Parse(json); }
         catch (JsonException exception)
         {
-            throw new LlmClientException(ProviderName, "OpenAI returned malformed stream data.",
+            throw new LlmClientException(_providerName, "Responses returned malformed stream data.",
                 exception, LlmClientErrorKind.Transient, errorClass: "malformed_event");
         }
     }
@@ -364,7 +392,7 @@ public sealed class OpenAiResponsesLlmClient : ILlmStreamingClient
         >= HttpStatusCode.InternalServerError => LlmClientErrorKind.ServerError,
         _ => LlmClientErrorKind.BadRequest
     };
-    private static LlmClientException Failure(string code, LlmClientErrorKind kind) =>
-        new(ProviderName, $"OpenAI Responses failed: {code}.",
+    private LlmClientException Failure(string code, LlmClientErrorKind kind) =>
+        new(_providerName, $"Responses failed: {code}.",
             errorKind: kind, errorClass: code);
 }

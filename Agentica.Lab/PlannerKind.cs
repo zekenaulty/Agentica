@@ -4,5 +4,6 @@ internal enum PlannerKind
     Gemini,
     Ollama,
     OpenAI,
-    Anthropic
+    Anthropic,
+    Grok
 }
