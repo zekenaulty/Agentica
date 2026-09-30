@@ -91,6 +91,7 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
                 .ConfigureAwait(false);
             using var reader = new StreamReader(stream);
             var output = new StringBuilder();
+            var nativeThinking = new StringBuilder();
             var thinkingCharacters = 0;
             var thinkingStarted = false;
             var completed = false;
@@ -139,6 +140,7 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
                             throw Failure("thinking_too_large", LlmClientErrorKind.BadRequest);
                         }
                         thinkingCharacters += thinking.Length;
+                        nativeThinking.Append(thinking);
                         if (!thinkingStarted)
                         {
                             thinkingStarted = true;
@@ -169,24 +171,33 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
                         var reason = GetString(root, "done_reason");
                         var promptTokens = GetInt(root, "prompt_eval_count");
                         var outputTokens = GetInt(root, "eval_count");
+                        var finishReason = reason switch
+                        {
+                            "length" => LlmFinishReason.MaxTokens,
+                            null or "stop" => LlmFinishReason.Stop,
+                            _ => LlmFinishReason.Unknown
+                        };
+                        var continuation = finishReason == LlmFinishReason.Stop &&
+                                           output.Length > 0
+                            ? CreateContinuation(request, model, body, output.ToString(),
+                                nativeThinking.ToString())
+                            : null;
                         var result = new LlmResponse(
                             ProviderName, model, output.ToString(),
                             request.StructuredOutput is null ? null : output.ToString(),
                             Usage: new LlmUsage(promptTokens, outputTokens,
                                 TotalTokens: promptTokens + outputTokens,
                                 CachedPromptTokens: GetInt(root, "prompt_eval_cached_count")),
-                            FinishReason: reason switch
-                            {
-                                "length" => LlmFinishReason.MaxTokens,
-                                null or "stop" => LlmFinishReason.Stop,
-                                _ => LlmFinishReason.Unknown
-                            },
+                            FinishReason: finishReason,
                             Metadata: new Dictionary<string, string>(StringComparer.Ordinal)
                             {
                                 ["ollama.doneReason"] = reason ?? string.Empty,
                                 ["ollama.thinkingCharacters"] =
-                                    thinkingCharacters.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                            });
+                                    thinkingCharacters.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                ["ollama.continuation.available"] =
+                                    (continuation is not null).ToString()
+                            },
+                            NativeContinuation: continuation);
                         yield return new LlmStreamEvent(LlmStreamEventKind.Completed,
                             Response: result);
                     }
@@ -201,10 +212,6 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
 
     internal static Dictionary<string, object?> BuildRequestBody(LlmRequest request, string model)
     {
-        if (request.NativeContinuation is not null)
-        {
-            throw Failure("unsupported_native_continuation", LlmClientErrorKind.BadRequest);
-        }
         if (request.Messages.Any(message =>
             message.Role is LlmMessageRole.Assistant or LlmMessageRole.Tool))
         {
@@ -214,20 +221,45 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
         {
             throw Failure("unsupported_thinking_budget", LlmClientErrorKind.BadRequest);
         }
-        var messages = request.Messages.Select(message => new Dictionary<string, string>
-        {
-            ["role"] = message.Role switch
-            {
-                LlmMessageRole.System => "system",
-                LlmMessageRole.User => "user",
-                _ => throw Failure("unsupported_role", LlmClientErrorKind.BadRequest)
-            },
-            ["content"] = message.Content
-        }).ToArray();
-        if (!messages.Any(message => message["role"] == "user"))
+        var system = string.Join("\n\n", request.Messages
+            .Where(message => message.Role == LlmMessageRole.System)
+            .Select(message => message.Content));
+        var userMessages = request.Messages
+            .Where(message => message.Role == LlmMessageRole.User).ToArray();
+        if (userMessages.Length == 0)
         {
             throw Failure("empty_input", LlmClientErrorKind.BadRequest);
         }
+        var messages = new List<object>();
+        if (request.NativeContinuation is { } continuation)
+        {
+            if (continuation.ProviderName != ProviderName ||
+                continuation.ModelId != model ||
+                continuation.SystemInstruction != system ||
+                userMessages.Length != 1 ||
+                request.Messages.Any(message => message.Role is not
+                    (LlmMessageRole.System or LlmMessageRole.User)))
+                throw Failure("continuation_binding_mismatch", LlmClientErrorKind.BadRequest);
+            using var previous = JsonDocument.Parse(continuation.HistoryStepsJson);
+            messages.AddRange(previous.RootElement.EnumerateArray()
+                .Select(item => (object)item.Clone()));
+            messages.Add(new { role = "user", content = userMessages[0].Content });
+        }
+        else
+        {
+            messages.AddRange(request.Messages.Select(message => (object)new
+            {
+                role = message.Role switch
+                {
+                    LlmMessageRole.System => "system",
+                    LlmMessageRole.User => "user",
+                    _ => throw Failure("unsupported_role", LlmClientErrorKind.BadRequest)
+                },
+                content = message.Content
+            }));
+        }
+        if (JsonSerializer.Serialize(messages).Length > LlmNativeContinuation.MaxPayloadCharacters)
+            throw Failure("continuation_too_large", LlmClientErrorKind.BadRequest);
         var body = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["model"] = model,
@@ -285,6 +317,27 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
             body["think"] = thought.ThinkingBudgetTokens != 0;
         }
         return body;
+    }
+
+    private static LlmNativeContinuation? CreateContinuation(
+        LlmRequest request,
+        string model,
+        Dictionary<string, object?> requestBody,
+        string answer,
+        string thinking)
+    {
+        var history = JsonSerializer.SerializeToElement(requestBody["messages"]);
+        var messages = history.EnumerateArray().Select(item => (object)item.Clone()).ToList();
+        messages.Add(thinking.Length == 0
+            ? new { role = "assistant", content = answer } as object
+            : new { role = "assistant", content = answer, thinking });
+        var json = JsonSerializer.Serialize(messages);
+        if (json.Length > LlmNativeContinuation.MaxPayloadCharacters)
+            return null;
+        var system = string.Join("\n\n", request.Messages
+            .Where(message => message.Role == LlmMessageRole.System)
+            .Select(message => message.Content));
+        return new LlmNativeContinuation(ProviderName, model, system, json);
     }
 
     private static JsonElement GetObject(JsonElement element, string name) =>

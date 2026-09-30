@@ -36,6 +36,8 @@ public sealed class OllamaLlmClientTests
         Assert.Equal(7, completed.Response.Usage?.PromptTokens);
         Assert.Equal(2, completed.Response.Usage?.OutputTokens);
         Assert.Equal("13", completed.Response.Metadata?["ollama.thinkingCharacters"]);
+        Assert.NotNull(completed.Response.NativeContinuation);
+        Assert.DoesNotContain("private trace", JsonSerializer.Serialize(completed.Response));
         Assert.Contains(events, item => item.Kind == LlmStreamEventKind.Activity &&
             item.Text == "thinking.started");
         Assert.DoesNotContain(events, item => item.Text?.Contains("private trace",
@@ -50,6 +52,51 @@ public sealed class OllamaLlmClientTests
             .GetProperty("num_predict").GetInt32());
         Assert.Equal("object", body.RootElement.GetProperty("format")
             .GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public async Task Completed_native_turn_replays_private_thinking_for_same_model_only()
+    {
+        var requests = new List<string>();
+        var client = CreateClient(new StubHandler(async request =>
+        {
+            requests.Add(await request.Content!.ReadAsStringAsync());
+            return requests.Count == 1
+                ? StreamResponse("""
+                    {"message":{"thinking":"private trace"},"done":false}
+                    {"message":{"content":"four"},"done":false}
+                    {"message":{},"done":true,"done_reason":"stop"}
+
+                    """)
+                : StreamResponse("""
+                    {"message":{"content":"eight"},"done":false}
+                    {"message":{},"done":true,"done_reason":"stop"}
+
+                    """);
+        }));
+        var first = await client.GenerateAsync(Request());
+        var continuation = Assert.IsType<LlmNativeContinuation>(first.NativeContinuation);
+        Assert.DoesNotContain("private trace", continuation.ToString());
+        var followUp = Request() with
+        {
+            Messages = [new LlmMessage(LlmMessageRole.System, "Plan safely."),
+                new LlmMessage(LlmMessageRole.User, "And twice that?")],
+            NativeContinuation = continuation
+        };
+
+        var second = await client.GenerateAsync(followUp);
+
+        Assert.Equal("eight", second.Text);
+        using var request = JsonDocument.Parse(requests[1]);
+        var messages = request.RootElement.GetProperty("messages");
+        Assert.Equal(4, messages.GetArrayLength());
+        Assert.Equal("assistant", messages[2].GetProperty("role").GetString());
+        Assert.Equal("private trace", messages[2].GetProperty("thinking").GetString());
+        Assert.Equal("And twice that?", messages[3].GetProperty("content").GetString());
+        Assert.Equal("continuation_binding_mismatch",
+            (await Assert.ThrowsAsync<LlmClientException>(() =>
+                client.GenerateAsync(followUp with { ModelId = "different" }))).ErrorClass);
+        Assert.Equal(2, requests.Count);
     }
 
     [Fact]

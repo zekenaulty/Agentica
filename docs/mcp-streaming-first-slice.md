@@ -80,7 +80,7 @@ Each entry declares its local `kind`, `effect`, `reads`, `exposesToPlanner`, `ex
 
 ## Native Ollama streaming
 
-Lab `run` and `chat` accept `--planner ollama` with `--model <installed-model>` or `OLLAMA_MODEL`. `AGENTICA_OLLAMA_ENDPOINT` may set the full `/api/chat` URL; otherwise `OLLAMA_HOST` or local loopback is used. The native adapter consumes Ollama's streamed newline-delimited JSON, reports live output and thinking activity, and waits for a terminal `done` record before accepting a response. Raw `message.thinking` stays out of planner text and receipts. Ollama does not supply a portable signed thought continuation in this protocol, so native assistant/tool history and numeric thinking budgets are rejected rather than silently flattened.
+Lab `run` and `chat` accept `--planner ollama` with `--model <installed-model>` or `OLLAMA_MODEL`. `AGENTICA_OLLAMA_ENDPOINT` may set the full `/api/chat` URL; otherwise `OLLAMA_HOST` or local loopback is used. The native adapter consumes Ollama's streamed newline-delimited JSON, reports live output and thinking activity, and waits for a terminal `done` record before accepting a response. Raw `message.thinking` stays out of planner text and receipts. A completed text turn can be replayed privately as native assistant `content` plus `thinking` under the same model and system instruction; this is bounded local transcript replay, not a signed thought proof. Direct assistant/tool history and numeric thinking budgets remain rejected. Provider tool calls are not treated as a completed text plan.
 
 ## Host binding and authority
 
@@ -100,6 +100,6 @@ The source review informing this boundary used the [Domain of Domains architectu
 - Add a provider-neutral stream event contract for time-to-first-token, token usage, tool-call phases, and terminal/unknown outcomes; keep provider-specific payloads behind adapters.
 - Add provider token-aware frame compilation: reserve output, reasoning, tool-result and safety capacity, then select representation depth for optional frame entries with omission/degradation receipts.
 - Expand MCP transport authentication beyond host bearer tokens and support additional safe result types. Verify mutation effects with a real host-specific acceptance predicate and test a separately operated MCP server.
-- Extend Ollama with native continuation if the transcript model can preserve every required provider field. Run live OpenAI, Anthropic, and xAI smoke calls when credentials are provided.
+- Run live OpenAI, Anthropic, xAI, and Ollama follow-up smoke calls when credentials or a local Ollama model are available.
 
 The user supplied the Bounded Context Envelope and Host/Application Authority synthesis directly; the four linked Google source documents were also reviewed for the contracts above.
