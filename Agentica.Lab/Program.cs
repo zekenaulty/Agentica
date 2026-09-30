@@ -12,6 +12,7 @@ using Agentica.Clients.Gemini;
 using Agentica.Clients.Llm;
 using Agentica.Clients.Planning;
 using Agentica.Clients.Ollama;
+using Agentica.Clients.OpenAI;
 using Agentica.Mcp;
 using Agentica.Execution;
 using Agentica.Events;
@@ -112,6 +113,13 @@ static async Task<int> RunDefaultAsync(IReadOnlyList<string> args)
         string.IsNullOrWhiteSpace(options.ModelId ?? Environment.GetEnvironmentVariable("OLLAMA_MODEL")))
     {
         Console.Error.WriteLine("Ollama planner requires --model or OLLAMA_MODEL.");
+        return 2;
+    }
+
+    if (options.Planner == PlannerKind.OpenAI &&
+        string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OPENAI_API_KEY")))
+    {
+        Console.Error.WriteLine("OpenAI planner requested, but no OPENAI_API_KEY was configured.");
         return 2;
     }
 
@@ -257,25 +265,29 @@ static IWorkflowPlanner CreatePlanner(CliRunOptions options)
     };
 
     var isOllama = options.Planner == PlannerKind.Ollama;
-    var modelId = isOllama
-        ? options.ModelId ?? Environment.GetEnvironmentVariable("OLLAMA_MODEL")!
-        : options.ModelId ?? GeminiModelId.Flash25;
+    var isOpenAI = options.Planner == PlannerKind.OpenAI;
+    var modelId = options.ModelId ?? (isOllama
+        ? Environment.GetEnvironmentVariable("OLLAMA_MODEL")!
+        : isOpenAI ? "gpt-4.1" : GeminiModelId.Flash25);
     ILlmClient llmClient = isOllama
         ? new OllamaLlmClient(OllamaClientOptions.FromEnvironment(modelId))
-        : GeminiTransportSelection.Create(modelId);
-    var isStreaming = isOllama || GeminiTransportSelection.UseInteractions;
+        : isOpenAI
+            ? new OpenAiResponsesLlmClient(OpenAiResponsesClientOptions.FromEnvironment(modelId))
+            : GeminiTransportSelection.Create(modelId);
+    var isStreaming = isOllama || isOpenAI || GeminiTransportSelection.UseInteractions;
     return new LlmWorkflowPlanner(
         llmClient,
         new LlmPlannerOptions(
             ModelId: modelId,
             GenerationOptions: new LlmGenerationOptions(
-                Temperature: isOllama ? 0 :
+                Temperature: isOllama ? 0 : isOpenAI ? null :
                     GeminiTransportSelection.UseInteractions ? null : 0,
                 MaxOutputTokens: options.MaxOutputTokens ?? LlmPlannerOptions.DefaultMaxOutputTokens,
                 Thinking: thinkingOptions),
             StatelessRepair: isStreaming),
         onStreamEvent: isStreaming
-            ? new StreamTelemetryReporter(isOllama ? "ollama" : "gemini").Report
+            ? new StreamTelemetryReporter(isOllama ? "ollama" :
+                isOpenAI ? "openai" : "gemini").Report
             : null);
 }
 
@@ -297,8 +309,8 @@ static void PrintUsage()
 {
     Console.Error.WriteLine("Usage:");
     Console.Error.WriteLine("  Agentica.Lab mcp-inspect <endpoint> <server-id>");
-    Console.Error.WriteLine("  Agentica.Lab run \"<objective>\" [--planner deterministic|gemini|ollama] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--include-thoughts] [--log-run] [--log-dir <path>]");
-    Console.Error.WriteLine("  Agentica.Lab chat [message] [--planner deterministic|gemini|ollama] [--persona agentica|bookforge|mara|nanda|nyx|plain|thal] [--conversation <id>] [--new] [--app-home <path>] [--workspace <path>] [--db <path>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--include-thoughts] [--verbose-events]");
+    Console.Error.WriteLine("  Agentica.Lab run \"<objective>\" [--planner deterministic|gemini|ollama|openai] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--include-thoughts] [--log-run] [--log-dir <path>]");
+    Console.Error.WriteLine("  Agentica.Lab chat [message] [--planner deterministic|gemini|ollama|openai] [--persona agentica|bookforge|mara|nanda|nyx|plain|thal] [--conversation <id>] [--new] [--app-home <path>] [--workspace <path>] [--db <path>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--include-thoughts] [--verbose-events]");
     Console.Error.WriteLine("  Agentica.Lab quest list");
     Console.Error.WriteLine("  Agentica.Lab quest run <quest-id> [--planner deterministic|gemini] [--planning-mode stepwise|query-blocker|blocker|plan-only] [--max-blocked-retries <count>] [--route observe|blocked] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--include-thoughts] [--log-run] [--log-dir <path>]");
     Console.Error.WriteLine("  Agentica.Lab mazequest list");

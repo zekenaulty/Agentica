@@ -3,6 +3,7 @@ using Agentica.Clients.Gemini;
 using Agentica.Clients.Images;
 using Agentica.Clients.Llm;
 using Agentica.Clients.Ollama;
+using Agentica.Clients.OpenAI;
 using Agentica.Lab.Configuration;
 using Agentica.Outcomes;
 using Agentica.Planning;
@@ -58,6 +59,12 @@ internal static class ChatCommand
             string.IsNullOrWhiteSpace(options.ModelId ?? Environment.GetEnvironmentVariable("OLLAMA_MODEL")))
         {
             Console.Error.WriteLine("Ollama planner requires --model or OLLAMA_MODEL.");
+            return 2;
+        }
+        if (selectedPlanner == PlannerKind.OpenAI &&
+            string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OPENAI_API_KEY")))
+        {
+            Console.Error.WriteLine("OpenAI planner requested, but no OPENAI_API_KEY was configured.");
             return 2;
         }
 
@@ -153,6 +160,9 @@ internal static class ChatCommand
         ILlmClient promptComposer = selectedPlanner == PlannerKind.Ollama
             ? new OllamaLlmClient(OllamaClientOptions.FromEnvironment(
                 options.ModelId ?? Environment.GetEnvironmentVariable("OLLAMA_MODEL")))
+            : selectedPlanner == PlannerKind.OpenAI
+                ? new OpenAiResponsesLlmClient(OpenAiResponsesClientOptions.FromEnvironment(
+                    options.ModelId ?? "gpt-4.1"))
             : new GeminiLlmClient();
         var runner = new AgenticaRunner(
             planner,
@@ -636,7 +646,7 @@ internal static class ChatCommand
     private static void PrintUsage()
     {
         Console.Error.WriteLine("Usage:");
-        Console.Error.WriteLine("  Agentica.Lab chat [message] [--planner deterministic|gemini|ollama] [--persona agentica|bookforge|mara|nanda|nyx|plain|thal] [--conversation <id>] [--new] [--app-home <path>] [--workspace <path>] [--db <path>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--include-thoughts] [--verbose-events]");
+        Console.Error.WriteLine("  Agentica.Lab chat [message] [--planner deterministic|gemini|ollama|openai] [--persona agentica|bookforge|mara|nanda|nyx|plain|thal] [--conversation <id>] [--new] [--app-home <path>] [--workspace <path>] [--db <path>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--include-thoughts] [--verbose-events]");
         Console.Error.WriteLine("  Agentica.Lab chat --personas");
     }
 

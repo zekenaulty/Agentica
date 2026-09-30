@@ -5,10 +5,21 @@ namespace Agentica.Lab.Configuration;
 
 internal static class GeminiTransportSelection
 {
-    public static bool UseInteractions => string.Equals(
-        Environment.GetEnvironmentVariable("AGENTICA_GEMINI_API"),
-        "interactions",
-        StringComparison.OrdinalIgnoreCase);
+    public static bool UseInteractions
+    {
+        get
+        {
+            var selected = Environment.GetEnvironmentVariable("AGENTICA_GEMINI_API");
+            if (string.Equals(selected, "legacy", StringComparison.OrdinalIgnoreCase))
+                return false;
+            if (string.Equals(selected, "interactions", StringComparison.OrdinalIgnoreCase))
+                return true;
+            // Vertex remains on its existing SDK path unless Developer API is selected.
+            return !string.Equals(
+                Environment.GetEnvironmentVariable("GOOGLE_GENAI_USE_VERTEXAI"),
+                "true", StringComparison.OrdinalIgnoreCase);
+        }
+    }
 
     public static ILlmClient Create(string modelId)
     {

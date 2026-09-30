@@ -2,5 +2,6 @@ internal enum PlannerKind
 {
     Deterministic,
     Gemini,
-    Ollama
+    Ollama,
+    OpenAI
 }
