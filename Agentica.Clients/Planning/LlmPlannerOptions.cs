@@ -14,6 +14,11 @@ public sealed record LlmPlannerOptions(
     public const int DefaultMaxOutputTokens = 12_288;
     public const int DefaultMaxInputCharacters = 131_072;
 
+    public LlmContextWindowBudget? ContextWindowBudget { get; init; }
+
+    public ILlmInputTokenEstimator InputTokenEstimator { get; init; } =
+        Utf8ByteTokenProxy.Instance;
+
     public static LlmPlannerOptions Default { get; } =
         new(GenerationOptions: new LlmGenerationOptions(Temperature: 0, MaxOutputTokens: DefaultMaxOutputTokens));
 }

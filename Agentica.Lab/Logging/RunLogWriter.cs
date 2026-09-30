@@ -20,6 +20,7 @@ public sealed class RunLogWriter
     private static readonly HashSet<string> AllowedMetadataOptionNames = new(
         [
             "--include-thoughts",
+            "--context-window-tokens",
             "--log-dir",
             "--log-run",
             "--max-blocked-retries",

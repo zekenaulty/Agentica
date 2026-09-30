@@ -22,6 +22,8 @@ internal sealed record ChatOptions(
 {
     public int? MaxInputCharacters { get; init; }
 
+    public int? ContextWindowTokens { get; init; }
+
     public static ChatOptions Parse(IReadOnlyList<string> args)
     {
         var messageParts = new List<string>();
@@ -31,6 +33,7 @@ internal sealed record ChatOptions(
         var includeThoughts = false;
         int? maxOutputTokens = null;
         int? maxInputCharacters = null;
+        int? contextWindowTokens = null;
         var appHome = ChatPaths.DefaultAppHome();
         string? workspaceRootOverride = null;
         string? databasePathOverride = null;
@@ -121,6 +124,17 @@ internal sealed record ChatOptions(
                     maxInputCharacters = parsedMaxInput;
                     break;
 
+                case "--context-window-tokens":
+                    if (!TryReadValue(args, ref index, out var contextWindowValue) ||
+                        !int.TryParse(contextWindowValue, out var parsedWindow) ||
+                        parsedWindow <= 0)
+                    {
+                        return Invalid("Missing or invalid value for --context-window-tokens.");
+                    }
+
+                    contextWindowTokens = parsedWindow;
+                    break;
+
                 case "--include-thoughts":
                     includeThoughts = true;
                     break;
@@ -183,6 +197,9 @@ internal sealed record ChatOptions(
         }
 
         var initialMessage = string.Join(' ', messageParts).Trim();
+        if (contextWindowTokens is { } window &&
+            window <= (long)(maxOutputTokens ?? 12_288) + 4096)
+            return Invalid("Context window must exceed output, tool-result, and safety reserves.");
 
         return new ChatOptions(
             string.IsNullOrWhiteSpace(initialMessage) ? null : initialMessage,
@@ -204,7 +221,8 @@ internal sealed record ChatOptions(
             IsValid: true,
             Error: null)
         {
-            MaxInputCharacters = maxInputCharacters
+            MaxInputCharacters = maxInputCharacters,
+            ContextWindowTokens = contextWindowTokens
         };
     }
 

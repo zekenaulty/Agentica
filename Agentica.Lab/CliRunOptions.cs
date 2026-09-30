@@ -16,6 +16,8 @@ internal sealed record CliRunOptions(
 {
     public int? MaxInputCharacters { get; init; }
 
+    public int? ContextWindowTokens { get; init; }
+
     public static CliRunOptions Parse(IReadOnlyList<string> args)
     {
         var objectiveParts = new List<string>();
@@ -25,6 +27,7 @@ internal sealed record CliRunOptions(
         var includeThoughts = false;
         int? maxOutputTokens = null;
         int? maxInputCharacters = null;
+        int? contextWindowTokens = null;
         var planningMode = PlanningMode.Stepwise;
         var maxBlockedRetries = 2;
         var logRun = false;
@@ -99,6 +102,17 @@ internal sealed record CliRunOptions(
                     maxInputCharacters = parsedMaxInput;
                     break;
 
+                case "--context-window-tokens":
+                    if (!TryReadValue(args, ref index, out var contextWindowValue) ||
+                        !int.TryParse(contextWindowValue, out var parsedWindow) ||
+                        parsedWindow <= 0)
+                    {
+                        return Invalid("Missing or invalid value for --context-window-tokens.");
+                    }
+
+                    contextWindowTokens = parsedWindow;
+                    break;
+
                 case "--planning-mode":
                     if (!TryReadValue(args, ref index, out var planningModeValue))
                     {
@@ -148,6 +162,9 @@ internal sealed record CliRunOptions(
         {
             return Invalid("Objective is required.");
         }
+        if (contextWindowTokens is { } window &&
+            window <= (long)(maxOutputTokens ?? 12_288) + 4096)
+            return Invalid("Context window must exceed output, tool-result, and safety reserves.");
 
         return new CliRunOptions(
             objective,
@@ -163,7 +180,8 @@ internal sealed record CliRunOptions(
             IsValid: true,
             Error: null)
         {
-            MaxInputCharacters = maxInputCharacters
+            MaxInputCharacters = maxInputCharacters,
+            ContextWindowTokens = contextWindowTokens
         };
     }
 

@@ -8,4 +8,7 @@ public sealed record LlmInputCompilationReceipt(
     int MaxInputCharacters,
     int InputCharacters,
     string InputSha256,
-    IReadOnlyList<LlmInputDecision> Decisions);
+    IReadOnlyList<LlmInputDecision> Decisions,
+    int? InputAllowanceTokens = null,
+    long? EstimatedInputTokens = null,
+    string? TokenEstimator = null);

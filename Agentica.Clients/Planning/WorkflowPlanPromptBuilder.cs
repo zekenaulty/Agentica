@@ -35,7 +35,10 @@ public static class WorkflowPlanPromptBuilder
         LlmPlannerOptions options)
     {
         var compiled = PlanningPromptCompiler.Compile(request,
-            EffectivePlanningCeiling(options), SystemInstruction, BuildInitialPrompt);
+            EffectivePlanningCeiling(options), options,
+            SystemInstruction,
+            new LlmStructuredOutputOptions(JsonSchema: WorkflowPlanJsonSchemas.InitialPlan),
+            BuildInitialPrompt);
         return new LlmRequest(
             ModelId: options.ModelId,
             Messages:
@@ -62,7 +65,8 @@ public static class WorkflowPlanPromptBuilder
         LlmPlannerOptions options)
     {
         var compiled = PlanningPromptCompiler.Compile(request,
-            EffectivePlanningCeiling(options), SystemInstruction,
+            EffectivePlanningCeiling(options), options, SystemInstruction,
+            new LlmStructuredOutputOptions(JsonSchema: WorkflowPlanJsonSchemas.Refinement),
             value => BuildRefinementPrompt(value, observation));
         return new LlmRequest(
             ModelId: options.ModelId,
@@ -320,8 +324,9 @@ public static class WorkflowPlanPromptBuilder
         string promptVersion,
         string schemaVersion,
         string requestKind,
-        LlmInputCompilationReceipt receipt) =>
-        new Dictionary<string, string>(StringComparer.Ordinal)
+        LlmInputCompilationReceipt receipt)
+    {
+        var metadata = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [PromptVersionMetadataKey] = promptVersion,
             [SchemaVersionMetadataKey] = schemaVersion,
@@ -333,6 +338,15 @@ public static class WorkflowPlanPromptBuilder
             ["agentica.planner.omittedReceipts"] = receipt.Decisions.Count(
                 item => item.Kind == "receipt" && !item.Included).ToString()
         };
+        if (receipt.InputAllowanceTokens is { } allowance)
+        {
+            metadata["agentica.planner.inputTokenAllowance"] = allowance.ToString();
+            metadata["agentica.planner.estimatedInputTokens"] =
+                receipt.EstimatedInputTokens!.Value.ToString();
+            metadata["agentica.planner.tokenEstimator"] = receipt.TokenEstimator!;
+        }
+        return metadata;
+    }
 
     private static int EffectivePlanningCeiling(LlmPlannerOptions options)
     {
@@ -399,6 +413,10 @@ public static class WorkflowPlanPromptBuilder
         if (messages.Sum(message => (long)message.Content.Length) > options.MaxInputCharacters)
             throw new LlmPlannerException(
                 "Planner repair context exceeds the configured input ceiling.");
+        PlanningPromptCompiler.EnsureRepairFitsTokens(originalRequest with
+        {
+            Messages = messages
+        }, options);
 
         var metadata = originalRequest.Metadata?.ToDictionary(
                 pair => pair.Key,

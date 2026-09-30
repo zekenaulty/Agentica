@@ -14,12 +14,15 @@ internal static class PlanningPromptCompiler
     public static Result Compile(
         PlanningRequest request,
         int maxInputCharacters,
+        LlmPlannerOptions options,
         string instruction,
+        LlmStructuredOutputOptions structuredOutput,
         Func<PlanningRequest, string> buildPrompt)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(buildPrompt);
         ArgumentNullException.ThrowIfNull(instruction);
+        ArgumentNullException.ThrowIfNull(options);
         if (maxInputCharacters < 8192)
             throw new LlmPlannerException("Planner input ceiling must be at least 8192 characters.");
         var observations = request.Observations.ToList();
@@ -27,7 +30,11 @@ internal static class PlanningPromptCompiler
         var originalObservations = observations.ToArray();
         var originalReceipts = receipts.ToArray();
         var prompt = buildPrompt(request);
-        while ((long)instruction.Length + prompt.Length > maxInputCharacters)
+        var tokenAllowance = options.ContextWindowBudget?.InputAllowanceTokens;
+        var estimatedTokens = EstimateTokens(instruction, prompt, structuredOutput,
+            options);
+        while ((long)instruction.Length + prompt.Length > maxInputCharacters ||
+               tokenAllowance is { } allowance && estimatedTokens > allowance)
         {
             var canTrimObservation = observations.Count > 1;
             var canTrimReceipt = receipts.Count > 1;
@@ -44,6 +51,8 @@ internal static class PlanningPromptCompiler
                 Observations = observations.ToArray(),
                 Receipts = receipts.ToArray()
             });
+            estimatedTokens = EstimateTokens(instruction, prompt, structuredOutput,
+                options);
         }
 
         var omittedObservationCount = originalObservations.Length - observations.Count;
@@ -57,7 +66,41 @@ internal static class PlanningPromptCompiler
             Encoding.UTF8.GetBytes(instruction + "\n" + prompt)));
         return new Result(prompt, new LlmInputCompilationReceipt(
             maxInputCharacters, instruction.Length + prompt.Length,
-            inputHash, decisions));
+            inputHash, decisions, tokenAllowance, estimatedTokens,
+            tokenAllowance is null ? null : options.InputTokenEstimator.Name));
+    }
+
+    public static void EnsureRepairFitsTokens(
+        LlmRequest request,
+        LlmPlannerOptions options)
+    {
+        if (options.ContextWindowBudget is null) return;
+        if (options.InputTokenEstimator is null ||
+            string.IsNullOrWhiteSpace(options.InputTokenEstimator.Name))
+            throw new LlmPlannerException("Planner input token estimator is invalid.");
+        var estimate = options.InputTokenEstimator.EstimateTokens(request);
+        if (estimate < 0 || estimate > options.ContextWindowBudget.InputAllowanceTokens)
+            throw new LlmPlannerException(
+                "Planner repair context exceeds the configured token allowance.");
+    }
+
+    private static long? EstimateTokens(string instruction, string prompt,
+        LlmStructuredOutputOptions structuredOutput,
+        LlmPlannerOptions options)
+    {
+        if (options.ContextWindowBudget is null) return null;
+        if (options.InputTokenEstimator is null ||
+            string.IsNullOrWhiteSpace(options.InputTokenEstimator.Name))
+            throw new LlmPlannerException("Planner input token estimator is invalid.");
+        var estimate = options.InputTokenEstimator.EstimateTokens(new LlmRequest(
+            options.ModelId,
+            [new LlmMessage(LlmMessageRole.System, instruction),
+             new LlmMessage(LlmMessageRole.User, prompt)],
+            options.GenerationOptions,
+            structuredOutput));
+        if (estimate < 0)
+            throw new LlmPlannerException("Planner input token estimator returned a negative count.");
+        return estimate;
     }
 
     private static int SerializeLength(object value) =>
