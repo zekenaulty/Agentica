@@ -14,6 +14,8 @@ internal sealed record CliRunOptions(
     bool IsValid,
     string? Error)
 {
+    public int? MaxInputCharacters { get; init; }
+
     public static CliRunOptions Parse(IReadOnlyList<string> args)
     {
         var objectiveParts = new List<string>();
@@ -22,6 +24,7 @@ internal sealed record CliRunOptions(
         string? thinkingBudget = null;
         var includeThoughts = false;
         int? maxOutputTokens = null;
+        int? maxInputCharacters = null;
         var planningMode = PlanningMode.Stepwise;
         var maxBlockedRetries = 2;
         var logRun = false;
@@ -83,6 +86,17 @@ internal sealed record CliRunOptions(
                     }
 
                     maxOutputTokens = parsedMaxOutputTokens;
+                    break;
+
+                case "--max-input-characters":
+                    if (!TryReadValue(args, ref index, out var maxInputValue) ||
+                        !int.TryParse(maxInputValue, out var parsedMaxInput) ||
+                        parsedMaxInput < 8192)
+                    {
+                        return Invalid("Missing or invalid value for --max-input-characters (minimum 8192).");
+                    }
+
+                    maxInputCharacters = parsedMaxInput;
                     break;
 
                 case "--planning-mode":
@@ -147,7 +161,10 @@ internal sealed record CliRunOptions(
             logRun,
             logDir,
             IsValid: true,
-            Error: null);
+            Error: null)
+        {
+            MaxInputCharacters = maxInputCharacters
+        };
     }
 
     private static bool TryReadValue(IReadOnlyList<string> args, ref int index, out string value)

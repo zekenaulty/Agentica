@@ -24,6 +24,7 @@ public sealed class RunLogWriter
             "--log-run",
             "--max-blocked-retries",
             "--max-graph-mutations",
+            "--max-input-characters",
             "--max-orchestration-refinements",
             "--max-orchestration-runs",
             "--max-output-tokens",
