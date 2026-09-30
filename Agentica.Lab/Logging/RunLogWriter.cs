@@ -57,6 +57,7 @@ public sealed class RunLogWriter
     private readonly string _rootPath;
     private readonly RunLogOptions _options;
     private readonly Action<string>? _warning;
+    private readonly Func<DateTimeOffset> _utcNow;
     private bool _enabled;
     private bool _warningIssued;
 
@@ -65,6 +66,7 @@ public sealed class RunLogWriter
         string directoryPath,
         RunLogOptions options,
         Action<string>? warning,
+        Func<DateTimeOffset> utcNow,
         bool enabled,
         bool warningIssued = false)
     {
@@ -72,6 +74,7 @@ public sealed class RunLogWriter
         DirectoryPath = directoryPath;
         _options = options;
         _warning = warning;
+        _utcNow = utcNow;
         _enabled = enabled;
         _warningIssued = warningIssued;
     }
@@ -97,10 +100,11 @@ public sealed class RunLogWriter
         Func<DateTimeOffset>? utcNow = null)
     {
         var effectiveOptions = options ?? RunLogOptions.Default;
+        var clock = utcNow ?? (() => DateTimeOffset.UtcNow);
         try
         {
             ValidateOptions(effectiveOptions);
-            var now = (utcNow ?? (() => DateTimeOffset.UtcNow))();
+            var now = clock();
             var root = RunLogPathGuard.ResolveRoot(baseDirectory);
             ApplyRetention(
                 root,
@@ -128,7 +132,8 @@ public sealed class RunLogWriter
                 marker.Write(Encoding.UTF8.GetBytes(OwnershipMarkerContent));
             }
 
-            var writer = new RunLogWriter(root, directory, effectiveOptions, warning, enabled: true);
+            var writer = new RunLogWriter(root, directory, effectiveOptions,
+                warning, clock, enabled: true);
             writer.ValidateStorageBounds();
             return writer;
         }
@@ -140,6 +145,7 @@ public sealed class RunLogWriter
                 string.Empty,
                 effectiveOptions,
                 warning,
+                clock,
                 enabled: false,
                 warningIssued: true);
         }
@@ -161,7 +167,7 @@ public sealed class RunLogWriter
         {
             schemaVersion = "agentica.lab.run-metadata.v2",
             scenario = SanitizeScenario(scenario),
-            startedAt = DateTimeOffset.UtcNow,
+            startedAt = _utcNow(),
             argumentCount = args.Count,
             optionNames
         });
@@ -258,7 +264,7 @@ public sealed class RunLogWriter
             ApplyRetention(
                 _rootPath,
                 _options,
-                DateTimeOffset.UtcNow,
+                _utcNow(),
                 directoryToKeep: DirectoryPath,
                 reserveBytes: Math.Max(0, payloadBytes - replacedBytes));
             rootBytes = CalculateTreeBytes(_rootPath);

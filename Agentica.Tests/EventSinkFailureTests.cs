@@ -269,6 +269,8 @@ public sealed class EventSinkFailureTests
         Assert.Contains(
             envelope.Details.Events,
             item => item.Type == ExecutionEventType.RunSucceeded.WireName());
+        Assert.True(SpinWait.SpinUntil(() => sink.Attempts == 1,
+            TimeSpan.FromSeconds(1)), "The queued observer was never invoked.");
         Assert.Equal(1, sink.Attempts);
     }
 
