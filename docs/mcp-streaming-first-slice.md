@@ -1,6 +1,6 @@
 # MCP and streaming providers: first runtime slices
 
-These slices add a host-bound MCP client tool, streamed Gemini Developer API and OpenAI Responses clients, and native Ollama streaming. Agentica's runtime stays independent of provider and MCP SDK types.
+These slices add a host-bound MCP client tool, streamed Gemini Developer API, OpenAI Responses, and Anthropic Messages clients, and native Ollama streaming. Agentica's runtime stays independent of provider and MCP SDK types.
 
 ## Streamed Gemini planning
 
@@ -15,6 +15,12 @@ On 2026-09-30, a live Gemini 2.5 Flash smoke call showed that `interaction.compl
 Set `OPENAI_API_KEY`, then use Lab `run` or `chat` with `--planner openai` and optionally `--model <model-id>`. The default model is `gpt-4.1`; choose a reasoning-capable model when requesting thought summaries. The client posts `store=false` and `stream=true` to the Responses API. Lab reports activity, output timing/size, provider-supplied reasoning summaries when requested, and terminal usage. Only `response.completed` with `status=completed` is accepted. Truncated, failed, incomplete, refused, or unexpected native tool-call responses do not become plans.
 
 For a stateless follow-up, the adapter privately retains the complete native output array, including encrypted reasoning items, after the original user input. The follow-up replays those items with one new user message under the same provider, model, and instructions. If a reasoning item lacks `encrypted_content`, continuation is withheld. The opaque payload is excluded from ordinary request/response serialization, logs, planner text, and receipts. The adapter's JSON mode is an output hint; Agentica's planner still validates the result against its own workflow contract. Numeric thinking budgets, temperature, and native provider tool calls are not mapped by this slice. Contract tests cover replay, stream completion, and binding failures; no OpenAI credential was available for a live provider test.
+
+## Anthropic Messages streaming
+
+Set `ANTHROPIC_API_KEY`, then use Lab `run` or `chat` with `--planner anthropic` and optionally `--model <model-id>`. The default model is `claude-sonnet-4-6`. The adapter reconstructs text, thinking, and redacted-thinking content blocks from SSE, reporting text and provider-supplied thinking summaries as they arrive. It accepts output only after `message_stop`, complete content blocks, and an `end_turn` or `max_tokens` stop reason. A `max_tokens` result has no continuation and is identified as truncated.
+
+For a follow-up, the private continuation holds the previous user turn and complete assistant blocks, including opaque thinking signatures and redacted-thinking data. A missing signature withholds continuation. Provider tool-use blocks are rejected until their native execution cycle has a governed contract. The adapter maps dynamic thinking to adaptive mode and explicit numeric budgets to manual mode with the provider's minimum and output-limit checks. It validates JSON schema syntax but does not send Agentica's workflow schema as a provider constraint because its free-form tool-input objects exceed the provider's constrained schema subset; Agentica still validates the plan. Contract tests pass, but no Anthropic credential was available for a live provider test.
 
 ## Host-approved MCP tool
 
@@ -46,10 +52,10 @@ The host's deliberate installation of a tool into an active execution surface is
 
 ## Next contracts
 
-- Extend the private native continuation contract to Anthropic signatures and xAI reasoning items, with exact replay tests and bounded persistence. Gemini and OpenAI continuation currently cover bounded thought/reasoning and text output; provider tool steps and unknown deltas require separate native handling.
+- Extend the private native continuation contract to xAI reasoning items, with exact replay tests and bounded persistence. Gemini, OpenAI, and Anthropic continuation cover bounded thought/reasoning and text output; provider tool steps and unknown deltas require separate native handling.
 - Add a provider-neutral stream event contract for time-to-first-token, token usage, tool-call phases, and terminal/unknown outcomes; keep provider-specific payloads behind adapters.
 - Add context-window budgeting at frame compilation: reserve output and safety margin, then account for mandatory layers and candidate selection with omission receipts.
 - Expand MCP transport authentication, safe result types, explicit mutation authorization, and integration testing against a live local MCP server.
-- Add Anthropic and xAI Grok adapters using the same bounded streaming contract and provider-specific continuation tests; extend Ollama with native continuation if the transcript model can preserve every required provider field. Run a live OpenAI smoke when credentials are provided.
+- Add an xAI Grok adapter using the same bounded streaming contract and provider-specific continuation tests; extend Ollama with native continuation if the transcript model can preserve every required provider field. Run live OpenAI and Anthropic smoke calls when credentials are provided.
 
 The user has supplied the Bounded Context Envelope and Host/Application Authority synthesis directly. The referenced original Google Domain of Domains thesis and Nyx cognition-loop source still need direct review before their additional claims become core contracts.

@@ -48,18 +48,21 @@ internal sealed class StreamTelemetryReporter(string provider)
     private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
     private int _outputCharacters;
     private bool _firstOutputSeen;
+    private bool _inCall;
 
     public void Report(LlmStreamEvent item)
     {
+        if (!_inCall || item.Kind == LlmStreamEventKind.Activity &&
+            item.Text is "interaction.created" or "response.created" or "message_start")
+        {
+            _clock.Restart();
+            _outputCharacters = 0;
+            _firstOutputSeen = false;
+            _inCall = true;
+        }
         switch (item.Kind)
         {
             case LlmStreamEventKind.Activity:
-                if (item.Text == "interaction.created")
-                {
-                    _clock.Restart();
-                    _outputCharacters = 0;
-                    _firstOutputSeen = false;
-                }
                 Console.Error.WriteLine($"[{provider}] {item.Text}");
                 break;
             case LlmStreamEventKind.TextDelta:
@@ -89,6 +92,7 @@ internal sealed class StreamTelemetryReporter(string provider)
                     $"output={item.Response?.Usage?.OutputTokens?.ToString() ?? "unknown"}; " +
                     $"thought={item.Response?.Usage?.ThinkingTokens?.ToString() ?? "unknown"}; " +
                     $"finish={item.Response?.FinishReason}");
+                _inCall = false;
                 break;
         }
     }
