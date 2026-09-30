@@ -27,6 +27,7 @@ public sealed class TaskOrchestrator
     private readonly IWorkContextCompiler _contextCompiler;
     private readonly Func<IReadOnlyDictionary<string, object?>> _hostStateProjection;
     private readonly OrchestrationPolicy _policy;
+    private readonly IChildAuthorityDeriver? _childAuthorityDeriver;
 
     public TaskOrchestrator(
         ITaskPlanner taskPlanner,
@@ -34,7 +35,8 @@ public sealed class TaskOrchestrator
         ITaskAcceptanceEvaluator acceptanceEvaluator,
         IWorkContextCompiler contextCompiler,
         Func<IReadOnlyDictionary<string, object?>> hostStateProjection,
-        OrchestrationPolicy? policy = null)
+        OrchestrationPolicy? policy = null,
+        IChildAuthorityDeriver? childAuthorityDeriver = null)
     {
         _taskPlanner = taskPlanner;
         _runExecutor = runExecutor;
@@ -42,6 +44,7 @@ public sealed class TaskOrchestrator
         _contextCompiler = contextCompiler;
         _hostStateProjection = hostStateProjection;
         _policy = policy ?? new OrchestrationPolicy();
+        _childAuthorityDeriver = childAuthorityDeriver;
         ValidatePolicy(_policy);
     }
 
@@ -217,10 +220,92 @@ public sealed class TaskOrchestrator
                 }
 
                 state.ActiveTaskId = task.TaskId;
-                state.TaskRunCounts[task.TaskId] = RunCount(state, task.TaskId) + 1;
                 var childDispatchId = AgenticaIds.New("child_dispatch");
+                var childRunNumber = RunCount(state, task.TaskId) + 1;
+                string? childAuthorizationScopeId = null;
+                string? derivationReceiptId = null;
+                if (request.AuthorizationScopeId is not null ||
+                    _childAuthorityDeriver is not null)
+                {
+                    if (string.IsNullOrWhiteSpace(request.AuthorizationScopeId) ||
+                        _childAuthorityDeriver is null)
+                    {
+                        state.Status = OrchestrationStatus.Blocked;
+                        state.StopReason = OrchestrationStopReason.Blocked;
+                        state.ActiveTaskId = null;
+                        AddDiagnostic(diagnostics,
+                            "Scoped child work requires a parent authority scope and host child-authority deriver.");
+                        return Envelope(request, plan, state, outcomes, definitionOfDone, diagnostics);
+                    }
+
+                    ChildAuthorityResolution? derivation;
+                    try
+                    {
+                        activeBoundary = "child authority derivation";
+                        derivation = await _childAuthorityDeriver.DeriveAsync(
+                            new ChildAuthorityDerivationRequest(
+                                request.AuthorizationScopeId,
+                                request.Objective,
+                                task.TaskId,
+                                task.Objective,
+                                childDispatchId,
+                                childRunNumber,
+                                task.ContextProjection),
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception exception) when (
+                        exception is not OperationCanceledException &&
+                        RuntimeExceptionBoundary.IsRecoverable(exception))
+                    {
+                        state.Status = OrchestrationStatus.Blocked;
+                        state.StopReason = OrchestrationStopReason.Blocked;
+                        state.ActiveTaskId = null;
+                        AddDiagnostic(diagnostics,
+                            $"Child authority derivation is unavailable ({exception.GetType().Name}); the parent objective remains active.");
+                        return Envelope(request, plan, state, outcomes, definitionOfDone, diagnostics);
+                    }
+
+                    switch (derivation?.Disposition)
+                    {
+                        case ChildAuthorityDisposition.Derived when
+                            !string.IsNullOrWhiteSpace(derivation.ChildAuthorizationScopeId) &&
+                            !string.Equals(derivation.ChildAuthorizationScopeId,
+                                request.AuthorizationScopeId, StringComparison.Ordinal) &&
+                            !string.IsNullOrWhiteSpace(derivation.DerivationReceiptId):
+                            childAuthorizationScopeId = derivation.ChildAuthorizationScopeId;
+                            derivationReceiptId = derivation.DerivationReceiptId;
+                            break;
+
+                        case ChildAuthorityDisposition.OutOfScope:
+                            state.Status = OrchestrationStatus.Blocked;
+                            state.StopReason = OrchestrationStopReason.AuthorityOutOfScope;
+                            state.ActiveTaskId = null;
+                            AddDiagnostic(diagnostics,
+                                $"Child task '{task.TaskId}' is outside derived authority: {derivation.Reason ?? "host declined derivation"}.");
+                            return Envelope(request, plan, state, outcomes, definitionOfDone, diagnostics);
+
+                        case ChildAuthorityDisposition.TemporarilyUnavailable:
+                            state.Status = OrchestrationStatus.Blocked;
+                            state.StopReason = OrchestrationStopReason.Blocked;
+                            state.ActiveTaskId = null;
+                            AddDiagnostic(diagnostics,
+                                $"Child authority execution control is unavailable: {derivation.Reason ?? "retry under the parent authority"}.");
+                            return Envelope(request, plan, state, outcomes, definitionOfDone, diagnostics);
+
+                        default:
+                            state.Status = OrchestrationStatus.Failed;
+                            state.StopReason = OrchestrationStopReason.Failed;
+                            state.ActiveTaskId = null;
+                            AddDiagnostic(diagnostics,
+                                "Host child-authority derivation returned no valid distinct child scope and receipt.");
+                            return Envelope(request, plan, state, outcomes, definitionOfDone, diagnostics);
+                    }
+                }
+
+                state.TaskRunCounts[task.TaskId] = childRunNumber;
                 var runRequest = ExecutionRecordSnapshot.Request(
-                    BuildRunRequest(request, task, state, childDispatchId));
+                    BuildRunRequest(request, task, state, childDispatchId,
+                        childAuthorizationScopeId, derivationReceiptId));
                 var childOutcomeIndex = outcomes.Count;
                 var pendingChildDispatch = ChildDispatchProofUnavailable(
                     runRequest,
@@ -475,7 +560,9 @@ public sealed class TaskOrchestrator
         LargeTaskRequest request,
         TaskNode task,
         OrchestrationState state,
-        string childDispatchId)
+        string childDispatchId,
+        string? childAuthorizationScopeId,
+        string? derivationReceiptId)
     {
         var context = new Dictionary<string, object?>(request.Context, StringComparer.Ordinal);
         foreach (var pair in task.ContextProjection)
@@ -486,6 +573,8 @@ public sealed class TaskOrchestrator
         context["orchestration.id"] = state.OrchestrationId;
         context["orchestration.taskId"] = task.TaskId;
         context["orchestration.childDispatchId"] = childDispatchId;
+        if (derivationReceiptId is not null)
+            context["orchestration.authorityDerivationReceiptId"] = derivationReceiptId;
         context["orchestration.workingContext"] = state.WorkingContext;
         context["orchestration.completedTaskIds"] = state.CompletedTaskIds.ToArray();
         context["orchestration.taskRunCount"] = RunCount(state, task.TaskId);
@@ -495,7 +584,8 @@ public sealed class TaskOrchestrator
             pair => pair.Value,
             StringComparer.Ordinal);
 
-        return new RunRequest(task.Objective, request.Origin, context);
+        return new RunRequest(task.Objective, request.Origin, context,
+            childAuthorizationScopeId);
     }
 
     private static Agentica.Outcomes.OutcomeEnvelope ChildDispatchProofUnavailable(

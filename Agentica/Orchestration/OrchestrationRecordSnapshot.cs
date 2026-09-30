@@ -48,7 +48,9 @@ internal static class OrchestrationRecordSnapshot
         return new LargeTaskRequest(
             budget.Text(source.Objective, "large-task objective"),
             source.Origin,
-            Structured(source.Context, budget, depth + 1));
+            Structured(source.Context, budget, depth + 1),
+            budget.OptionalText(source.AuthorizationScopeId,
+                "large-task authorization scope id"));
     }
 
     public static TaskGraphPlan Plan(TaskGraphPlan source) =>

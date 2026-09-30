@@ -86,7 +86,7 @@ Lab `run` and `chat` accept `--planner ollama` with `--model <installed-model>` 
 
 ## Host binding and authority
 
-The host's deliberate installation of a tool into an active execution surface is a standing, scoped grant for that capability. Agentica no longer infers an extra one-shot approval from `ExternalSideEffect` alone. An installed declaration may still explicitly require a per-invocation grant; effect policy, schema validation, manifest identity, and host resource fences continue to constrain dispatch. Mere MCP discovery does not install a tool. The originating objective and valid delegated descendants supply purpose; installation alone does not authorize an unrelated objective. See `host-binding-authority.md` for the bounded-context contract and current implementation gap.
+The host's deliberate installation of a tool into an active execution surface is a standing, scoped grant for that capability. Agentica no longer infers an extra one-shot approval from `ExternalSideEffect` alone. An installed declaration may still explicitly require a per-invocation grant; effect policy, schema validation, manifest identity, and host resource fences continue to constrain dispatch. Mere MCP discovery does not install a tool. The originating objective and valid delegated descendants supply purpose; installation alone does not authorize an unrelated objective. Scoped task orchestration can ask the host to derive a distinct child scope with a receipt before child dispatch. See `host-binding-authority.md` for the bounded-context contract and host-owned proof boundary.
 
 ## Bounded planning input
 

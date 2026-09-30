@@ -37,6 +37,111 @@ public sealed class TaskOrchestratorTests
     }
 
     [Fact]
+    public async Task Scoped_orchestration_dispatches_only_a_receipted_derived_child_scope()
+    {
+        var executor = new ScriptedRunExecutor(
+            [Envelope("run_project", RunOutcomeStatus.Succeeded)]);
+        var deriver = new ScriptedChildAuthorityDeriver(
+            new ChildAuthorityResolution(ChildAuthorityDisposition.Derived,
+                "scope.project.child", "receipt.authority.child"));
+        var orchestrator = CreateOrchestrator(
+            new ScriptedTaskPlanner(Plan([Task("project", "Create the workspace.")])),
+            executor,
+            new ScriptedAcceptanceEvaluator(_ =>
+                new TaskAcceptanceResult(TaskAcceptanceStatus.Accepted, [], [])),
+            deriver);
+
+        var outcome = await orchestrator.RunAsync(
+            Request("Set up Fragmented Context.") with
+            {
+                AuthorizationScopeId = "scope.parent"
+            });
+
+        Assert.Equal(OrchestrationStatus.Succeeded, outcome.Status);
+        var derivation = Assert.Single(deriver.Requests);
+        Assert.Equal("scope.parent", derivation.ParentAuthorizationScopeId);
+        Assert.Equal("Set up Fragmented Context.", derivation.ParentObjective);
+        Assert.Equal("Create the workspace.", derivation.ChildObjective);
+        Assert.Equal("project", derivation.ChildTaskId);
+        Assert.Equal(1, derivation.ChildRunNumber);
+        var child = Assert.Single(executor.Requests);
+        Assert.Equal("scope.project.child", child.AuthorizationScopeId);
+        Assert.Equal("receipt.authority.child",
+            child.Context?["orchestration.authorityDerivationReceiptId"]);
+        Assert.Equal(derivation.ChildDispatchId,
+            child.Context?["orchestration.childDispatchId"]);
+    }
+
+    [Fact]
+    public async Task Scoped_orchestration_without_host_derivation_cannot_dispatch_child()
+    {
+        var executor = new ScriptedRunExecutor([]);
+        var outcome = await CreateOrchestrator(
+                new ScriptedTaskPlanner(Plan([Task("project")])),
+                executor,
+                new EvidenceTaskAcceptanceEvaluator())
+            .RunAsync(Request("Create a project.") with
+            {
+                AuthorizationScopeId = "scope.parent"
+            });
+
+        Assert.Equal(OrchestrationStatus.Blocked, outcome.Status);
+        Assert.Equal(OrchestrationStopReason.Blocked, outcome.StopReason);
+        Assert.Empty(executor.Requests);
+        Assert.Empty(outcome.RunOutcomes);
+    }
+
+    [Theory]
+    [InlineData(ChildAuthorityDisposition.OutOfScope,
+        OrchestrationStopReason.AuthorityOutOfScope)]
+    [InlineData(ChildAuthorityDisposition.TemporarilyUnavailable,
+        OrchestrationStopReason.Blocked)]
+    public async Task Host_derivation_refusal_stops_before_effect_dispatch(
+        ChildAuthorityDisposition disposition,
+        OrchestrationStopReason expectedReason)
+    {
+        var executor = new ScriptedRunExecutor([]);
+        var deriver = new ScriptedChildAuthorityDeriver(
+            new ChildAuthorityResolution(disposition, Reason: "host policy"));
+        var outcome = await CreateOrchestrator(
+                new ScriptedTaskPlanner(Plan([Task("project")])),
+                executor,
+                new EvidenceTaskAcceptanceEvaluator(),
+                deriver)
+            .RunAsync(Request("Create a project.") with
+            {
+                AuthorizationScopeId = "scope.parent"
+            });
+
+        Assert.Equal(OrchestrationStatus.Blocked, outcome.Status);
+        Assert.Equal(expectedReason, outcome.StopReason);
+        Assert.Empty(executor.Requests);
+        Assert.Empty(outcome.RunOutcomes);
+        Assert.Empty(outcome.State.TaskRunCounts);
+    }
+
+    [Fact]
+    public async Task Derivation_cannot_reuse_parent_scope_or_omit_proof()
+    {
+        var executor = new ScriptedRunExecutor([]);
+        var deriver = new ScriptedChildAuthorityDeriver(
+            new ChildAuthorityResolution(ChildAuthorityDisposition.Derived,
+                "scope.parent", null));
+        var outcome = await CreateOrchestrator(
+                new ScriptedTaskPlanner(Plan([Task("project")])),
+                executor,
+                new EvidenceTaskAcceptanceEvaluator(),
+                deriver)
+            .RunAsync(Request("Create a project.") with
+            {
+                AuthorizationScopeId = "scope.parent"
+            });
+
+        Assert.Equal(OrchestrationStatus.Failed, outcome.Status);
+        Assert.Empty(executor.Requests);
+    }
+
+    [Fact]
     public void Graph_validator_rejects_cycles_and_dangling_dependencies()
     {
         var cyclic = Plan(
@@ -2053,14 +2158,16 @@ public sealed class TaskOrchestratorTests
     private static TaskOrchestrator CreateOrchestrator(
         ITaskPlanner planner,
         IRunExecutor executor,
-        ITaskAcceptanceEvaluator evaluator) =>
+        ITaskAcceptanceEvaluator evaluator,
+        IChildAuthorityDeriver? childAuthorityDeriver = null) =>
         new(
             planner,
             executor,
             evaluator,
             new DeterministicWorkContextCompiler(),
             () => new Dictionary<string, object?> { ["hostReady"] = true },
-            new OrchestrationPolicy(MaxRuns: 8, MaxRefinements: 4, MaxGraphMutationsPerRefinement: 4));
+            new OrchestrationPolicy(MaxRuns: 8, MaxRefinements: 4, MaxGraphMutationsPerRefinement: 4),
+            childAuthorityDeriver);
 
     private static LargeTaskRequest Request(string objective) =>
         new(objective, RequestOrigin.User, new Dictionary<string, object?>());
@@ -2299,6 +2406,20 @@ public sealed class TaskOrchestratorTests
         {
             Requests.Add(request);
             return System.Threading.Tasks.Task.FromResult(_outcomes.Dequeue());
+        }
+    }
+
+    private sealed class ScriptedChildAuthorityDeriver(
+        ChildAuthorityResolution resolution) : IChildAuthorityDeriver
+    {
+        public List<ChildAuthorityDerivationRequest> Requests { get; } = [];
+
+        public Task<ChildAuthorityResolution> DeriveAsync(
+            ChildAuthorityDerivationRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            return System.Threading.Tasks.Task.FromResult(resolution);
         }
     }
 

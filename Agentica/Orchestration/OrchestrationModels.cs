@@ -2,13 +2,15 @@ using Agentica.Observations;
 using Agentica.Orchestration.Context;
 using Agentica.Orchestration.Planning;
 using Agentica.Outcomes;
+using System.Text.Json.Serialization;
 
 namespace Agentica.Orchestration;
 
 public sealed record LargeTaskRequest(
     string Objective,
     Agentica.Requests.RequestOrigin Origin,
-    IReadOnlyDictionary<string, object?> Context);
+    IReadOnlyDictionary<string, object?> Context,
+    [property: JsonIgnore] string? AuthorizationScopeId = null);
 
 public sealed record OrchestrationPolicy(
     int MaxRuns = 16,
@@ -41,7 +43,8 @@ public enum OrchestrationStopReason
     PlanInvalid,
     MaxRunsReached,
     MaxRefinementsReached,
-    DefinitionOfDoneNotSatisfied
+    DefinitionOfDoneNotSatisfied,
+    AuthorityOutOfScope
 }
 
 public sealed class OrchestrationState
