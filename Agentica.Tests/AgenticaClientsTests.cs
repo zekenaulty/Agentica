@@ -552,6 +552,43 @@ public sealed class AgenticaClientsTests
     }
 
     [Fact]
+    public async Task Rejected_terminal_stream_releases_private_continuation()
+    {
+        var continuation = new LlmNativeContinuation("fixture", "fake-model",
+            "system", "[{\"role\":\"assistant\",\"content\":\"private\"}]");
+        var json = PlanJson("query_state", "Query", "ReadOnly");
+        var client = new ScriptedStreamingClient(json, lateData: true,
+            continuation: continuation);
+
+        await Assert.ThrowsAsync<LlmClientException>(() =>
+            LlmStreamCompletion.GenerateAsync(client,
+                new LlmRequest("fake-model", []), _ => { },
+                CancellationToken.None));
+
+        Assert.Throws<ObjectDisposedException>(() => _ = continuation.HistoryStepsJson);
+    }
+
+    [Fact]
+    public async Task Duplicate_terminal_stream_releases_both_private_continuations()
+    {
+        var first = new LlmNativeContinuation("fixture", "fake-model",
+            "system", "[{\"role\":\"assistant\",\"content\":\"first\"}]");
+        var second = new LlmNativeContinuation("fixture", "fake-model",
+            "system", "[{\"role\":\"assistant\",\"content\":\"second\"}]");
+        var json = PlanJson("query_state", "Query", "ReadOnly");
+        var client = new ScriptedStreamingClient(json, continuation: first,
+            trailingContinuation: second);
+
+        await Assert.ThrowsAsync<LlmClientException>(() =>
+            LlmStreamCompletion.GenerateAsync(client,
+                new LlmRequest("fake-model", []), _ => { },
+                CancellationToken.None));
+
+        Assert.Throws<ObjectDisposedException>(() => _ = first.HistoryStepsJson);
+        Assert.Throws<ObjectDisposedException>(() => _ = second.HistoryStepsJson);
+    }
+
+    [Fact]
     public async Task Invalid_model_json_fails_before_tool_execution()
     {
         var tool = new CountingTool("known_tool");
@@ -1307,7 +1344,8 @@ public sealed class AgenticaClientsTests
     }
 
     private sealed class ScriptedStreamingClient(string json, bool fail = false,
-        bool lateData = false)
+        bool lateData = false, LlmNativeContinuation? continuation = null,
+        LlmNativeContinuation? trailingContinuation = null)
         : ILlmStreamingClient
     {
         public Task<LlmResponse> GenerateAsync(LlmRequest request,
@@ -1328,10 +1366,16 @@ public sealed class AgenticaClientsTests
             yield return new LlmStreamEvent(LlmStreamEventKind.TextDelta, json);
             yield return new LlmStreamEvent(LlmStreamEventKind.Completed,
                 Response: new LlmResponse("fixture", request.ModelId, json, json,
-                    FinishReason: LlmFinishReason.Stop));
+                    FinishReason: LlmFinishReason.Stop,
+                    NativeContinuation: continuation));
             if (lateData)
                 yield return new LlmStreamEvent(LlmStreamEventKind.Activity,
                     "unexpected.trailing.data");
+            if (trailingContinuation is not null)
+                yield return new LlmStreamEvent(LlmStreamEventKind.Completed,
+                    Response: new LlmResponse("fixture", request.ModelId, json, json,
+                        FinishReason: LlmFinishReason.Stop,
+                        NativeContinuation: trailingContinuation));
         }
     }
 

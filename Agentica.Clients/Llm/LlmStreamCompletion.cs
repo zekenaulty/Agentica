@@ -36,6 +36,7 @@ internal static class LlmStreamCompletion
         }
 
         Report(new LlmStreamEvent(LlmStreamEventKind.Started));
+        var delivered = false;
         try
         {
             await foreach (var item in streaming.StreamAsync(request, cancellationToken)
@@ -43,6 +44,7 @@ internal static class LlmStreamCompletion
             {
                 if (completed is not null)
                 {
+                    item.Response?.NativeContinuation?.Dispose();
                     throw Incomplete("data_after_completion");
                 }
                 if (item.Kind == LlmStreamEventKind.Completed)
@@ -55,6 +57,10 @@ internal static class LlmStreamCompletion
                 }
             }
             if (completed is null) throw Incomplete("stream_incomplete");
+            Report(new LlmStreamEvent(LlmStreamEventKind.Completed,
+                Response: completed));
+            delivered = true;
+            return completed;
         }
         catch (OperationCanceledException)
         {
@@ -73,9 +79,10 @@ internal static class LlmStreamCompletion
                 "stream_failure"));
             throw;
         }
-        Report(new LlmStreamEvent(LlmStreamEventKind.Completed,
-            Response: completed));
-        return completed;
+        finally
+        {
+            if (!delivered) completed?.NativeContinuation?.Dispose();
+        }
     }
 
     private static LlmClientException Incomplete(string code) =>
