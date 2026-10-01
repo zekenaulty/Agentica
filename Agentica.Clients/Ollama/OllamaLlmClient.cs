@@ -217,7 +217,14 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
         {
             throw Failure("native_history_required", LlmClientErrorKind.BadRequest);
         }
-        if (request.GenerationOptions?.Thinking?.ThinkingBudgetTokens is > 0)
+        var thinking = request.GenerationOptions?.Thinking;
+        var effort = thinking?.GetEffortValue(ProviderName);
+        if (thinking?.Effort is LlmReasoningEffort.None or LlmReasoningEffort.Minimal or
+            LlmReasoningEffort.XHigh or LlmReasoningEffort.Max)
+            throw Failure("unsupported_reasoning_effort", LlmClientErrorKind.BadRequest);
+        if (effort is not null && thinking?.ThinkingBudgetTokens is 0)
+            throw Failure("conflicting_thinking_controls", LlmClientErrorKind.BadRequest);
+        if (thinking?.ThinkingBudgetTokens is > 0)
         {
             throw Failure("unsupported_thinking_budget", LlmClientErrorKind.BadRequest);
         }
@@ -309,7 +316,11 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
         {
             body["options"] = options;
         }
-        if (generation?.Thinking is { } thought &&
+        if (effort is not null)
+        {
+            body["think"] = effort;
+        }
+        else if (generation?.Thinking is { } thought &&
             (thought.ThinkingBudgetTokens == 0 ||
              thought.ThinkingBudgetTokens == LlmThinkingOptions.DynamicBudget ||
              thought.IncludeThoughts))

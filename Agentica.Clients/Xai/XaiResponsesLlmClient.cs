@@ -1,3 +1,4 @@
+using Agentica.Clients.Llm;
 using Agentica.Clients.OpenAI;
 
 namespace Agentica.Clients.Xai;
@@ -14,6 +15,10 @@ public sealed class XaiResponsesLlmClient : OpenAiResponsesLlmClient
             httpClient, ProviderName, "XAI_API_KEY", includeEncryptedReasoning: true)
     {
     }
+
+    protected override bool SupportsReasoningEffort(LlmReasoningEffort effort) =>
+        effort is LlmReasoningEffort.Low or LlmReasoningEffort.Medium or
+            LlmReasoningEffort.High or LlmReasoningEffort.XHigh;
 
     private static OpenAiResponsesClientOptions ToBaseOptions(XaiResponsesClientOptions? options)
     {

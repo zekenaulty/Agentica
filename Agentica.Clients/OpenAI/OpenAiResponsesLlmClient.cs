@@ -247,7 +247,11 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
             throw Failure("native_history_required", LlmClientErrorKind.BadRequest);
         if (request.GenerationOptions?.Temperature is not null)
             throw Failure("unsupported_temperature", LlmClientErrorKind.BadRequest);
-        if (request.GenerationOptions?.Thinking?.ThinkingBudgetTokens is > 0 or 0)
+        var thinking = request.GenerationOptions?.Thinking;
+        var effort = thinking?.GetEffortValue(_providerName);
+        if (thinking?.Effort is { } requestedEffort && !SupportsReasoningEffort(requestedEffort))
+            throw Failure("unsupported_reasoning_effort", LlmClientErrorKind.BadRequest);
+        if (thinking?.ThinkingBudgetTokens is > 0 or 0)
             throw Failure("unsupported_thinking_budget", LlmClientErrorKind.BadRequest);
         var instruction = string.Join("\n\n", request.Messages
             .Where(message => message.Role is LlmMessageRole.System or LlmMessageRole.Developer)
@@ -285,8 +289,10 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
             if (maxTokens <= 0) throw Failure("invalid_max_output_tokens", LlmClientErrorKind.BadRequest);
             body["max_output_tokens"] = maxTokens;
         }
-        if (request.GenerationOptions?.Thinking?.IncludeThoughts == true)
-            body["reasoning"] = new { summary = "auto" };
+        var reasoning = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (effort is not null) reasoning["effort"] = effort;
+        if (thinking?.IncludeThoughts == true) reasoning["summary"] = "auto";
+        if (reasoning.Count > 0) body["reasoning"] = reasoning;
         if (request.StructuredOutput is { } structured)
         {
             if (structured.ResponseMimeType != "application/json")
@@ -304,6 +310,9 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
         }
         return body;
     }
+
+    protected virtual bool SupportsReasoningEffort(LlmReasoningEffort effort) =>
+        Enum.IsDefined(effort);
 
     private string ExtractTextAndValidate(JsonElement output)
     {

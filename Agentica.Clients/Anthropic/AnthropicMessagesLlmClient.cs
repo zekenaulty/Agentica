@@ -263,6 +263,10 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
         };
         if (system.Length > 0) body["system"] = system;
         var thinking = request.GenerationOptions?.Thinking;
+        var effort = thinking?.GetEffortValue(ProviderName);
+        if (thinking?.Effort is LlmReasoningEffort.None or LlmReasoningEffort.Minimal)
+            throw Failure("unsupported_reasoning_effort", LlmClientErrorKind.BadRequest);
+        if (effort is not null) body["output_config"] = new { effort };
         if (thinking?.ThinkingBudgetTokens is 0)
         {
             if (thinking.IncludeThoughts)

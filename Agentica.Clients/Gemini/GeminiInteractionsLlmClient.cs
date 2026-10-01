@@ -339,7 +339,11 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
         {
             throw Failure("unsupported_temperature", LlmClientErrorKind.BadRequest);
         }
-        if (request.GenerationOptions?.Thinking?.ThinkingBudgetTokens is > 0 or 0)
+        var thinking = request.GenerationOptions?.Thinking;
+        var effort = thinking?.GetEffortValue(GeminiLlmClient.ProviderName);
+        if (thinking?.Effort is LlmReasoningEffort.None or LlmReasoningEffort.XHigh or LlmReasoningEffort.Max)
+            throw Failure("unsupported_reasoning_effort", LlmClientErrorKind.BadRequest);
+        if (thinking?.ThinkingBudgetTokens is > 0 or 0)
         {
             throw Failure("unsupported_thinking_budget", LlmClientErrorKind.BadRequest);
         }
@@ -385,7 +389,8 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
             }
             config["max_output_tokens"] = maxTokens;
         }
-        if (request.GenerationOptions?.Thinking?.IncludeThoughts == true)
+        if (effort is not null) config["thinking_level"] = effort;
+        if (thinking?.IncludeThoughts == true)
         {
             config["thinking_summaries"] = "auto";
         }
