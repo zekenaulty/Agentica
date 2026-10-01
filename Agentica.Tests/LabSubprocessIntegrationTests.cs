@@ -11,6 +11,12 @@ public sealed class LabSubprocessIntegrationTests
 
         Assert.Equal(2, result.ExitCode);
         Assert.Contains("Agentica.Lab run", result.StandardError, StringComparison.Ordinal);
+        var commandUsage = result.StandardError.Split('\n').Where(line =>
+            line.Contains("Agentica.Lab run ", StringComparison.Ordinal) ||
+            line.Contains("Agentica.Lab chat [message]", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(2, commandUsage.Length);
+        Assert.All(commandUsage, line =>
+            Assert.Contains("--reasoning-effort", line, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -20,6 +26,22 @@ public sealed class LabSubprocessIntegrationTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("The Sun Gate (sun_gate)", result.StandardOutput, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("run")]
+    [InlineData("chat")]
+    public async Task Conflicting_reasoning_flags_fail_before_provider_configuration(string command)
+    {
+        var result = await RunLabAsync(command, "Inspect state", "--planner", "gemini",
+            "--reasoning-effort", "high", "--thinking-budget", "off");
+
+        Assert.Equal(2, result.ExitCode);
+        Assert.Contains("Choose either --reasoning-effort or --thinking-budget.",
+            result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("none|minimal|low|medium|high|xhigh|max",
+            result.StandardError, StringComparison.Ordinal);
+        Assert.DoesNotContain("no Gemini API key", result.StandardError, StringComparison.Ordinal);
     }
 
     [Fact]

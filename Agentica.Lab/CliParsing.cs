@@ -1,7 +1,25 @@
 using Agentica.Execution;
+using Agentica.Clients.Llm;
 
 internal static class CliParsing
 {
+    public static bool TryParseReasoningEffort(string value, out LlmReasoningEffort effort)
+    {
+        LlmReasoningEffort? parsed = value.ToLowerInvariant() switch
+        {
+            "none" => LlmReasoningEffort.None,
+            "minimal" => LlmReasoningEffort.Minimal,
+            "low" => LlmReasoningEffort.Low,
+            "medium" => LlmReasoningEffort.Medium,
+            "high" => LlmReasoningEffort.High,
+            "xhigh" => LlmReasoningEffort.XHigh,
+            "max" => LlmReasoningEffort.Max,
+            _ => null
+        };
+        effort = parsed.GetValueOrDefault();
+        return parsed.HasValue;
+    }
+
     public static bool TryParsePlanningMode(string value, out PlanningMode planningMode)
     {
         switch (value.ToLowerInvariant())

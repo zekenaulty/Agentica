@@ -1,4 +1,5 @@
 using Agentica.Execution;
+using Agentica.Clients.Llm;
 
 internal sealed record CliRunOptions(
     string Objective,
@@ -20,12 +21,36 @@ internal sealed record CliRunOptions(
 
     public bool StreamEventsJsonl { get; init; }
 
+    public LlmReasoningEffort? ReasoningEffort { get; init; }
+
+    public LlmThinkingOptions? CreateThinkingOptions()
+    {
+        if (ReasoningEffort is { } effort)
+        {
+            if (ThinkingBudget is not null)
+                throw new InvalidOperationException("Choose either --reasoning-effort or --thinking-budget.");
+            return LlmThinkingOptions.AtEffort(effort, IncludeThoughts);
+        }
+        return ThinkingBudget switch
+        {
+            null when IncludeThoughts => new LlmThinkingOptions(IncludeThoughts: true),
+            null => null,
+            "dynamic" => LlmThinkingOptions.Dynamic(IncludeThoughts),
+            "off" => LlmThinkingOptions.Off(IncludeThoughts),
+            "0" => LlmThinkingOptions.Off(IncludeThoughts),
+            var value when int.TryParse(value, out var tokens) && tokens > 0 =>
+                LlmThinkingOptions.Budget(tokens, IncludeThoughts),
+            _ => throw new InvalidOperationException($"Invalid thinking budget '{ThinkingBudget}'.")
+        };
+    }
+
     public static CliRunOptions Parse(IReadOnlyList<string> args)
     {
         var objectiveParts = new List<string>();
         var planner = PlannerKind.Deterministic;
         string? modelId = null;
         string? thinkingBudget = null;
+        LlmReasoningEffort? reasoningEffort = null;
         var includeThoughts = false;
         int? maxOutputTokens = null;
         int? maxInputCharacters = null;
@@ -81,6 +106,15 @@ internal sealed record CliRunOptions(
                         return Invalid($"Invalid thinking budget '{thinkingBudget}'.");
                     }
 
+                    break;
+
+                case "--reasoning-effort":
+                    if (!TryReadValue(args, ref index, out var reasoningValue) ||
+                        !CliParsing.TryParseReasoningEffort(reasoningValue, out var parsedEffort))
+                    {
+                        return Invalid("Missing or invalid value for --reasoning-effort (none|minimal|low|medium|high|xhigh|max).");
+                    }
+                    reasoningEffort = parsedEffort;
                     break;
 
                 case "--max-output-tokens":
@@ -165,6 +199,8 @@ internal sealed record CliRunOptions(
         }
 
         var objective = string.Join(' ', objectiveParts).Trim();
+        if (reasoningEffort is not null && thinkingBudget is not null)
+            return Invalid("Choose either --reasoning-effort or --thinking-budget.");
         if (string.IsNullOrWhiteSpace(objective))
         {
             return Invalid("Objective is required.");
@@ -189,7 +225,8 @@ internal sealed record CliRunOptions(
         {
             MaxInputCharacters = maxInputCharacters,
             ContextWindowTokens = contextWindowTokens,
-            StreamEventsJsonl = streamEventsJsonl
+            StreamEventsJsonl = streamEventsJsonl,
+            ReasoningEffort = reasoningEffort
         };
     }
 

@@ -6,6 +6,22 @@ Effort is soft guidance with provider-specific semantics. It does not reserve to
 set a hard budget, or imply equal reasoning work across models. Use `MaxOutputTokens`
 for the provider's output limit.
 
+Lab `run` and `chat` expose named effort with
+`--reasoning-effort none|minimal|low|medium|high|xhigh|max`, for example:
+
+```text
+Agentica.Lab run "Inspect the workspace" --planner openai --model <compatible-model> --reasoning-effort low --include-thoughts
+Agentica.Lab chat "Review the current task" --planner gemini --model <compatible-model> --reasoning-effort high
+```
+
+The names are case-insensitive; numeric enum values are rejected. `--include-thoughts`
+continues to control summary display independently. In these two CLI commands,
+`--reasoning-effort` and `--thinking-budget` are alternative selectors: supplying both
+is a usage error before provider configuration or execution. Budget-only commands
+and omitted controls retain their existing behavior. Provider-specific combined
+budget/effort requests remain available through the library API described below.
+Scenario commands retain their existing options.
+
 | Adapter | Field sent for `Effort` | Accepted adapter values |
 | --- | --- | --- |
 | OpenAI Responses | `reasoning.effort` | none, minimal, low, medium, high, xhigh, max |

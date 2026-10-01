@@ -1,4 +1,5 @@
 using Agentica.Outcomes;
+using Agentica.Clients.Llm;
 
 internal sealed record ChatOptions(
     string? InitialMessage,
@@ -26,12 +27,15 @@ internal sealed record ChatOptions(
 
     public bool StreamEventsJsonl { get; init; }
 
+    public LlmReasoningEffort? ReasoningEffort { get; init; }
+
     public static ChatOptions Parse(IReadOnlyList<string> args)
     {
         var messageParts = new List<string>();
         PlannerKind? planner = null;
         string? modelId = null;
         string? thinkingBudget = null;
+        LlmReasoningEffort? reasoningEffort = null;
         var includeThoughts = false;
         int? maxOutputTokens = null;
         int? maxInputCharacters = null;
@@ -103,6 +107,15 @@ internal sealed record ChatOptions(
                         return Invalid($"Invalid thinking budget '{thinkingBudget}'.");
                     }
 
+                    break;
+
+                case "--reasoning-effort":
+                    if (!TryReadValue(args, ref index, out var reasoningValue) ||
+                        !CliParsing.TryParseReasoningEffort(reasoningValue, out var parsedEffort))
+                    {
+                        return Invalid("Missing or invalid value for --reasoning-effort (none|minimal|low|medium|high|xhigh|max).");
+                    }
+                    reasoningEffort = parsedEffort;
                     break;
 
                 case "--max-output-tokens":
@@ -204,6 +217,8 @@ internal sealed record ChatOptions(
         }
 
         var initialMessage = string.Join(' ', messageParts).Trim();
+        if (reasoningEffort is not null && thinkingBudget is not null)
+            return Invalid("Choose either --reasoning-effort or --thinking-budget.");
         if (contextWindowTokens is { } window &&
             window <= (long)(maxOutputTokens ?? 12_288) + 4096)
             return Invalid("Context window must exceed output, tool-result, and safety reserves.");
@@ -230,7 +245,8 @@ internal sealed record ChatOptions(
         {
             MaxInputCharacters = maxInputCharacters,
             ContextWindowTokens = contextWindowTokens,
-            StreamEventsJsonl = streamEventsJsonl
+            StreamEventsJsonl = streamEventsJsonl,
+            ReasoningEffort = reasoningEffort
         };
     }
 

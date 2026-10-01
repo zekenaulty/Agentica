@@ -280,7 +280,8 @@ internal static class ChatCommand
         {
             MaxInputCharacters = options.MaxInputCharacters,
             ContextWindowTokens = options.ContextWindowTokens,
-            StreamEventsJsonl = options.StreamEventsJsonl
+            StreamEventsJsonl = options.StreamEventsJsonl,
+            ReasoningEffort = options.ReasoningEffort
         });
     }
 
@@ -674,7 +675,7 @@ internal static class ChatCommand
     private static void PrintUsage()
     {
         Console.Error.WriteLine("Usage:");
-        Console.Error.WriteLine("  Agentica.Lab chat [message] [--planner deterministic|gemini|ollama|openai|anthropic|grok] [--persona agentica|bookforge|mara|nanda|nyx|plain|thal] [--conversation <id>] [--new] [--app-home <path>] [--workspace <path>] [--db <path>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens>] [--max-output-tokens <count>] [--max-input-characters <count>] [--context-window-tokens <count>] [--include-thoughts] [--stream-events-jsonl] [--verbose-events]");
+        Console.Error.WriteLine("  Agentica.Lab chat [message] [--planner deterministic|gemini|ollama|openai|anthropic|grok] [--persona agentica|bookforge|mara|nanda|nyx|plain|thal] [--conversation <id>] [--new] [--app-home <path>] [--workspace <path>] [--db <path>] [--model <model-id>] [--thinking-budget dynamic|off|<tokens> | --reasoning-effort none|minimal|low|medium|high|xhigh|max] [--max-output-tokens <count>] [--max-input-characters <count>] [--context-window-tokens <count>] [--include-thoughts] [--stream-events-jsonl] [--verbose-events]");
         Console.Error.WriteLine("  Agentica.Lab chat --personas");
     }
 
