@@ -114,6 +114,16 @@ The [Gemini thought-signature thesis](https://docs.google.com/document/d/1UefWYj
 
 ## Verification and extension boundaries
 
+The shared [runner/session test](../Agentica.Tests/LlmPlanningSessionTests.cs) runs once for each row below through the actual adapter parser and Agentica runner. It asserts one query, normalized evidence in the follow-up request, native history replay, one host mutation, authoritative completion, and carrier disposal. [Reasoning-control fixtures](../Agentica.Tests/ProviderReasoningControlTests.cs) inspect exact request fields and rejection before network dispatch.
+
+| Provider | Adapter seam fixtures | Private native carrier |
+| --- | --- | --- |
+| OpenAI | [Responses tests](../Agentica.Tests/OpenAiResponsesLlmClientTests.cs) | Complete native output including encrypted reasoning |
+| Google Gemini | [Interactions tests](../Agentica.Tests/GeminiInteractionsLlmClientTests.cs) | Ordered model/thought steps and signatures |
+| Ollama | [Native chat tests](../Agentica.Tests/OllamaLlmClientTests.cs) | Native assistant content and thinking |
+| Grok / xAI | [Responses tests](../Agentica.Tests/XaiResponsesLlmClientTests.cs) | Native output with encrypted reasoning, bound to xAI |
+| Anthropic | [Messages tests](../Agentica.Tests/AnthropicMessagesLlmClientTests.cs) | Complete signed/redacted thinking and text blocks |
+
 The checked-in [modern-provider live smoke harness](live-provider-verification.md) verifies streamed progress and a native follow-up without logging output, signatures, or credentials. OpenAI and Gemini passed. Remaining live Anthropic, xAI, and Ollama checks are deferred by the host's explicit direction. Acceptance for this scope requires all five adapters and their tested integration seam: request mapping, streaming, native continuation, governed tool execution, and normalized receipts. The recorded live limits remain visible alongside that fixture coverage.
 
 The adapters reject native function-call phases; Agentica executes validated workflow proposals through its own tools. Adding native provider tool phases, multimodal replay, durable private-state retention, or further MCP authentication/content types requires additional contracts. Those features are outside the current text-planning workflow. Provider-specific tokenizers and deeper host-authored representation selection can improve the existing bounded compiler. The asynchronous telemetry feed is ready for host UI wiring; the Lab console writer remains synchronous.
