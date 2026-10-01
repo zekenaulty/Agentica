@@ -4,6 +4,8 @@ using System.Text.Json;
 using Agentica.Clients.Gemini;
 using Agentica.Clients.Planning;
 using Agentica.Clients.Llm;
+using Agentica.Planning;
+using Agentica.Requests;
 
 namespace Agentica.Tests;
 
@@ -160,6 +162,111 @@ public sealed class GeminiInteractionsLlmClientTests
         Assert.Equal("model_output", steps[2].GetProperty("type").GetString());
         Assert.Equal("How many dogs?", steps[3].GetProperty("content")[0]
             .GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public async Task Planner_repair_replays_signed_steps_through_stateless_interactions()
+    {
+        const string invalidJson = "{bad";
+        const string repairedJson = """
+            {"planId":"repaired","description":"Use the query.","steps":[{"stepId":"step_1","toolId":"query_state","kind":"Query","effect":"ReadOnly","input":{},"reason":"Inspect state."}],"completionCondition":"State was inspected."}
+            """;
+        static string Event(string name, object payload) =>
+            $"event: {name}\ndata: {JsonSerializer.Serialize(payload)}\n\n";
+        static object Output(string text) => new
+        {
+            type = "model_output",
+            content = new[] { new { type = "text", text } }
+        };
+        var first = string.Concat(
+            Event("step.start", new
+            {
+                event_type = "step.start",
+                index = 0,
+                step = new { type = "thought" }
+            }),
+            Event("step.delta", new
+            {
+                event_type = "step.delta",
+                index = 0,
+                delta = new { type = "thought_signature", signature = "private-signature" }
+            }),
+            Event("step.start", new
+            {
+                event_type = "step.start",
+                index = 1,
+                step = new { type = "model_output" }
+            }),
+            Event("step.delta", new
+            {
+                event_type = "step.delta",
+                index = 1,
+                delta = new { type = "text", text = invalidJson }
+            }),
+            Event("interaction.completed", new
+            {
+                event_type = "interaction.completed",
+                interaction = new
+                {
+                    id = "int_invalid",
+                    status = "completed",
+                    steps = new object[]
+                    {
+                        new { type = "thought", signature = "private-signature",
+                            summary = Array.Empty<object>() },
+                        Output(invalidJson)
+                    }
+                }
+            }));
+        var second = string.Concat(
+            Event("step.start", new
+            {
+                event_type = "step.start",
+                index = 0,
+                step = new { type = "model_output" }
+            }),
+            Event("step.delta", new
+            {
+                event_type = "step.delta",
+                index = 0,
+                delta = new { type = "text", text = repairedJson }
+            }),
+            Event("interaction.completed", new
+            {
+                event_type = "interaction.completed",
+                interaction = new
+                {
+                    id = "int_repaired",
+                    status = "completed",
+                    steps = new[] { Output(repairedJson) }
+                }
+            }));
+        var sent = new List<string>();
+        var handler = new StubHandler(async request =>
+        {
+            sent.Add(await request.Content!.ReadAsStringAsync());
+            return StreamResponse(sent.Count == 1 ? first : second);
+        });
+        var planner = new LlmWorkflowPlanner(CreateClient(handler),
+            new LlmPlannerOptions(ModelId: "gemini-3.8-flash",
+                InvalidJsonRepairAttempts: 1, StatelessRepair: true));
+
+        var plan = await planner.CreatePlanAsync(new PlanningRequest(
+            new RunRequest("Inspect state"), [], [], []));
+
+        Assert.Equal("repaired", plan.PlanId);
+        Assert.Equal(2, sent.Count);
+        using var repair = JsonDocument.Parse(sent[1]);
+        var body = repair.RootElement;
+        Assert.False(body.GetProperty("store").GetBoolean());
+        var input = body.GetProperty("input");
+        Assert.Equal(4, input.GetArrayLength());
+        Assert.Equal("private-signature", input[1].GetProperty("signature").GetString());
+        Assert.Contains("previous Agentica planning response could not be parsed",
+            input[3].GetProperty("content")[0].GetProperty("text").GetString(),
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("private-signature", sent[0],
+            StringComparison.Ordinal);
     }
 
     [Fact]

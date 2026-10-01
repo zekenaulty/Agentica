@@ -438,6 +438,62 @@ public sealed class AgenticaClientsTests
     }
 
     [Fact]
+    public async Task Stateless_planner_repair_uses_private_provider_continuation()
+    {
+        const string invalidJson = "{not-json";
+        var options = new LlmPlannerOptions(ModelId: "fake-model",
+            InvalidJsonRepairAttempts: 1, StatelessRepair: true);
+        var initial = WorkflowPlanPromptBuilder.BuildInitialPlanRequest(
+            CreatePlanningRequest(), options);
+        var continuation = new LlmNativeContinuation("fake", "fake-model",
+            initial.Messages[0].Content,
+            "[{\"role\":\"user\",\"content\":\"original\"},{\"role\":\"assistant\",\"content\":\"invalid\"}]");
+        var repairedJson = PlanJson("query_state", "Query", "ReadOnly");
+        var client = new FakeLlmClient(
+            new LlmResponse("fake", "fake-model", invalidJson, invalidJson,
+                NativeContinuation: continuation),
+            new LlmResponse("fake", "fake-model", repairedJson, repairedJson));
+        var planner = new LlmWorkflowPlanner(client, options);
+
+        var plan = await planner.CreatePlanAsync(CreatePlanningRequest());
+
+        Assert.Equal("plan_model", plan.PlanId);
+        var repair = client.Requests[1];
+        Assert.Same(continuation, repair.NativeContinuation);
+        Assert.Equal([LlmMessageRole.System, LlmMessageRole.User],
+            repair.Messages.Select(message => message.Role));
+        Assert.DoesNotContain(invalidJson, repair.Messages[^1].Content,
+            StringComparison.Ordinal);
+        Assert.Equal("native", repair.Metadata?["agentica.planner.repairContext"]);
+    }
+
+    [Fact]
+    public async Task Stateless_planner_repair_quotes_when_continuation_provenance_mismatches()
+    {
+        var options = new LlmPlannerOptions(ModelId: "fake-model",
+            InvalidJsonRepairAttempts: 1, StatelessRepair: true);
+        var initial = WorkflowPlanPromptBuilder.BuildInitialPlanRequest(
+            CreatePlanningRequest(), options);
+        var foreign = new LlmNativeContinuation("other-provider", "fake-model",
+            initial.Messages[0].Content,
+            "[{\"role\":\"user\",\"content\":\"original\"}]");
+        var validJson = PlanJson("query_state", "Query", "ReadOnly");
+        var client = new FakeLlmClient(
+            new LlmResponse("fake", "fake-model", "{bad", "{bad",
+                NativeContinuation: foreign),
+            new LlmResponse("fake", "fake-model", validJson, validJson));
+
+        await new LlmWorkflowPlanner(client, options)
+            .CreatePlanAsync(CreatePlanningRequest());
+
+        Assert.Null(client.Requests[1].NativeContinuation);
+        Assert.Equal("quoted",
+            client.Requests[1].Metadata?["agentica.planner.repairContext"]);
+        Assert.Contains("{bad", client.Requests[1].Messages[^1].Content,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Invalid_model_json_fails_before_tool_execution()
     {
         var tool = new CountingTool("known_tool");

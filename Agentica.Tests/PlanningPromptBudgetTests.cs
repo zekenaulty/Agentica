@@ -184,6 +184,50 @@ public sealed class PlanningPromptBudgetTests
     }
 
     [Fact]
+    public void Native_repair_counts_private_history_and_quoted_fallback_remains_available()
+    {
+        var original = new LlmRequest("model",
+            [new LlmMessage(LlmMessageRole.System, "system"),
+             new LlmMessage(LlmMessageRole.User, "objective")]);
+        var history = "[{\"role\":\"user\",\"content\":\"" +
+            new string('x', 8_000) + "\"}]";
+        var continuation = new LlmNativeContinuation("gemini", "model",
+            "system", history);
+        var options = new LlmPlannerOptions(ModelId: "model",
+            StatelessRepair: true, MaxInputCharacters: 8192);
+
+        Assert.Equal(System.Text.Encoding.UTF8.GetByteCount(history),
+            Utf8ByteTokenProxy.Instance.EstimateTokens(original with
+            {
+                NativeContinuation = continuation
+            }) - Utf8ByteTokenProxy.Instance.EstimateTokens(original));
+        var bounded = WorkflowPlanPromptBuilder.BuildInitialPlanRepairRequest(
+            original, "invalid", "parse failure", 1, options, continuation);
+        Assert.Null(bounded.NativeContinuation);
+        Assert.Equal("quoted", bounded.Metadata?["agentica.planner.repairContext"]);
+
+        var fallback = WorkflowPlanPromptBuilder.BuildInitialPlanRepairRequest(
+            original, "invalid", "parse failure", 1,
+            options with { MaxInputCharacters = 20_000 });
+        Assert.Null(fallback.NativeContinuation);
+        Assert.Contains("invalid", fallback.Messages[^1].Content,
+            StringComparison.Ordinal);
+        Assert.Equal("quoted", fallback.Metadata?["agentica.planner.repairContext"]);
+
+        var allowance = Utf8ByteTokenProxy.Instance.EstimateTokens(fallback) + 100;
+        var tokenBound = WorkflowPlanPromptBuilder.BuildInitialPlanRepairRequest(
+            original, "invalid", "parse failure", 1,
+            options with
+            {
+                MaxInputCharacters = 20_000,
+                ContextWindowBudget = new LlmContextWindowBudget(
+                    (int)allowance + 4096, 2048, 0, 1024, 1024)
+            }, continuation);
+        Assert.Null(tokenBound.NativeContinuation);
+        Assert.Equal("quoted", tokenBound.Metadata?["agentica.planner.repairContext"]);
+    }
+
+    [Fact]
     public void Token_window_reserves_capacity_and_trims_multibyte_older_evidence()
     {
         var observations = Enumerable.Range(0, 4)

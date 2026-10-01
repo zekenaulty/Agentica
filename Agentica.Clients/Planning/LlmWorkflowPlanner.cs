@@ -39,6 +39,7 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
                 llmRequest,
                 response.StructuredJson ?? response.Text,
                 response.FinishReason,
+                MatchingContinuation(response),
                 version: 1,
                 isRefinement: false,
                 cancellationToken)
@@ -59,6 +60,7 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
                 llmRequest,
                 response.StructuredJson ?? response.Text,
                 response.FinishReason,
+                MatchingContinuation(response),
                 version: 2,
                 isRefinement: true,
                 cancellationToken)
@@ -69,6 +71,7 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
         LlmRequest originalRequest,
         string json,
         LlmFinishReason finishReason,
+        LlmNativeContinuation? nativeContinuation,
         int version,
         bool isRefinement,
         CancellationToken cancellationToken)
@@ -85,6 +88,7 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
                     originalRequest,
                     json,
                     finishReason,
+                    nativeContinuation,
                     version,
                     isRefinement,
                     exception,
@@ -97,6 +101,7 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
         LlmRequest originalRequest,
         string invalidJson,
         LlmFinishReason initialFinishReason,
+        LlmNativeContinuation? nativeContinuation,
         int version,
         bool isRefinement,
         LlmPlannerException firstException,
@@ -105,6 +110,7 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
         var lastJson = invalidJson;
         LlmPlannerException lastException = firstException;
         var lastRepairFinishReason = LlmFinishReason.Unknown;
+        var lastContinuation = nativeContinuation;
 
         for (var attempt = 1; attempt <= _options.InvalidJsonRepairAttempts; attempt++)
         {
@@ -114,17 +120,20 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
                     lastJson,
                     lastException.Message,
                     attempt,
-                    _options)
+                    _options,
+                    lastContinuation)
                 : WorkflowPlanPromptBuilder.BuildInitialPlanRepairRequest(
                     originalRequest,
                     lastJson,
                     lastException.Message,
                     attempt,
-                    _options);
+                    _options,
+                    lastContinuation);
 
             var repairResponse = await GenerateAsync(repairRequest, cancellationToken).ConfigureAwait(false);
             lastJson = repairResponse.StructuredJson ?? repairResponse.Text;
             lastRepairFinishReason = repairResponse.FinishReason;
+            lastContinuation = MatchingContinuation(repairResponse);
 
             try
             {
@@ -199,6 +208,15 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
         finishReason == LlmFinishReason.MaxTokens
             ? $"Planner returned truncated {payloadKind} JSON ({failure}); provider finish reason was MaxTokens."
             : $"Planner returned invalid {payloadKind} JSON ({failure}); provider finish reason was {finishReason}.";
+
+    private static LlmNativeContinuation? MatchingContinuation(LlmResponse response) =>
+        response.NativeContinuation is { } continuation &&
+        string.Equals(continuation.ProviderName, response.ProviderName,
+            StringComparison.Ordinal) &&
+        string.Equals(continuation.ModelId, response.ModelId,
+            StringComparison.Ordinal)
+            ? continuation
+            : null;
 
     private async Task<LlmResponse> GenerateAsync(
         LlmRequest request,

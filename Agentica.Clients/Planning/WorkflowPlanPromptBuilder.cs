@@ -93,7 +93,8 @@ public static class WorkflowPlanPromptBuilder
         string invalidResponse,
         string failureMessage,
         int attempt,
-        LlmPlannerOptions options) =>
+        LlmPlannerOptions options,
+        LlmNativeContinuation? nativeContinuation = null) =>
         BuildRepairRequest(
             originalRequest,
             invalidResponse,
@@ -101,14 +102,16 @@ public static class WorkflowPlanPromptBuilder
             attempt,
             options,
             repairKind: "initial_plan",
-            requiredTopLevelShape: "planId, description, steps, completionCondition");
+            requiredTopLevelShape: "planId, description, steps, completionCondition",
+            nativeContinuation: nativeContinuation);
 
     public static LlmRequest BuildRefinementRepairRequest(
         LlmRequest originalRequest,
         string invalidResponse,
         string failureMessage,
         int attempt,
-        LlmPlannerOptions options) =>
+        LlmPlannerOptions options,
+        LlmNativeContinuation? nativeContinuation = null) =>
         BuildRepairRequest(
             originalRequest,
             invalidResponse,
@@ -116,7 +119,8 @@ public static class WorkflowPlanPromptBuilder
             attempt,
             options,
             repairKind: "refinement",
-            requiredTopLevelShape: "fromPlanId, reason, evidence, refinedPlan");
+            requiredTopLevelShape: "fromPlanId, reason, evidence, refinedPlan",
+            nativeContinuation: nativeContinuation);
 
     private const string SystemInstruction =
         """
@@ -371,14 +375,24 @@ public static class WorkflowPlanPromptBuilder
         int attempt,
         LlmPlannerOptions options,
         string repairKind,
-        string requiredTopLevelShape)
+        string requiredTopLevelShape,
+        LlmNativeContinuation? nativeContinuation)
     {
+        var systemInstruction = string.Join("\n\n", originalRequest.Messages
+            .Where(message => message.Role is LlmMessageRole.System or
+                LlmMessageRole.Developer)
+            .Select(message => message.Content)
+            .Where(content => !string.IsNullOrWhiteSpace(content)));
+        var useNativeContinuation = options.StatelessRepair &&
+            nativeContinuation is not null &&
+            nativeContinuation.ModelId == originalRequest.ModelId &&
+            nativeContinuation.SystemInstruction == systemInstruction;
         var repairMessage = new LlmMessage(
                     LlmMessageRole.User,
                     $$"""
                     Your previous Agentica planning response could not be parsed.
 
-                    {{(options.StatelessRepair
+                    {{(options.StatelessRepair && !useNativeContinuation
                         ? "Previous invalid response as quoted data:\n" +
                           TruncateForRepair(invalidResponse, options.MaxRepairPayloadCharacters)
                         : string.Empty)}}
@@ -404,7 +418,11 @@ public static class WorkflowPlanPromptBuilder
                     Preserve the latest public observation and execution context from the previous user message.
                     Include concise public execution intent on every refined step.
                     """);
-        var messages = (options.StatelessRepair
+        var messages = (useNativeContinuation
+            ? originalRequest.Messages.Where(message => message.Role is
+                    LlmMessageRole.System or LlmMessageRole.Developer)
+                .Concat([repairMessage])
+            : options.StatelessRepair
             ? originalRequest.Messages.Concat([repairMessage])
             : originalRequest.Messages.Concat(
             [
@@ -413,14 +431,17 @@ public static class WorkflowPlanPromptBuilder
                 repairMessage
             ]))
             .ToArray();
-        if (messages.Sum(message => (long)message.Content.Length) > options.MaxInputCharacters)
+        if (messages.Sum(message => (long)message.Content.Length) +
+            (useNativeContinuation ? nativeContinuation!.HistoryStepsJson.Length : 0) >
+            options.MaxInputCharacters)
+        {
+            if (useNativeContinuation)
+                return BuildRepairRequest(originalRequest, invalidResponse,
+                    failureMessage, attempt, options, repairKind,
+                    requiredTopLevelShape, nativeContinuation: null);
             throw new LlmPlannerException(
                 "Planner repair context exceeds the configured input ceiling.");
-        PlanningPromptCompiler.EnsureRepairFitsTokens(originalRequest with
-        {
-            Messages = messages
-        }, options);
-
+        }
         var metadata = originalRequest.Metadata?.ToDictionary(
                 pair => pair.Key,
                 pair => pair.Value,
@@ -428,12 +449,26 @@ public static class WorkflowPlanPromptBuilder
             ?? new Dictionary<string, string>(StringComparer.Ordinal);
         metadata["agentica.planner.repairKind"] = repairKind;
         metadata["agentica.planner.repairAttempt"] = attempt.ToString();
+        metadata["agentica.planner.repairContext"] = useNativeContinuation
+            ? "native"
+            : options.StatelessRepair ? "quoted" : "assistant";
 
-        return originalRequest with
+        var repairRequest = originalRequest with
         {
             Messages = messages,
+            NativeContinuation = useNativeContinuation ? nativeContinuation : null,
             Metadata = metadata
         };
+        if (!PlanningPromptCompiler.RepairFitsTokens(repairRequest, options))
+        {
+            if (useNativeContinuation)
+                return BuildRepairRequest(originalRequest, invalidResponse,
+                    failureMessage, attempt, options, repairKind,
+                    requiredTopLevelShape, nativeContinuation: null);
+            throw new LlmPlannerException(
+                "Planner repair context exceeds the configured token allowance.");
+        }
+        return repairRequest;
     }
 
     private static string TruncateForRepair(string value, int maxCharacters)

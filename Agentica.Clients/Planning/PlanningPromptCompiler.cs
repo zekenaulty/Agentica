@@ -92,18 +92,19 @@ internal static class PlanningPromptCompiler
             tokenAllowance is null ? null : options.InputTokenEstimator.Name));
     }
 
-    public static void EnsureRepairFitsTokens(
+    public static bool RepairFitsTokens(
         LlmRequest request,
         LlmPlannerOptions options)
     {
-        if (options.ContextWindowBudget is null) return;
+        if (options.ContextWindowBudget is null) return true;
         if (options.InputTokenEstimator is null ||
             string.IsNullOrWhiteSpace(options.InputTokenEstimator.Name))
             throw new LlmPlannerException("Planner input token estimator is invalid.");
         var estimate = options.InputTokenEstimator.EstimateTokens(request);
-        if (estimate < 0 || estimate > options.ContextWindowBudget.InputAllowanceTokens)
+        if (estimate < 0)
             throw new LlmPlannerException(
-                "Planner repair context exceeds the configured token allowance.");
+                "Planner input token estimator returned a negative count.");
+        return estimate <= options.ContextWindowBudget.InputAllowanceTokens;
     }
 
     private static long? EstimateTokens(string instruction, string prompt,

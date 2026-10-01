@@ -44,5 +44,8 @@ public sealed class Utf8ByteTokenProxy : ILlmInputTokenEstimator
     public string Name => "utf8-request-byte-proxy-v1";
 
     public long EstimateTokens(LlmRequest request) =>
-        (long)Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(request)) + 512;
+        (long)Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(request)) +
+        (request.NativeContinuation is { } continuation
+            ? Encoding.UTF8.GetByteCount(continuation.HistoryStepsJson)
+            : 0) + 512;
 }
