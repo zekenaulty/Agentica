@@ -5,7 +5,7 @@ using Agentica.Planning;
 
 namespace Agentica.Clients.Planning;
 
-public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
+public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner, IWorkflowPlannerSessionFactory
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -15,6 +15,7 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
     private readonly ILlmClient _client;
     private readonly LlmPlannerOptions _options;
     private readonly Action<LlmStreamEvent>? _onStreamEvent;
+    private readonly LlmPlanningSession? _session;
 
     public LlmWorkflowPlanner(
         ILlmClient client,
@@ -26,11 +27,19 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
         _onStreamEvent = onStreamEvent;
     }
 
+    internal LlmWorkflowPlanner(ILlmClient client, LlmPlannerOptions options,
+        Action<LlmStreamEvent>? onStreamEvent, LlmPlanningSession session)
+        : this(client, options, onStreamEvent) => _session = session;
+
+    public IWorkflowPlannerSession BeginSession(PlanningSessionContext context) =>
+        new LlmPlanningSession(_client, _options, _onStreamEvent, context);
+
     public async Task<WorkflowPlan> CreatePlanAsync(
         PlanningRequest request,
         CancellationToken cancellationToken = default)
     {
         var llmRequest = WorkflowPlanPromptBuilder.BuildInitialPlanRequest(request, _options);
+        llmRequest = _session?.Prepare(llmRequest) ?? llmRequest;
         var response = await GenerateAsync(
             llmRequest,
             cancellationToken).ConfigureAwait(false);
@@ -49,7 +58,7 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
         }
         finally
         {
-            response.NativeContinuation?.Dispose();
+            DisposeUnlessRetained(response.NativeContinuation);
         }
     }
 
@@ -59,6 +68,7 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
         CancellationToken cancellationToken = default)
     {
         var llmRequest = WorkflowPlanPromptBuilder.BuildRefinementRequest(request, observation, _options);
+        llmRequest = _session?.Prepare(llmRequest) ?? llmRequest;
         var response = await GenerateAsync(
             llmRequest,
             cancellationToken).ConfigureAwait(false);
@@ -77,7 +87,7 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
         }
         finally
         {
-            response.NativeContinuation?.Dispose();
+            DisposeUnlessRetained(response.NativeContinuation);
         }
     }
 
@@ -92,9 +102,11 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
     {
         try
         {
-            return isRefinement
+            var plan = isRefinement
                 ? ParseRefinementPlan(json, version, finishReason)
                 : ParsePlan(json, version, finishReason);
+            _session?.Retain(nativeContinuation);
+            return plan;
         }
         catch (LlmPlannerException exception) when (_options.InvalidJsonRepairAttempts > 0)
         {
@@ -158,9 +170,11 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
 
                 try
                 {
-                    return isRefinement
+                    var plan = isRefinement
                         ? ParseRefinementPlan(lastJson, version, repairResponse.FinishReason)
                         : ParsePlan(lastJson, version, repairResponse.FinishReason);
+                    _session?.Retain(lastContinuation);
+                    return plan;
                 }
                 catch (LlmPlannerException exception)
                 {
@@ -179,7 +193,7 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
         {
             foreach (var continuation in repairContinuations)
             {
-                continuation.Dispose();
+                DisposeUnlessRetained(continuation);
             }
         }
     }
@@ -246,6 +260,12 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
             StringComparison.Ordinal)
             ? continuation
             : null;
+
+    private void DisposeUnlessRetained(LlmNativeContinuation? continuation)
+    {
+        if (continuation is not null && _session?.Owns(continuation) != true)
+            continuation.Dispose();
+    }
 
     private async Task<LlmResponse> GenerateAsync(
         LlmRequest request,

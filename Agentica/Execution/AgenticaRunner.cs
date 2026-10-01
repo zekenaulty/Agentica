@@ -214,13 +214,22 @@ public sealed class AgenticaRunner
 
         try
         {
+            using var plannerSession = (_planner as IWorkflowPlannerSessionFactory)?
+                .BeginSession(new PlanningSessionContext(run.RunId, request.Objective,
+                    request.Origin, request.AuthorizationScopeId));
+            var planner = (IWorkflowPlanner?)plannerSession ?? _planner;
+            if (PlannerSecurityBlockers(run, planner) is { Count: > 0 } sessionPlannerBlockers)
+            {
+                return Finish(run, RunOutcomeStatus.Blocked,
+                    StopReason.PlannerDataBoundaryDenied, blockers: sessionPlannerBlockers);
+            }
             WorkflowPlan currentPlan;
             PlanningRequest? initialPlanningRequest = null;
             try
             {
                 initialPlanningRequest = CreatePlanningRequest(request, run);
                 EmitPlanningStarted(run, PlanningCallKind.Creation, initialPlanningRequest);
-                currentPlan = await _planner
+                currentPlan = await planner
                     .CreatePlanAsync(initialPlanningRequest, ct)
                     .ConfigureAwait(false);
                 currentPlan = ExecutionRecordSnapshot.Plan(currentPlan);
@@ -308,7 +317,7 @@ public sealed class AgenticaRunner
                     }
 
                     PlanningRequest? continuationPlanningRequest = null;
-                    if (PlannerSecurityBlockers(run) is { Count: > 0 } continuationPlannerBlockers)
+                    if (PlannerSecurityBlockers(run, planner) is { Count: > 0 } continuationPlannerBlockers)
                     {
                         return Finish(
                             run,
@@ -325,7 +334,7 @@ public sealed class AgenticaRunner
                             PlanningCallKind.Continuation,
                             continuationPlanningRequest,
                             currentPlan: currentPlan);
-                        currentPlan = await _planner
+                        currentPlan = await planner
                             .CreatePlanAsync(continuationPlanningRequest, ct)
                             .ConfigureAwait(false);
                         currentPlan = ExecutionRecordSnapshot.Plan(currentPlan);
@@ -483,7 +492,7 @@ public sealed class AgenticaRunner
 
                     WorkflowPlan refinedPlan;
                     PlanningRequest? refinementPlanningRequest = null;
-                    if (PlannerSecurityBlockers(run) is { Count: > 0 } refinementPlannerBlockers)
+                    if (PlannerSecurityBlockers(run, planner) is { Count: > 0 } refinementPlannerBlockers)
                     {
                         return Finish(
                             run,
@@ -507,7 +516,7 @@ public sealed class AgenticaRunner
                             currentPlan: currentPlan,
                             observation: observation,
                             evidenceRefs: refinementEvidence);
-                        refinedPlan = await _planner
+                        refinedPlan = await planner
                             .RefinePlanAsync(refinementPlanningRequest, observation, ct)
                             .ConfigureAwait(false);
                         refinedPlan = ExecutionRecordSnapshot.Plan(refinedPlan);
@@ -2247,10 +2256,11 @@ public sealed class AgenticaRunner
         return planningRequest;
     }
 
-    private IReadOnlyList<string> PlannerSecurityBlockers(AgenticaRun run)
+    private IReadOnlyList<string> PlannerSecurityBlockers(AgenticaRun run, IWorkflowPlanner? activePlanner = null)
     {
         var securityPolicy = _policy.EffectiveSecurityPolicy;
-        if (_planner is IExternalWorkflowPlanner && !securityPolicy.UsesExternalPlanner)
+        if ((_planner is IExternalWorkflowPlanner || activePlanner is IExternalWorkflowPlanner) &&
+            !securityPolicy.UsesExternalPlanner)
         {
             return
             [

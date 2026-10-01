@@ -52,6 +52,8 @@ internal sealed class PlanningRequestFactory
             observations,
             receipts)
         {
+            SessionContext = new PlanningSessionContext(run.RunId, request.Objective,
+                request.Origin, request.AuthorizationScopeId),
             ExecutionContext = executionContext,
             ToolSurface = toolSurface
         };
