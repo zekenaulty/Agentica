@@ -74,6 +74,33 @@ public sealed class LlmTelemetryFeedTests
         Assert.Same(feed.Latest, feed.LastTerminal);
     }
 
+    [Theory]
+    [InlineData("terminal-only output")]
+    [InlineData("")]
+    public async Task Terminal_only_output_records_first_output_time_only_when_text_exists(string text)
+    {
+        using var feed = new LlmTelemetryFeed("fixture");
+        feed.Report(new LlmStreamEvent(LlmStreamEventKind.Started));
+        feed.Report(new LlmStreamEvent(LlmStreamEventKind.Completed,
+            Response: new LlmResponse("fixture", "model", text)));
+        feed.Complete();
+
+        var records = new List<LlmTelemetryRecord>();
+        await foreach (var delivery in feed.ReadAllAsync()) records.Add(delivery.Record);
+        var terminal = Assert.Single(records, record => record.Kind == "completed");
+        Assert.Equal(text.Length, terminal.OutputCharacters);
+        if (text.Length > 0)
+        {
+            Assert.NotNull(terminal.FirstOutputElapsedMs);
+            Assert.InRange(terminal.FirstOutputElapsedMs.Value, 0, terminal.ElapsedMs);
+        }
+        else
+        {
+            Assert.Null(terminal.FirstOutputElapsedMs);
+        }
+        Assert.Same(terminal, feed.LastTerminal);
+    }
+
     [Fact]
     public async Task Telemetry_omits_output_and_native_payload_and_bounds_opted_in_summary()
     {

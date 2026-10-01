@@ -122,6 +122,8 @@ public sealed class LlmTelemetryFeed : IDisposable
                     break;
                 case LlmStreamEventKind.Completed:
                     _outputCharacters = Math.Max(_outputCharacters, item.Response?.Text.Length ?? 0);
+                    if (_firstOutputElapsedMs is null && _outputCharacters > 0)
+                        _firstOutputElapsedMs = _clock.ElapsedMilliseconds;
                     _inCall = false;
                     break;
                 case LlmStreamEventKind.Failed:

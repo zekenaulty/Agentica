@@ -8,9 +8,8 @@ using Agentica.Clients.Llm;
 namespace Agentica.Clients.Gemini;
 
 /// <summary>
-/// Stateless, streamed Gemini Developer API interaction for one bounded text generation.
-/// The caller owns context. Native multi-turn thought history and provider tool calls require
-/// a separate exact-step contract and are deliberately rejected here.
+/// Stateless, streamed Gemini Developer API text interactions with bounded private native
+/// thought-step replay. The caller owns context; provider function calls require a separate contract.
 /// </summary>
 public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
 {
