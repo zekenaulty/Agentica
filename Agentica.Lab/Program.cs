@@ -105,6 +105,17 @@ static async Task<int> RunDefaultAsync(IReadOnlyList<string> args)
         return 2;
     }
 
+    if (options.Planner == PlannerKind.Deterministic &&
+        (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AGENTICA_MCP_ENDPOINT")) ||
+         !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AGENTICA_MCP_BINDINGS_FILE"))))
+    {
+        Console.Error.WriteLine(
+            "The deterministic run planner supports demo tools only. " +
+            "For installed MCP tools, select --planner gemini|ollama|openai|anthropic|grok, " +
+            "or use AgenticaRunner with a host-authored planner.");
+        return 2;
+    }
+
     if (options.Planner == PlannerKind.Gemini && !GeminiCredentialsAvailable())
     {
         Console.Error.WriteLine("Gemini planner requested, but no Gemini API key was configured. Set GEMINI_API_KEY or GOOGLE_API_KEY.");
@@ -181,7 +192,8 @@ static async Task<int> InspectMcpAsync(IReadOnlyList<string> args)
     }
 
     await using var transport = await SdkMcpToolTransport.ConnectHttpAsync(
-        args[1], endpoint);
+        args[1], endpoint,
+        bearerToken: Environment.GetEnvironmentVariable("AGENTICA_MCP_BEARER_TOKEN"));
     foreach (var tool in await transport.ListToolsAsync(CancellationToken.None))
     {
         Console.WriteLine(JsonSerializer.Serialize(new
