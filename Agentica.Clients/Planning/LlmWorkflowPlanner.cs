@@ -35,15 +35,22 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
             llmRequest,
             cancellationToken).ConfigureAwait(false);
 
-        return await ParsePlanWithRepairAsync(
-                llmRequest,
-                response.StructuredJson ?? response.Text,
-                response.FinishReason,
-                MatchingContinuation(response),
-                version: 1,
-                isRefinement: false,
-                cancellationToken)
-            .ConfigureAwait(false);
+        try
+        {
+            return await ParsePlanWithRepairAsync(
+                    llmRequest,
+                    response.StructuredJson ?? response.Text,
+                    response.FinishReason,
+                    MatchingContinuation(response),
+                    version: 1,
+                    isRefinement: false,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            response.NativeContinuation?.Dispose();
+        }
     }
 
     public async Task<WorkflowPlan> RefinePlanAsync(
@@ -56,15 +63,22 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
             llmRequest,
             cancellationToken).ConfigureAwait(false);
 
-        return await ParsePlanWithRepairAsync(
-                llmRequest,
-                response.StructuredJson ?? response.Text,
-                response.FinishReason,
-                MatchingContinuation(response),
-                version: 2,
-                isRefinement: true,
-                cancellationToken)
-            .ConfigureAwait(false);
+        try
+        {
+            return await ParsePlanWithRepairAsync(
+                    llmRequest,
+                    response.StructuredJson ?? response.Text,
+                    response.FinishReason,
+                    MatchingContinuation(response),
+                    version: 2,
+                    isRefinement: true,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            response.NativeContinuation?.Dispose();
+        }
     }
 
     private async Task<WorkflowPlan> ParsePlanWithRepairAsync(
@@ -111,48 +125,63 @@ public sealed class LlmWorkflowPlanner : IExternalWorkflowPlanner
         LlmPlannerException lastException = firstException;
         var lastRepairFinishReason = LlmFinishReason.Unknown;
         var lastContinuation = nativeContinuation;
+        var repairContinuations = new HashSet<LlmNativeContinuation>(ReferenceEqualityComparer.Instance);
 
-        for (var attempt = 1; attempt <= _options.InvalidJsonRepairAttempts; attempt++)
+        try
         {
-            var repairRequest = isRefinement
-                ? WorkflowPlanPromptBuilder.BuildRefinementRepairRequest(
-                    originalRequest,
-                    lastJson,
-                    lastException.Message,
-                    attempt,
-                    _options,
-                    lastContinuation)
-                : WorkflowPlanPromptBuilder.BuildInitialPlanRepairRequest(
-                    originalRequest,
-                    lastJson,
-                    lastException.Message,
-                    attempt,
-                    _options,
-                    lastContinuation);
-
-            var repairResponse = await GenerateAsync(repairRequest, cancellationToken).ConfigureAwait(false);
-            lastJson = repairResponse.StructuredJson ?? repairResponse.Text;
-            lastRepairFinishReason = repairResponse.FinishReason;
-            lastContinuation = MatchingContinuation(repairResponse);
-
-            try
+            for (var attempt = 1; attempt <= _options.InvalidJsonRepairAttempts; attempt++)
             {
-                return isRefinement
-                    ? ParseRefinementPlan(lastJson, version, repairResponse.FinishReason)
-                    : ParsePlan(lastJson, version, repairResponse.FinishReason);
+                var repairRequest = isRefinement
+                    ? WorkflowPlanPromptBuilder.BuildRefinementRepairRequest(
+                        originalRequest,
+                        lastJson,
+                        lastException.Message,
+                        attempt,
+                        _options,
+                        lastContinuation)
+                    : WorkflowPlanPromptBuilder.BuildInitialPlanRepairRequest(
+                        originalRequest,
+                        lastJson,
+                        lastException.Message,
+                        attempt,
+                        _options,
+                        lastContinuation);
+
+                var repairResponse = await GenerateAsync(repairRequest, cancellationToken).ConfigureAwait(false);
+                if (repairResponse.NativeContinuation is { } continuation)
+                {
+                    repairContinuations.Add(continuation);
+                }
+                lastJson = repairResponse.StructuredJson ?? repairResponse.Text;
+                lastRepairFinishReason = repairResponse.FinishReason;
+                lastContinuation = MatchingContinuation(repairResponse);
+
+                try
+                {
+                    return isRefinement
+                        ? ParseRefinementPlan(lastJson, version, repairResponse.FinishReason)
+                        : ParsePlan(lastJson, version, repairResponse.FinishReason);
+                }
+                catch (LlmPlannerException exception)
+                {
+                    lastException = exception;
+                }
             }
-            catch (LlmPlannerException exception)
+
+            var payloadKind = isRefinement ? "refinement" : "plan";
+            var truncation = initialFinishReason == LlmFinishReason.MaxTokens ||
+                lastRepairFinishReason == LlmFinishReason.MaxTokens;
+            throw new LlmPlannerException(
+                $"Planner returned invalid {payloadKind} JSON and repair failed after {_options.InvalidJsonRepairAttempts} attempt(s). Initial finish reason: {initialFinishReason}; last repair finish reason: {lastRepairFinishReason}; truncation suspected: {truncation}. Last repair error: {lastException.Message}",
+                lastException);
+        }
+        finally
+        {
+            foreach (var continuation in repairContinuations)
             {
-                lastException = exception;
+                continuation.Dispose();
             }
         }
-
-        var payloadKind = isRefinement ? "refinement" : "plan";
-        var truncation = initialFinishReason == LlmFinishReason.MaxTokens ||
-            lastRepairFinishReason == LlmFinishReason.MaxTokens;
-        throw new LlmPlannerException(
-            $"Planner returned invalid {payloadKind} JSON and repair failed after {_options.InvalidJsonRepairAttempts} attempt(s). Initial finish reason: {initialFinishReason}; last repair finish reason: {lastRepairFinishReason}; truncation suspected: {truncation}. Last repair error: {lastException.Message}",
-            lastException);
     }
 
     private static WorkflowPlan ParseRefinementPlan(

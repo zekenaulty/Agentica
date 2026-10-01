@@ -465,6 +465,7 @@ public sealed class AgenticaClientsTests
         Assert.DoesNotContain(invalidJson, repair.Messages[^1].Content,
             StringComparison.Ordinal);
         Assert.Equal("native", repair.Metadata?["agentica.planner.repairContext"]);
+        Assert.Throws<ObjectDisposedException>(() => _ = continuation.HistoryStepsJson);
     }
 
     [Fact]
@@ -491,6 +492,63 @@ public sealed class AgenticaClientsTests
             client.Requests[1].Metadata?["agentica.planner.repairContext"]);
         Assert.Contains("{bad", client.Requests[1].Messages[^1].Content,
             StringComparison.Ordinal);
+        Assert.Throws<ObjectDisposedException>(() => _ = foreign.HistoryStepsJson);
+    }
+
+    [Fact]
+    public void Native_continuation_disposal_releases_private_payload_and_remains_redacted()
+    {
+        const string secret = "private-signed-thought";
+        var continuation = new LlmNativeContinuation("fake", "fake-model",
+            secret, "[{\"step\":\"private-signed-thought\"}]");
+
+        Assert.DoesNotContain(secret, JsonSerializer.Serialize(continuation),
+            StringComparison.Ordinal);
+        continuation.Dispose();
+        continuation.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => _ = continuation.SystemInstruction);
+        Assert.Throws<ObjectDisposedException>(() => _ = continuation.HistoryStepsJson);
+        Assert.DoesNotContain(secret, continuation.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(secret, JsonSerializer.Serialize(continuation),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Planner_releases_private_continuation_after_valid_plan()
+    {
+        var continuation = new LlmNativeContinuation("fake", "fake-model",
+            "system", "[{\"role\":\"user\",\"content\":\"private\"}]");
+        var valid = PlanJson("query_state", "Query", "ReadOnly");
+        var client = new FakeLlmClient(new LlmResponse("fake", "fake-model",
+            valid, valid, NativeContinuation: continuation));
+
+        await new LlmWorkflowPlanner(client).CreatePlanAsync(CreatePlanningRequest());
+
+        Assert.Throws<ObjectDisposedException>(() => _ = continuation.HistoryStepsJson);
+    }
+
+    [Fact]
+    public async Task Planner_releases_private_continuations_when_repair_fails()
+    {
+        const string invalid = "{bad";
+        var initial = new LlmNativeContinuation("fake", "fake-model",
+            "system", "[{\"role\":\"user\",\"content\":\"first\"}]");
+        var repair = new LlmNativeContinuation("fake", "fake-model",
+            "system", "[{\"role\":\"user\",\"content\":\"second\"}]");
+        var client = new FakeLlmClient(
+            new LlmResponse("fake", "fake-model", invalid, invalid,
+                NativeContinuation: initial),
+            new LlmResponse("fake", "fake-model", invalid, invalid,
+                NativeContinuation: repair));
+        var planner = new LlmWorkflowPlanner(client,
+            new LlmPlannerOptions(ModelId: "fake-model", InvalidJsonRepairAttempts: 1));
+
+        await Assert.ThrowsAsync<LlmPlannerException>(() =>
+            planner.CreatePlanAsync(CreatePlanningRequest()));
+
+        Assert.Throws<ObjectDisposedException>(() => _ = initial.HistoryStepsJson);
+        Assert.Throws<ObjectDisposedException>(() => _ = repair.HistoryStepsJson);
     }
 
     [Fact]

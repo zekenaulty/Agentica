@@ -8,10 +8,14 @@ namespace Agentica.Clients.Llm;
 /// ordinary JSON serialization, logs, planner text, and receipts. Only the matching adapter
 /// may interpret its bounded native payload. It is a continuation carrier, not
 /// canonical task state, an authority grant, or a verified account of reasoning.
+/// Disposal releases references to private strings; it cannot erase immutable
+/// string copies already made by provider parsing or the runtime.
 /// </summary>
-public sealed class LlmNativeContinuation
+public sealed class LlmNativeContinuation : IDisposable
 {
     internal const int MaxPayloadCharacters = 4_194_304;
+    private string? _systemInstruction;
+    private string? _historyStepsJson;
 
     internal LlmNativeContinuation(
         string providerName,
@@ -40,18 +44,26 @@ public sealed class LlmNativeContinuation
 
         ProviderName = providerName;
         ModelId = modelId;
-        SystemInstruction = systemInstruction;
-        HistoryStepsJson = historyStepsJson;
+        _systemInstruction = systemInstruction;
+        _historyStepsJson = historyStepsJson;
     }
 
     public string ProviderName { get; }
     public string ModelId { get; }
 
     [JsonIgnore]
-    internal string SystemInstruction { get; }
+    internal string SystemInstruction => Volatile.Read(ref _systemInstruction) ??
+        throw new ObjectDisposedException(nameof(LlmNativeContinuation));
 
     [JsonIgnore]
-    internal string HistoryStepsJson { get; }
+    internal string HistoryStepsJson => Volatile.Read(ref _historyStepsJson) ??
+        throw new ObjectDisposedException(nameof(LlmNativeContinuation));
+
+    public void Dispose()
+    {
+        Interlocked.Exchange(ref _historyStepsJson, null);
+        Interlocked.Exchange(ref _systemInstruction, null);
+    }
 
     public override string ToString() =>
         $"Native continuation for {ProviderName}/{ModelId} (payload redacted)";
