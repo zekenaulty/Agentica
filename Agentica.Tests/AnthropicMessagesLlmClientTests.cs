@@ -109,6 +109,41 @@ public sealed class AnthropicMessagesLlmClientTests
         Assert.Equal("And twice that?", messages[2].GetProperty("content").GetString());
     }
 
+    [Theory]
+    [InlineData("{\"input_tokens\":13,\"cache_read_input_tokens\":5,\"output_tokens\":7}", 13, 7, 5)]
+    [InlineData("{\"output_tokens\":7}", 8, 7, 2)]
+    [InlineData("{\"input_tokens\":0,\"cache_read_input_tokens\":0}", 0, 1, 0)]
+    public async Task Final_usage_overwrites_cumulative_counts_and_preserves_omitted_fields(
+        string usage, int expectedInput, int expectedOutput, int expectedCached)
+    {
+        var client = CreateClient(new StubHandler(_ => Task.FromResult(StreamResponse($$$$"""
+            event: message_start
+            data: {"type":"message_start","message":{"usage":{"input_tokens":8,"cache_read_input_tokens":2,"output_tokens":1}}}
+
+            event: content_block_start
+            data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"ok"}}
+
+            event: content_block_stop
+            data: {"type":"content_block_stop","index":0}
+
+            event: message_delta
+            data: {"type":"message_delta","usage":{{{{usage}}}}}
+
+            event: message_delta
+            data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}
+
+            event: message_stop
+            data: {"type":"message_stop"}
+
+            """))));
+        var response = await client.GenerateAsync(TextRequest());
+        using var continuation = response.NativeContinuation;
+        Assert.Equal(expectedInput, response.Usage?.PromptTokens);
+        Assert.Equal(expectedOutput, response.Usage?.OutputTokens);
+        Assert.Equal(expectedCached, response.Usage?.CachedPromptTokens);
+        Assert.Equal(expectedInput + expectedOutput, response.Usage?.TotalTokens);
+    }
+
     [Fact]
     public async Task Missing_signature_withholds_continuation_and_tool_block_fails()
     {

@@ -95,6 +95,68 @@ public sealed class GeminiInteractionsLlmClientTests
         Assert.Equal("text", body.GetProperty("response_format").GetProperty("type").GetString());
     }
 
+    [Theory]
+    [InlineData("completed")]
+    [InlineData("incomplete")]
+    public async Task Conflicting_terminal_output_fails_before_response_or_continuation(string status)
+    {
+        var client = CreateClient(new StubHandler(_ => Task.FromResult(StreamResponse($$$$"""
+            event: step.start
+            data: {"event_type":"step.start","index":0,"step":{"type":"model_output"}}
+
+            event: step.delta
+            data: {"event_type":"step.delta","index":0,"delta":{"type":"text","text":"accepted plan"}}
+
+            event: interaction.completed
+            data: {"event_type":"interaction.completed","interaction":{"status":"{{{{status}}}}","steps":[{"type":"thought","signature":"private-signature","summary":[]},{"type":"model_output","content":[{"type":"text","text":"different plan"}]}]}}
+
+            """))));
+        var events = new List<LlmStreamEvent>();
+        var error = await Assert.ThrowsAsync<LlmClientException>(async () =>
+        {
+            await foreach (var item in client.StreamAsync(new LlmRequest("gemini-test",
+                [new LlmMessage(LlmMessageRole.User, "Plan work.")])))
+                events.Add(item);
+        });
+        Assert.Equal("output_mismatch", error.ErrorClass);
+        Assert.Equal(LlmClientErrorKind.Transient, error.ErrorKind);
+        Assert.Contains(events, item => item.Kind == LlmStreamEventKind.TextDelta);
+        Assert.DoesNotContain(events, item => item.Kind == LlmStreamEventKind.Completed);
+        Assert.All(events, item => Assert.Null(item.Response));
+        Assert.DoesNotContain("private-signature", error.Message);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Terminal_output_preserves_order_and_can_supply_unstreamed_text(bool emitTextDelta)
+    {
+        var deltas = emitTextDelta ? """
+            event: step.start
+            data: {"event_type":"step.start","index":0,"step":{"type":"model_output"}}
+
+            event: step.delta
+            data: {"event_type":"step.delta","index":0,"delta":{"type":"text","text":"hello"}}
+
+
+            """ : string.Empty;
+        var terminal = """
+            event: interaction.completed
+            data: {"event_type":"interaction.completed","interaction":{"status":"completed","steps":[{"type":"thought","signature":"private-signature","summary":[{"type":"text","text":"not output"}]},{"type":"model_output","content":[{"type":"text","text":"he"},{"type":"text","text":"l"}]},{"type":"model_output","content":[{"type":"text","text":"lo"}]}]}}
+
+            """;
+        var client = CreateClient(new StubHandler(_ =>
+            Task.FromResult(StreamResponse(deltas + terminal))));
+        var result = await client.GenerateAsync(new LlmRequest("gemini-test",
+            [new LlmMessage(LlmMessageRole.User, "Say hello.")],
+            StructuredOutput: new LlmStructuredOutputOptions()));
+        using var continuation = result.NativeContinuation;
+        Assert.Equal("hello", result.Text);
+        Assert.Equal("hello", result.StructuredJson);
+        Assert.NotNull(continuation);
+        Assert.DoesNotContain("private-signature", JsonSerializer.Serialize(result));
+    }
+
     [Fact]
     public async Task Stateless_follow_up_replays_signed_native_steps_without_serializing_them()
     {

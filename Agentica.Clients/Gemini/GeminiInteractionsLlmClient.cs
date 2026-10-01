@@ -266,6 +266,15 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
                                 {
                                     completedSteps = ReconstructCompletedSteps(replaySteps);
                                 }
+                                if (completedSteps.ValueKind == JsonValueKind.Array)
+                                {
+                                    var nativeText = ExtractNativeOutputText(completedSteps);
+                                    if (text.Length > 0 && resultText != nativeText)
+                                    {
+                                        throw Failure("output_mismatch", LlmClientErrorKind.Transient);
+                                    }
+                                    resultText = nativeText;
+                                }
                                 var nativeContinuation = status == "completed"
                                     ? CreateContinuation(request, modelId,
                                         completedSteps,
@@ -440,6 +449,29 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
             body["response_format"] = format;
         }
         return body;
+    }
+
+    private static string ExtractNativeOutputText(JsonElement steps)
+    {
+        var output = new StringBuilder();
+        foreach (var step in steps.EnumerateArray())
+        {
+            if (GetString(step, "type") != "model_output") continue;
+            var content = GetObject(step, "content");
+            if (content.ValueKind != JsonValueKind.Array)
+                throw Failure("invalid_native_output", LlmClientErrorKind.Transient);
+            foreach (var part in content.EnumerateArray())
+            {
+                if (GetString(part, "type") != "text")
+                    throw Failure("unsupported_native_output", LlmClientErrorKind.BadRequest);
+                var chunk = GetString(part, "text")
+                    ?? throw Failure("invalid_native_output", LlmClientErrorKind.Transient);
+                if (chunk.Length > MaxOutputCharacters - output.Length)
+                    throw Failure("output_too_large", LlmClientErrorKind.BadRequest);
+                output.Append(chunk);
+            }
+        }
+        return output.ToString();
     }
 
     private static LlmNativeContinuation? CreateContinuation(

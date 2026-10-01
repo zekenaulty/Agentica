@@ -118,6 +118,7 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
                                 messageId = GetString(initial, "id");
                                 var initialUsage = GetObject(initial, "usage");
                                 inputTokens = GetInt(initialUsage, "input_tokens");
+                                outputTokens = GetInt(initialUsage, "output_tokens");
                                 cacheReadTokens = GetInt(initialUsage, "cache_read_input_tokens");
                                 yield return new LlmStreamEvent(LlmStreamEventKind.Activity,
                                     "message_start");
@@ -166,8 +167,12 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
                             case "message_delta":
                                 stopReason = GetString(GetObject(root, "delta"), "stop_reason")
                                     ?? stopReason;
-                                outputTokens = GetInt(GetObject(root, "usage"), "output_tokens")
-                                    ?? outputTokens;
+                                var finalUsage = GetObject(root, "usage");
+                                // These are cumulative totals; omitted fields retain the last value.
+                                inputTokens = GetInt(finalUsage, "input_tokens") ?? inputTokens;
+                                outputTokens = GetInt(finalUsage, "output_tokens") ?? outputTokens;
+                                cacheReadTokens = GetInt(finalUsage, "cache_read_input_tokens")
+                                    ?? cacheReadTokens;
                                 break;
                             case "message_stop":
                                 if (!started || stopReason is null || blocks.Count == 0 ||
