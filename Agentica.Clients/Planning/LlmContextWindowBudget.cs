@@ -41,10 +41,11 @@ public sealed class Utf8ByteTokenProxy : ILlmInputTokenEstimator
 {
     public static Utf8ByteTokenProxy Instance { get; } = new();
 
-    public string Name => "utf8-request-byte-proxy-v1";
+    public string Name => "utf8-request-byte-proxy-v2";
 
+    // Host bookkeeping is not transmitted by adapters and must not count itself.
     public long EstimateTokens(LlmRequest request) =>
-        (long)Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(request)) +
+        (long)Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(request with { Metadata = null })) +
         (request.NativeContinuation is { } continuation
             ? Encoding.UTF8.GetByteCount(continuation.HistoryStepsJson)
             : 0) + 512;

@@ -468,6 +468,43 @@ public static class WorkflowPlanPromptBuilder
             throw new LlmPlannerException(
                 "Planner repair context exceeds the configured token allowance.");
         }
+        if (originalRequest.InputCompilationReceipt is { } originalReceipt)
+        {
+            var native = repairRequest.NativeContinuation;
+            var receipt = originalReceipt with
+            {
+                MaxInputCharacters = options.MaxInputCharacters,
+                InputCharacters = checked((int)(messages.Sum(message => (long)message.Content.Length) +
+                    (native?.HistoryStepsJson.Length ?? 0))),
+                InputSha256 = PlanningPromptCompiler.ComputeInputHash(
+                    messages.Select(message => message.Content), native?.HistoryStepsJson),
+                InputAllowanceTokens = options.ContextWindowBudget?.InputAllowanceTokens,
+                EstimatedInputTokens = options.ContextWindowBudget is null ? null :
+                    options.InputTokenEstimator.EstimateTokens(repairRequest),
+                TokenEstimator = options.ContextWindowBudget is null ? null : options.InputTokenEstimator.Name,
+                Decisions = originalReceipt.Decisions.Where(item => item.Kind != "nativeContinuation")
+                    .Append(new LlmInputDecision("nativeContinuation",
+                        originalReceipt.Decisions.LastOrDefault(item => item.Kind == "nativeContinuation")?.RefId
+                            ?? "repair", native is not null, metadata["agentica.planner.repairContext"]))
+                    .ToArray()
+            };
+            metadata["agentica.planner.inputSha256"] = receipt.InputSha256;
+            metadata["agentica.planner.inputCharacters"] = receipt.InputCharacters.ToString();
+            metadata["agentica.planner.continuation"] = native is not null ? "native" : "none";
+            if (receipt.InputAllowanceTokens is { } allowance)
+            {
+                metadata["agentica.planner.inputTokenAllowance"] = allowance.ToString();
+                metadata["agentica.planner.estimatedInputTokens"] = receipt.EstimatedInputTokens!.Value.ToString();
+                metadata["agentica.planner.tokenEstimator"] = receipt.TokenEstimator!;
+            }
+            else
+            {
+                metadata.Remove("agentica.planner.inputTokenAllowance");
+                metadata.Remove("agentica.planner.estimatedInputTokens");
+                metadata.Remove("agentica.planner.tokenEstimator");
+            }
+            repairRequest = repairRequest with { InputCompilationReceipt = receipt };
+        }
         return repairRequest;
     }
 

@@ -227,6 +227,62 @@ public sealed class PlanningPromptBudgetTests
         Assert.Equal("quoted", tokenBound.Metadata?["agentica.planner.repairContext"]);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Repair_receipt_accounts_for_final_native_or_quoted_input(bool forceFallback)
+    {
+        var options = new LlmPlannerOptions(ModelId: "model", StatelessRepair: true,
+            InvalidJsonRepairAttempts: 1, MaxRepairPayloadCharacters: 1000,
+            MaxInputCharacters: 20_000)
+        {
+            ContextWindowBudget = new LlmContextWindowBudget(100_000, 4096)
+        };
+        var original = WorkflowPlanPromptBuilder.BuildInitialPlanRequest(
+            new PlanningRequest(new RunRequest("Repair the current bounded proposal"), [], [], []), options);
+        var originalReceipt = Assert.IsType<LlmInputCompilationReceipt>(original.InputCompilationReceipt);
+        var originalHash = originalReceipt.InputSha256;
+        var history = JsonSerializer.Serialize(new[]
+        {
+            new { role = "user", content = original.Messages[^1].Content },
+            new { role = "assistant", content = "private-history-marker" +
+                (forceFallback ? new string('x', 30_000) : "{bad") }
+        });
+        using var carrier = new LlmNativeContinuation("fixture", "model",
+            original.Messages[0].Content, history);
+
+        var repaired = WorkflowPlanPromptBuilder.BuildInitialPlanRepairRequest(
+            original, "{bad", "Missing plan fields", 1, options, carrier);
+        var receipt = Assert.IsType<LlmInputCompilationReceipt>(repaired.InputCompilationReceipt);
+        var expectedHistory = forceFallback ? null : history;
+        var expectedCharacters = repaired.Messages.Sum(message => message.Content.Length) +
+            (expectedHistory?.Length ?? 0);
+        var expectedInput = string.Join("\n", repaired.Messages.Select(message => message.Content)) +
+            (expectedHistory is null ? string.Empty : "\n" + expectedHistory);
+        var expectedHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(expectedInput)));
+
+        Assert.Equal(forceFallback ? "quoted" : "native", repaired.Metadata!["agentica.planner.repairContext"]);
+        Assert.Equal(forceFallback ? "none" : "native", repaired.Metadata["agentica.planner.continuation"]);
+        Assert.Equal(!forceFallback, repaired.NativeContinuation is not null);
+        Assert.Equal(options.MaxInputCharacters, receipt.MaxInputCharacters);
+        Assert.Equal(expectedCharacters, receipt.InputCharacters);
+        Assert.Equal(expectedHash, receipt.InputSha256);
+        Assert.NotEqual(originalHash, receipt.InputSha256);
+        Assert.Equal(receipt.InputSha256, repaired.Metadata["agentica.planner.inputSha256"]);
+        Assert.Equal(expectedCharacters.ToString(), repaired.Metadata["agentica.planner.inputCharacters"]);
+        Assert.Equal(options.InputTokenEstimator.EstimateTokens(repaired), receipt.EstimatedInputTokens);
+        Assert.Equal(receipt.EstimatedInputTokens!.Value.ToString(),
+            repaired.Metadata["agentica.planner.estimatedInputTokens"]);
+        Assert.Equal(options.ContextWindowBudget.InputAllowanceTokens, receipt.InputAllowanceTokens);
+        Assert.Equal(options.InputTokenEstimator.Name, receipt.TokenEstimator);
+        var decision = Assert.Single(receipt.Decisions, item => item.Kind == "nativeContinuation");
+        Assert.Equal(!forceFallback, decision.Included);
+        Assert.DoesNotContain("private-history-marker", JsonSerializer.Serialize(receipt));
+        Assert.Same(originalReceipt, original.InputCompilationReceipt);
+        Assert.Equal(originalHash, original.Metadata!["agentica.planner.inputSha256"]);
+    }
+
     [Fact]
     public void Token_window_reserves_capacity_and_trims_multibyte_older_evidence()
     {
@@ -261,7 +317,7 @@ public sealed class PlanningPromptBudgetTests
 
         Assert.Equal(allowance, receipt.InputAllowanceTokens);
         Assert.True(receipt.EstimatedInputTokens <= allowance);
-        Assert.Equal("utf8-request-byte-proxy-v1", receipt.TokenEstimator);
+        Assert.Equal("utf8-request-byte-proxy-v2", receipt.TokenEstimator);
         Assert.Contains(receipt.Decisions, item =>
             item is { RefId: "observation_0", Included: false });
         Assert.Contains(receipt.Decisions, item =>

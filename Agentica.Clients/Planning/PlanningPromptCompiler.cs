@@ -84,12 +84,18 @@ internal static class PlanningPromptCompiler
                 "frame", item.FrameId, true,
                 compactedFrames[index] ? "compact" : "full")))
             .ToArray();
-        var inputHash = Convert.ToHexStringLower(SHA256.HashData(
-            Encoding.UTF8.GetBytes(instruction + "\n" + prompt)));
+        var inputHash = ComputeInputHash([instruction, prompt]);
         return new Result(prompt, new LlmInputCompilationReceipt(
             maxInputCharacters, instruction.Length + prompt.Length,
             inputHash, decisions, tokenAllowance, estimatedTokens,
             tokenAllowance is null ? null : options.InputTokenEstimator.Name));
+    }
+
+    internal static string ComputeInputHash(IEnumerable<string> messages, string? nativeHistory = null)
+    {
+        var input = string.Join("\n", messages);
+        if (nativeHistory is not null) input += "\n" + nativeHistory;
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(input)));
     }
 
     public static bool RepairFitsTokens(

@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using Agentica.Clients.Llm;
 using Agentica.Observations;
 using Agentica.Planning;
@@ -119,12 +117,11 @@ internal sealed class LlmPlanningSession : IWorkflowPlannerSession, IExternalWor
         if (receipt is not null)
         {
             var native = request.NativeContinuation;
-            var hashInput = string.Join("\n", request.Messages.Select(message => message.Content));
-            if (native is not null) hashInput += "\n" + native.HistoryStepsJson;
             receipt = receipt with
             {
                 InputCharacters = checked(receipt.InputCharacters + (native?.HistoryStepsJson.Length ?? 0)),
-                InputSha256 = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(hashInput))),
+                InputSha256 = PlanningPromptCompiler.ComputeInputHash(
+                    request.Messages.Select(message => message.Content), native?.HistoryStepsJson),
                 EstimatedInputTokens = _options.ContextWindowBudget is null ? null :
                     _options.InputTokenEstimator.EstimateTokens(request),
                 Decisions = receipt.Decisions.Append(new LlmInputDecision(
