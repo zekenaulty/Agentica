@@ -114,15 +114,17 @@ The [Gemini thought-signature thesis](https://docs.google.com/document/d/1UefWYj
 
 ## Verification and extension boundaries
 
-The shared [runner/session test](../Agentica.Tests/LlmPlanningSessionTests.cs) runs once for each row below through the actual adapter parser and Agentica runner. It asserts one query, normalized evidence in the follow-up request, native history replay, one host mutation, authoritative completion, and carrier disposal. [Reasoning-control fixtures](../Agentica.Tests/ProviderReasoningControlTests.cs) inspect exact request fields and rejection before network dispatch.
+The shared [runner/session test](../Agentica.Tests/LlmPlanningSessionTests.cs) runs once for each row below through the actual adapter parser and Agentica runner. It asserts one query, normalized evidence in the follow-up request, native history replay, one host mutation, authoritative completion, and carrier disposal. [Reasoning-control fixtures](../Agentica.Clients.Tests/ProviderReasoningControlTests.cs) inspect exact request fields and rejection before network dispatch.
 
 | Provider | Adapter seam fixtures | Private native carrier |
 | --- | --- | --- |
-| OpenAI | [Responses tests](../Agentica.Tests/OpenAiResponsesLlmClientTests.cs) | Complete native output including encrypted reasoning |
-| Google Gemini | [Interactions tests](../Agentica.Tests/GeminiInteractionsLlmClientTests.cs) | Ordered model/thought steps and signatures |
-| Ollama | [Native chat tests](../Agentica.Tests/OllamaLlmClientTests.cs) | Native assistant content and thinking |
-| Grok / xAI | [Responses tests](../Agentica.Tests/XaiResponsesLlmClientTests.cs) | Native output with encrypted reasoning, bound to xAI |
-| Anthropic | [Messages tests](../Agentica.Tests/AnthropicMessagesLlmClientTests.cs) | Complete signed/redacted thinking and text blocks |
+| OpenAI | [Responses tests](../Agentica.Clients.Tests/OpenAiResponsesLlmClientTests.cs) | Complete native output including encrypted reasoning |
+| Google Gemini | [Interactions tests](../Agentica.Clients.Tests/GeminiInteractionsLlmClientTests.cs) | Ordered model/thought steps and signatures |
+| Ollama | [Native chat tests](../Agentica.Clients.Tests/OllamaLlmClientTests.cs) | Native assistant content and thinking |
+| Grok / xAI | [Responses tests](../Agentica.Clients.Tests/XaiResponsesLlmClientTests.cs) | Native output with encrypted reasoning, bound to xAI |
+| Anthropic | [Messages tests](../Agentica.Clients.Tests/AnthropicMessagesLlmClientTests.cs) | Complete signed/redacted thinking and text blocks |
+
+The adapter fixtures and reasoning-control tests can run through the focused `Agentica.Clients.Tests` project. The aggregate `Agentica.Tests` links those same sources and retains the runner/session and live-provider tests; see [capability test suites](testing-capability-suites.md).
 
 The checked-in [modern-provider live smoke harness](live-provider-verification.md) verifies streamed progress and a native follow-up without logging output, signatures, or credentials. OpenAI and Gemini passed. Remaining live Anthropic, xAI, and Ollama checks are deferred by the host's explicit direction. Acceptance for this scope requires all five adapters and their tested integration seam: request mapping, streaming, native continuation, governed tool execution, and normalized receipts. The recorded live limits remain visible alongside that fixture coverage.
 
