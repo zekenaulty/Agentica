@@ -72,8 +72,17 @@ public sealed class McpSdkIntegrationTests
             {
                 while (!_stop.IsCancellationRequested)
                 {
-                    var context = await _listener.GetContextAsync()
-                        .WaitAsync(_stop.Token);
+                    HttpListenerContext context;
+                    try
+                    {
+                        context = await _listener.GetContextAsync()
+                            .WaitAsync(_stop.Token);
+                    }
+                    catch (ObjectDisposedException) when (_stop.IsCancellationRequested)
+                    {
+                        // Closing the listener can complete accept before cancellation wins.
+                        break;
+                    }
                     await HandleAsync(context);
                 }
             }

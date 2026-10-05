@@ -19,5 +19,6 @@ TestResults
 .env
 .env.*
 Agentica.Tests
+Agentica.Clients.Tests
 Agentica.ReadMe.md
 eng

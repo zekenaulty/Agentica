@@ -102,6 +102,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Keep this project's complete regression/coverage population while the
+         focused capability project owns the physical provider test sources. -->
+    <Compile Include="..\Agentica.Clients.Tests\**\*.cs"
+             Exclude="..\Agentica.Clients.Tests\bin\**;..\Agentica.Clients.Tests\obj\**"
+             Link="ProviderClients\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
 

@@ -49,11 +49,30 @@ jobs:
       - name: Restore the locked dependency graph
         run: dotnet restore Agentica.slnx --locked-mode --configfile NuGet.config
 
+      - name: Restore the focused provider suite
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath 'Agentica.Clients.Tests/Packages.lock.json')) {
+            throw 'The focused provider suite requires its checked-in Packages.lock.json.'
+          }
+          dotnet restore Agentica.Clients.Tests/Agentica.Clients.Tests.csproj --locked-mode --configfile NuGet.config
+
       - name: Verify lock files stayed unchanged
-        run: git diff --exit-code -- Agentica/Packages.lock.json Agentica.Clients/Packages.lock.json Agentica.Lab/Packages.lock.json Agentica.Tests/Packages.lock.json
+        run: git diff --exit-code -- Agentica/Packages.lock.json Agentica.Clients/Packages.lock.json Agentica.Lab/Packages.lock.json Agentica.Tests/Packages.lock.json Agentica.Clients.Tests/Packages.lock.json
 
       - name: Build Release with warnings as errors
         run: dotnet build Agentica.slnx --configuration Release --no-restore
+
+      - name: Build the focused provider suite
+        run: dotnet build Agentica.Clients.Tests/Agentica.Clients.Tests.csproj --configuration Release --no-restore
+
+      - name: Verify the focused provider suite entrypoint
+        run: >-
+          dotnet test Agentica.Clients.Tests/Agentica.Clients.Tests.csproj
+          --configuration Release
+          --no-build
+          --no-restore
+          -- RunConfiguration.TreatNoTestsAsError=true
 
       - name: Run deterministic tests including Windows junction proof
         run: >-
@@ -93,19 +112,42 @@ jobs:
       - name: Restore the locked dependency graph
         run: dotnet restore Agentica.slnx --locked-mode --configfile NuGet.config
 
+      - name: Restore the focused provider suite
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath 'Agentica.Clients.Tests/Packages.lock.json')) {
+            throw 'The focused provider suite requires its checked-in Packages.lock.json.'
+          }
+          dotnet restore Agentica.Clients.Tests/Agentica.Clients.Tests.csproj --locked-mode --configfile NuGet.config
+
       - name: Verify lock files stayed unchanged
         shell: bash
-        run: git diff --exit-code -- Agentica/Packages.lock.json Agentica.Clients/Packages.lock.json Agentica.Lab/Packages.lock.json Agentica.Tests/Packages.lock.json
+        run: git diff --exit-code -- Agentica/Packages.lock.json Agentica.Clients/Packages.lock.json Agentica.Lab/Packages.lock.json Agentica.Tests/Packages.lock.json Agentica.Clients.Tests/Packages.lock.json
 
       - name: Reject vulnerable or deprecated dependencies
         shell: pwsh
         run: ./eng/Assert-PackageAudit.ps1
+
+      - name: Audit the focused provider suite dependencies
+        shell: pwsh
+        run: ./eng/Assert-PackageAudit.ps1 -Solution Agentica.Clients.Tests/Agentica.Clients.Tests.csproj
 
       - name: Verify formatting
         run: dotnet format Agentica.slnx --verify-no-changes --no-restore
 
       - name: Build Release with warnings as errors
         run: dotnet build Agentica.slnx --configuration Release --no-restore
+
+      - name: Build the focused provider suite
+        run: dotnet build Agentica.Clients.Tests/Agentica.Clients.Tests.csproj --configuration Release --no-restore
+
+      - name: Verify the focused provider suite entrypoint
+        run: >-
+          dotnet test Agentica.Clients.Tests/Agentica.Clients.Tests.csproj
+          --configuration Release
+          --no-build
+          --no-restore
+          -- RunConfiguration.TreatNoTestsAsError=true
 
       - name: Run selected security analyzers
         run: >-

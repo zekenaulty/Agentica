@@ -30,6 +30,7 @@ Implemented reality:
 - `Agentica.Clients` exists as the provider SDK isolation project.
 - `Agentica.Lab` is the internal lab executable for deterministic proofs, scenario harnesses, probes, Chat, orchestration experiments, benchmarks, and run inspection. It is not a supported product CLI.
 - `Agentica.Tests` covers runtime contracts, validation, client mapping, retry behavior, harness boundaries, real Lab subprocesses, package consumption, container contracts, and bounded/redacted logging.
+- `Agentica.Clients.Tests` provides a focused deterministic provider-adapter suite without building Lab or MCP. `Agentica.Tests` links the same source files to preserve the complete aggregate and its coverage gate.
 - Deterministic planning remains the regression baseline.
 - Gemini-backed planning exists through `LlmWorkflowPlanner` and `GeminiLlmClient`.
 - Tool input contracts, effect policy, explicit completion evaluation, bounded continuation, mutation-safe blocked retries, provider-call retries, full multi-attempt envelopes, and planner context shaping are implemented.
@@ -176,6 +177,8 @@ Agentica.slnx
   Agentica.Tests/    boundary and behavior tests
 ```
 
+`Agentica.Clients.Tests/` is an optional focused project outside `Agentica.slnx`. Its source files are also linked into the aggregate `Agentica.Tests`, so a solution test run still executes each case once. See [capability test suites](docs/testing-capability-suites.md) for suite selection and coverage boundaries.
+
 Do not create runtime project bloat such as:
 
 ```text
@@ -242,6 +245,15 @@ Test:
 ```powershell
 dotnet test Agentica.slnx --configuration Release --no-build
 ```
+
+For a provider-adapter change, use the smaller deterministic suite:
+
+```powershell
+dotnet restore Agentica.Clients.Tests/Agentica.Clients.Tests.csproj --locked-mode --configfile NuGet.config
+dotnet test Agentica.Clients.Tests/Agentica.Clients.Tests.csproj --configuration Release --no-restore
+```
+
+This focused command covers adapter parsing, streaming, continuation, and reasoning controls. It does not replace the aggregate release and coverage gates or the separately opted-in live-provider tests. CI checks the focused entrypoint as well as the aggregate; the intentional overlap verifies suite wiring and is not additional unique coverage.
 
 Run proof slice:
 
