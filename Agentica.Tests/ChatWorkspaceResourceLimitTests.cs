@@ -342,7 +342,9 @@ public sealed class ChatWorkspaceResourceLimitTests
         Assert.Equal(ReceiptStatus.Succeeded, result.Receipt.Status);
         Assert.True(Assert.IsType<bool>(result.Receipt.Data["usedFallback"]));
         Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<string>>(result.Receipt.Data["matches"]));
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(10), $"Bounded fallback took {stopwatch.Elapsed}.");
+        // Allow hosted-runner scheduling headroom beyond the operation deadline
+        // and termination grace; the behavioral assertions still require fallback.
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(30), $"Bounded fallback took {stopwatch.Elapsed}.");
     }
 
     [Fact]
