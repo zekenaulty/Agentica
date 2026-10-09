@@ -514,6 +514,7 @@ internal sealed class WorkspaceFileSearchTool : ITool
     private readonly WorkspacePathBoundary _workspaceBoundary;
     private readonly WorkspaceSearchProcessSpec _processSpec;
     private readonly WorkspaceSearchResourceLimits _limits;
+    private readonly TimeProvider _timeProvider;
 
     public WorkspaceFileSearchTool(string workspaceRoot)
         : this(
@@ -526,7 +527,8 @@ internal sealed class WorkspaceFileSearchTool : ITool
     internal WorkspaceFileSearchTool(
         string workspaceRoot,
         WorkspaceSearchProcessSpec processSpec,
-        WorkspaceSearchResourceLimits limits)
+        WorkspaceSearchResourceLimits limits,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(processSpec);
         ArgumentNullException.ThrowIfNull(limits);
@@ -534,6 +536,7 @@ internal sealed class WorkspaceFileSearchTool : ITool
         _workspaceBoundary = new WorkspacePathBoundary(workspaceRoot);
         _processSpec = processSpec;
         _limits = limits;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task<ToolResult> ExecuteAsync(ToolInvocation invocation, CancellationToken cancellationToken)
@@ -550,32 +553,51 @@ internal sealed class WorkspaceFileSearchTool : ITool
         }
 
         var maxResults = ChatToolInput.Int(invocation.Input, "maxResults", 40, 1, 200);
-        using var durationCancellation = new CancellationTokenSource(_limits.MaxSearchDuration);
+        var startedTimestamp = _timeProvider.GetTimestamp();
+        using var durationCancellation = new CancellationTokenSource(_limits.MaxSearchDuration, _timeProvider);
         using var searchCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             durationCancellation.Token);
         try
         {
-            return await ExecuteBoundedSearchAsync(
+            var result = await ExecuteBoundedSearchAsync(
                     invocation,
                     pattern,
                     ChatToolInput.String(invocation.Input, "path"),
                     maxResults,
                     searchCancellation.Token)
                 .ConfigureAwait(false);
+
+            // Timer callbacks can run late, so cancellation alone cannot prove
+            // that a completed search stayed within its elapsed-time budget.
+            if (result.Receipt.Status == ReceiptStatus.Succeeded)
+            {
+                var durationExpired = durationCancellation.IsCancellationRequested ||
+                    _timeProvider.GetElapsedTime(startedTimestamp) >= _limits.MaxSearchDuration;
+                cancellationToken.ThrowIfCancellationRequested();
+                if (durationExpired)
+                {
+                    return SearchDurationRefused(invocation);
+                }
+            }
+
+            return result;
         }
         catch (OperationCanceledException) when (
             durationCancellation.IsCancellationRequested &&
             !cancellationToken.IsCancellationRequested)
         {
-            return Refused(
-                invocation,
-                "Workspace search refused: the owned search-duration limit expired.",
-                "workspace.search.duration",
-                "search_duration",
-                "workspace_search");
+            return SearchDurationRefused(invocation);
         }
     }
+
+    private static ToolResult SearchDurationRefused(ToolInvocation invocation) =>
+        Refused(
+            invocation,
+            "Workspace search refused: the owned search-duration limit expired.",
+            "workspace.search.duration",
+            "search_duration",
+            "workspace_search");
 
     private async Task<ToolResult> ExecuteBoundedSearchAsync(
         ToolInvocation invocation,
