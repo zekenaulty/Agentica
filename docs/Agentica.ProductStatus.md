@@ -1,10 +1,18 @@
 # Agentica Product Status And Goal Xref
 
-Canonical status date: 2026-07-27
+Canonical status date: 2026-10-09
 
 Lifecycle: Incubating
 
 This is the authoritative high-level status page for Agentica. Detailed goal documents remain useful design records and evidence logs, but they do not independently set current priority. When another document conflicts with this page about product identity, active work, lifecycle, or completion, this page wins.
+
+## Current integration slice: Lab web and external hosts
+
+The initial `Agentica.Lab.Web` service is implemented and locally qualified. It runs the existing Agentica loop with five streaming provider adapters, a browser dashboard, a reusable external-host WebSocket contract, bounded context and evidence tools, and durable original-action custody for reconnect/restart reconciliation. The scoped inventory is a deterministic fixture. The service contains no Maze Battle simulation or domain policy.
+
+Focused evidence: 70 web tests passed; the existing aggregate passed 721 tests with seven explicitly skipped live-provider checks. The SDK and browser qualification are recorded in [the kickoff guide](lab-web-kickoff.md). [The external-host contract](external-host-browser.md) is the adoption boundary for Maze Battle and other hosts.
+
+The remaining proving-ground gate is actual external-host adoption and integration. Live-provider qualification remains deferred; native GenerateContent streaming and full durable runtime/provider continuation are separate follow-ons. This slice adds no public-package readiness claim. The dated hardening-program scores below remain historical evidence for their original bounded gates.
 
 ## Product Truth
 
@@ -37,6 +45,7 @@ The hardening gates now support internal research artifacts, not a public releas
 | `Agentica/Orchestration` | Task-level adaptive supervision | Bounded proof contract is fail-closed; broader surface remains Incubating | Keep experimental and excluded from general product claims |
 | `Agentica.Clients` | Provider SDK isolation and LLM planner adapters | Alpha adapter layer | Keep |
 | `Agentica.Lab` | Lab, harness host, benchmark suite, demos, probes, Chat prototype, and run inspection | Internal research surface, explicitly non-packable, not a supported CLI | Keep the boundary explicit and stop routing general product experiments into it |
+| `Agentica.Lab.Web` | Browser Lab and domain-neutral external-host service over the existing runtime | Initial service locally qualified; external integration ongoing; non-packable | Keep canonical domain state and effects in each host |
 | `Agentica.Tests` | Runtime/client contracts and selected lab behavior tests | Strong internal verification, including package-consumer and real-process gates | Keep release gates representative and fail closed |
 | Future `Agentica.Cli` | Thin supported shell over stable runtime APIs | Does not exist | Reserve the name until productization |
 | Future external workspace | Independent host consuming built artifacts rather than source links | Does not exist | Required before reusable-package readiness can be claimed |

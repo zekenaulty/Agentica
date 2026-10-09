@@ -29,6 +29,7 @@ Implemented reality:
 - `Agentica` is the central in-process runtime package.
 - `Agentica.Clients` exists as the provider SDK isolation project.
 - `Agentica.Lab` is the internal lab executable for deterministic proofs, scenario harnesses, probes, Chat, orchestration experiments, benchmarks, and run inspection. It is not a supported product CLI.
+- `Agentica.Lab.Web` is the local browser Lab and reusable external-host service. Hosts bind scoped capabilities and retain world/effect ownership while the actual Agentica runner streams planning telemetry, invokes remote tools, records evidence and checks completion. See the [web kickoff guide](docs/lab-web-kickoff.md) and [browser host contract](docs/external-host-browser.md).
 - `Agentica.Tests` covers runtime contracts, validation, client mapping, retry behavior, harness boundaries, real Lab subprocesses, package consumption, container contracts, and bounded/redacted logging.
 - `Agentica.Clients.Tests` provides a focused deterministic provider-adapter suite without building Lab or MCP. `Agentica.Tests` links the same source files to preserve the complete aggregate and its coverage gate.
 - Deterministic planning remains the regression baseline.
