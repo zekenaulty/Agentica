@@ -107,7 +107,7 @@ type ProviderSettings = {
   model?: string | null;
   thinkingEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null;
   maxOutputTokens?: number; // default 4096
-  contextWindowTokens?: number; // default 32768
+  contextWindowTokens?: number; // default 131072
   includeThoughtSummaries?: boolean; // default false
   geminiApi?: 'interactions' | null;
 };
@@ -185,6 +185,8 @@ const host = new AgenticaHost({
   loadAction: key => actionStore.load(key),
   saveAction: (key, record) => actionStore.save(key, record),
   onAction: action => applyBoundAction(action),
+  // Optional: inspect the original effect; never invoke the capability again.
+  reconcileAction: (action, retainedRecord) => inspectOriginalEffect(action, retainedRecord),
   onMessage: message => displayProgress(message),
   onStatus: status => displayConnectionState(status)
 });
@@ -284,10 +286,12 @@ Supply **both** persistence hooks for restart protection:
 
 - `loadAction(key)` returns a retained record or `null`.
 - `saveAction(key, record)` must complete only after the reservation or result is stored.
-- A record is `{ fingerprint, status: 'pending' }` or `{ fingerprint, status: 'completed', result }`.
+- A record is `{ fingerprint, status: 'pending' }`, `{ fingerprint, status: 'unresolved', result }`, or `{ fingerprint, status: 'completed', result }`. Only a concrete non-unresolved result can be completed. Legacy `completed` records carrying an unresolved result are read as unresolved.
 - `actionKey(action)` and `actionFingerprint(action)` are exported for hosts that atomically persist their world transition and completed result in `onAction`.
 
 For effects, the authoritative host should atomically commit its state transition and completed action result. If the process crashes between dispatch and recording the result, the pending reservation prevents re-execution. Reconcile authoritative state before resolving that pending attempt. The SDK does not infer whether the effect happened.
+
+An unresolved `onAction` response stays uncertain in the client. Its original durable reservation remains intact, so storing uncertainty cannot overwrite a concurrent host commit of the exact completed result. Storage hooks should enforce that completed results are immutable, including against concurrent writers. Reconciliation reloads durable custody even when the same SDK instance has cached an older pending/unresolved record. Changed fingerprints or changed completed results are rejected; known completed evidence is preserved.
 
 Without persistence hooks, duplicate protection covers only the current `AgenticaHost` instance. It does not establish restart durability or protect separate host writers. The host must enforce a single writer or a transactional revision fence for the underlying world/save. The browser sample uses a Web Lock and one localStorage write for its small isolated state and exact action result; its storage implementation is an example, not a general database adapter.
 
@@ -299,7 +303,9 @@ await host.stop(runId);
 host.close(); // Disconnects transport; does not imply cancellation.
 ```
 
-Reconnection is explicit. The service requests `action.reconcile` for a previously dispatched unresolved action. The SDK looks for the exact retained result and never calls `onAction` for reconciliation. Missing or pending results return `unresolved`. A result completed after disconnection remains in the host store for reconciliation.
+Reconnection is explicit. The service requests `action.reconcile` for a previously dispatched unresolved action. The SDK refreshes durable custody and returns an exact retained concrete result, without calling `onAction`. This picks up a late result committed by the host after the SDK originally observed pending or unresolved custody.
+
+If no completed result exists, the optional constructor callback `reconcileAction(action, retainedRecord)` may inspect authoritative state and the original attempt journal. It returns the original `HostActionResult`, or `null`/`undefined`/an unresolved result if the outcome remains unknown. It must not execute or repeat the capability. The SDK validates and persists concrete resolution before sending it; a failed persistence write keeps the service response unresolved. Missing evidence without a callback stays unresolved. A cached completed result cannot be replaced by a later changed record.
 
 `stop` requests cancellation and prevents queued, unstarted actions from invoking the host. An action already executing may still finish; the host must retain its result. Cancellation does not roll back an external effect. Control-request timeouts are reported without automatic repetition.
 
@@ -355,7 +361,7 @@ const outstanding = recovery.filter(item => !item.resolved);
 // Keep the same session fenced while anything is outstanding.
 ```
 
-`recover()` never calls `onAction`. It compares original fingerprints, preserves action/session/epoch identities, persists an established host result before POST, and returns per-entry `resolved`, `unresolved`, `live_run`, or `error` outcomes. Missing evidence produces `unresolved` without submitting invented proof. An expired original deadline does not prevent reporting a previously established result; it still prevents a new invocation. Recovering an effect does not retroactively turn the lost run into a successful completed run. Recovery resolves custody only; a subsequent new run must supply a fresh observation, since the HTTP recovery route does not rebuild lost planner context or update its old completion outcome.
+`recover()` never calls `onAction`. It refreshes durable records, compares original fingerprints, preserves action/session/epoch identities, persists an established host result before POST, and returns per-entry `resolved`, `unresolved`, `live_run`, or `error` outcomes. Its explicit `reconcile` callback takes precedence over the constructor's `reconcileAction` callback; if neither exists, missing evidence stays unresolved. A prior unresolved response, including a legacy record marked completed, does not prevent this state inspection. An expired original deadline does not prevent reporting a previously established result; it still prevents a new invocation. Recovering an effect does not retroactively turn the lost run into a successful completed run. Recovery resolves custody only; a subsequent new run must supply a fresh observation, since the HTTP recovery route does not rebuild lost planner context or update its old completion outcome.
 
 The browser example checks recovery before replacing an earlier sample session. Its Reconnect button switches to this recovery path when the old service run is no longer retained. Pending host reservations without a proven result remain visible as a block to starting another example.
 

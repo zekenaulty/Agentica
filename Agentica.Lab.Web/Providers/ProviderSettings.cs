@@ -6,7 +6,7 @@ public sealed record ProviderSettings(
     string? Model = null,
     string? ThinkingEffort = null,
     int MaxOutputTokens = 4096,
-    int ContextWindowTokens = 32768,
+    int ContextWindowTokens = 131072,
     bool IncludeThoughtSummaries = false,
     string? GeminiApi = null);
 

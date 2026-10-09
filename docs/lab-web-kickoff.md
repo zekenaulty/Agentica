@@ -71,6 +71,8 @@ The service reads credentials and endpoint configuration from its environment. T
 
 Per-run settings are `provider`, `model`, `thinkingEffort`, `maxOutputTokens`, `contextWindowTokens`, `includeThoughtSummaries`, and `geminiApi`. The default provider is Gemini; the browser sample deliberately selects demo. See the contract document for exact limits. Unsupported provider/model reasoning controls can fail closed in the underlying adapter; setting a generic effort does not promise identical behavior across models.
 
+The default application context budget is 131,072 tokens. The current estimator conservatively counts UTF-8 bytes as tokens; the default accommodates the mandatory runtime/tool contract plus a scoped observation. This budget is an application limit, not discovery of a model's actual capacity. Hosts targeting a smaller model must choose a compatible budget; compilation fails before dispatch if mandatory context cannot fit.
+
 ### Stateless Gemini and reasoning custody
 
 The web service uses `GeminiInteractionsLlmClient` with streaming and `store:false`. Agentica supplies context and privately retains the native continuation needed within that planner session. It does not depend on a stored provider conversation to resume the run. Provider-native thought signatures and opaque continuation remain private to the planner/client path; the UI receives only the supported summary/telemetry projection.
@@ -156,22 +158,29 @@ node browser-tests/ui-smoke.mjs
 
 No frontend package build is required: the dashboard uses static HTML, CSS and ES modules served by ASP.NET Core. Screenshot files under `browser-tests/artifacts` are Git ignored.
 
+### External deterministic planner fixture
+
+Use the [loopback fixture launcher](../samples/Agentica.Lab.Web.FixtureHost/README.md) to connect a host-owned deterministic planner to the real service without provider calls or service source edits. It injects the existing streaming Responses client through `LabWebApplication.Create`, accepts an explicit loopback HTTP fixture endpoint, and disables redirects/proxies. The included Node fixture demonstrates the SSE protocol with the isolated inventory. Other hosts supply their own observed-state planning fixture behind that endpoint.
+
+The actual browser SDK → service → loopback HTTP SSE fixture → planning/refinement → host action/receipt path passed locally. This additionally exercises the real planner session's default input budget, which the built-in demo does not configure. The integration test accepts only `demo` or `fixture`; it rejects a live provider selection.
+
 Recorded focused evidence from this implementation session:
 
 | Evidence | Observed result | Qualification boundary |
 | --- | --- | --- |
-| Lab web .NET suite | 70 passed | Service/context/custody/provider-factory seams, reported by the integration owner in this qualification pass |
+| Lab web .NET suite | 84 passed | Service/context/custody/provider-factory seams, reported by the integration owner in this qualification pass |
 | Existing Agentica core suite | 721 passed, 7 skipped | Existing regression scope; skips remain unqualified, reported by the integration owner in this qualification pass |
-| Browser host SDK seam suite | 17 passed | In-process protocol, bounded queues, exact deduplication, reservation ordering, disconnect, result reconciliation and exceptional terminality |
-| Restart recovery SDK suite | 6 passed | Mocked recovery HTTP; original identity/fingerprint, no invocation, persistence before resolution and live-run refusal |
+| Browser host SDK seam suite | 22 passed | In-process protocol, bounded queues, exact deduplication, reservation ordering, disconnect, late durable results, explicit state reconciliation and exceptional terminality |
+| Restart recovery SDK suite | 8 passed | Mocked recovery HTTP; original identity/fingerprint, no invocation, persistence before resolution, live-run refusal and prior unresolved record recovery |
 | Real SDK to refreshed local service | Passed | Actual WebSocket, scripted provider stream, inspect → replan → accept, two retained results, zero pending actions and succeeded outcome |
+| External HTTP streaming fixture | Passed | Actual browser SDK → service → loopback HTTP SSE fixture → planning/refinement → host actions/receipts; deterministic fixture only, with no provider API call |
 | Browser UI smoke on refreshed service | Passed | Deterministic sample, context inspection, progress counters, disabled terminal cancellation, no page exceptions and no horizontal overflow at 390 px |
 | Browser exceptional termination | Passed | Explicitly unconfigured OpenAI factory rejected before provider network execution; reliable `run.terminated`, null normal outcome, snapshot failure, zero host actions, stopped activity and no page exceptions |
 | Desktop/mobile screenshot review | Visually inspected | Layout and readable execution state; screenshots are local artifacts |
 
 These observations do not establish live-provider parity, a connected Maze Battle integration, full process-restart continuation, production deployment readiness or a benchmark of model reasoning. Provider fixture seams and installed/live-provider execution are separate proof levels. Subsequent changes should rerun the affected focused gate and report its actual result.
 
-The SDK suites total **23 passed**. `node browser-tests/ui-termination-smoke.mjs` reproduces the exceptional browser path only when provider metadata reports an explicitly unconfigured remote provider; it stops before creating a run if none is available. Its purpose is to qualify reliable local setup-failure reporting, with no provider API call.
+The SDK suites total **30 passed**. `node browser-tests/ui-termination-smoke.mjs` reproduces the exceptional browser path only when provider metadata reports an explicitly unconfigured remote provider; it stops before creating a run if none is available. Its purpose is to qualify reliable local setup-failure reporting, with no provider API call.
 
 ## Remaining integration work
 
@@ -180,4 +189,4 @@ The SDK suites total **23 passed**. `node browser-tests/ui-termination-smoke.mjs
 - Live-provider qualification selected explicitly by the operator, including model/effort support and actual stream behavior.
 - Optional native GenerateContent streaming, richer nested schema contracts, prediction/counterevidence experiments and longer-lived durable run continuation as distinct follow-on slices.
 
-The initial service, browser surface and reusable adapter seam can be exercised independently while the external host adopts the contract. No Maze Battle agent was contacted during this implementation slice.
+The initial service, browser surface and reusable adapter seam are qualified independently. After those gates passed, the Maze Battle task received the contract and confirmed its host mapping. Its actual cross-runtime proving-ground integration remains in progress; its separate observed-planner browser proof is not Agentica integration evidence.

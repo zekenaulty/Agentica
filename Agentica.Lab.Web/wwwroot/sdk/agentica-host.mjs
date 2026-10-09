@@ -35,16 +35,17 @@ export function actionFingerprint(action) {
  * The in-memory fallback only protects this client instance; it is not restart durability.
  */
 export class AgenticaHost {
-  constructor({ url, onAction, loadAction, saveAction, onMessage = () => {}, onStatus = () => {},
+  constructor({ url, onAction, loadAction, saveAction, reconcileAction, onMessage = () => {}, onStatus = () => {},
     WebSocketImpl = globalThis.WebSocket, maxMessages = 256, maxActions = 2048, maxQueuedActions = 64,
     maxMessageBytes = 262144, requestTimeoutMs = 15000 } = {}) {
     if (!url) throw new TypeError('A WebSocket URL is required.');
     if (typeof onAction !== 'function') throw new TypeError('onAction is required.');
+    if (reconcileAction !== undefined && typeof reconcileAction !== 'function') throw new TypeError('reconcileAction must be a function.');
     if (!!loadAction !== !!saveAction) throw new TypeError('Supply both action persistence hooks.');
     for (const [name, value] of Object.entries({ maxMessages, maxActions, maxQueuedActions, maxMessageBytes, requestTimeoutMs })) {
       if (!Number.isSafeInteger(value) || value < 1) throw new TypeError(`${name} must be a positive integer.`);
     }
-    Object.assign(this, { url, onAction, loadAction, saveAction, onMessage, onStatus,
+    Object.assign(this, { url, onAction, loadAction, saveAction, reconcileAction, onMessage, onStatus,
       WebSocketImpl, maxMessages, maxActions, maxQueuedActions, maxMessageBytes, requestTimeoutMs });
     this.messages = [];
     this.droppedMessages = 0;
@@ -172,15 +173,11 @@ export class AgenticaHost {
       try {
         if (!action || entry.hostId !== hostId || entry.sessionId !== sessionId || action.sessionId !== sessionId || (entry.runId && entry.runId !== action.runId) || (entry.sessionEpoch && entry.sessionEpoch !== action.sessionEpoch)) throw new Error('Recovery entry does not match the requested host/session identity.');
         for (const field of ['actionId', 'runId', 'runnerRunId', 'stepId', 'sessionId', 'sessionEpoch', 'capabilityId', 'manifestHash']) requiredText(action[field], field);
-        const key = actionKey(action); const fingerprint = actionFingerprint(action);
-        const retained = this.actions.get(key) ?? await this.loadAction?.(key);
-        if (retained && retained.fingerprint !== fingerprint) throw new Error('Recovery action fingerprint differs from retained host custody.');
-        const result = retained?.status === 'completed' ? retained.result : await reconcile?.(copy(action), retained ? copy(retained) : null, copy(entry));
+        const retained = await this._retainedAction(action, true);
+        const inspect = reconcile ?? this.reconcileAction;
+        let result = this._resolved(retained) ? retained.result : await inspect?.(copy(action), retained ? copy(retained) : null, copy(entry));
         if (!result || result.disposition === 'unresolved') { outcomes.push({ ...identity, status: 'unresolved', resolved: false }); continue; }
-        this._validateResult(action, result);
-        const record = { fingerprint, status: 'completed', result: copy(result) };
-        if (this.actions.has(key) || this.actions.size < this.maxActions) this.actions.set(key, record);
-        await this.saveAction?.(key, copy(record));
+        result = await this._persistResolvedAction(action, result);
         const response = await read(endpoint.href, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hostId, sessionId, result }) });
         if (response.actionId !== action.actionId) throw new Error('Recovery response action identity differs.');
         outcomes.push({ ...identity, status: response.resolved ? 'resolved' : 'unresolved', resolved: response.resolved === true, duplicate: response.duplicate === true });
@@ -225,6 +222,47 @@ export class AgenticaHost {
       evidenceId: `unresolved:${action.actionId}`, summary };
   }
 
+  _resolved(record) { return record?.status === 'completed' && record.result && record.result.disposition !== 'unresolved'; }
+
+  _cacheAction(action, record) {
+    const key = actionKey(action);
+    if (this.actions.has(key) || this.actions.size < this.maxActions) this.actions.set(key, copy(record));
+  }
+
+  async _retainedAction(action, refresh = false) {
+    const fingerprint = actionFingerprint(action);
+    const checked = record => {
+      if (!record) return null;
+      if (record.fingerprint !== fingerprint) throw new Error('Action identity was reused with changed arguments or bindings. No effect was attempted.');
+      if (!['pending', 'unresolved', 'completed'].includes(record.status)) throw new Error('Invalid retained action status.');
+      if (record.result) this._validateResult(action, record.result);
+      if (record.status === 'completed' && !record.result) throw new Error('Completed custody is missing its result.');
+      // Older SDK records could mark an unresolved response as completed.
+      return copy(record.result?.disposition === 'unresolved' ? { ...record, status: 'unresolved' } : record);
+    };
+    const memory = checked(this.actions.get(actionKey(action)));
+    const durable = this.loadAction && (refresh || !this._resolved(memory))
+      ? checked(await this.loadAction(actionKey(action))) : null;
+    if (this._resolved(memory) && this._resolved(durable) && canonicalJson(memory.result) !== canonicalJson(durable.result))
+      throw new Error('A completed original action result changed in durable storage.');
+    const retained = this._resolved(memory) ? memory : this._resolved(durable) ? durable
+      : durable?.status === 'unresolved' ? durable : memory?.status === 'unresolved' ? memory : durable ?? memory;
+    if (retained) this._cacheAction(action, retained);
+    return retained;
+  }
+
+  async _persistResolvedAction(action, result) {
+    this._validateResult(action, result);
+    if (result.disposition === 'unresolved') throw new Error('Unresolved custody cannot be committed as completed.');
+    const retained = await this._retainedAction(action, true);
+    if (this._resolved(retained) && canonicalJson(retained.result) !== canonicalJson(result))
+      throw new Error('A completed original action result cannot be replaced.');
+    const record = { fingerprint: actionFingerprint(action), status: 'completed', result: copy(result) };
+    this._cacheAction(action, record);
+    await this.saveAction?.(actionKey(action), copy(record));
+    return copy(record.result);
+  }
+
   async _action(message) {
     const action = message.payload;
     for (const field of ['actionId', 'runId', 'runnerRunId', 'stepId', 'sessionId', 'sessionEpoch', 'capabilityId', 'manifestHash']) requiredText(action[field], field);
@@ -233,17 +271,20 @@ export class AgenticaHost {
     if (!run || run.sessionId !== action.sessionId || run.sessionEpoch !== action.sessionEpoch) throw new Error('Action belongs to an unknown run or another host session.');
     const key = actionKey(action);
     const fingerprint = actionFingerprint(action);
-    let record = this.actions.get(key);
+    let record;
     let result;
     try {
-      record ??= await this.loadAction?.(key);
-      if (record && record.fingerprint !== fingerprint) {
-        result = this._unresolved(action, 'Action identity was reused with changed arguments or bindings. No effect was attempted.');
-      } else if (record?.status === 'completed' && record.result) {
-        this._validateResult(action, record.result);
-        result = copy(record.result);
+      record = await this._retainedAction(action, message.type === 'action.reconcile');
+      if (this._resolved(record)) {
+        result = await this._persistResolvedAction(action, record.result);
       } else if (record || message.type === 'action.reconcile') {
-        result = this._unresolved(action, 'No completed retained result exists. Reconcile authoritative host state; the action was not invoked again.');
+        const inspected = message.type === 'action.reconcile'
+          ? await this.reconcileAction?.(copy(action), record ? copy(record) : null) : null;
+        if (inspected && inspected.disposition !== 'unresolved') result = await this._persistResolvedAction(action, inspected);
+        else {
+          if (inspected) this._validateResult(action, inspected);
+          result = inspected ?? this._unresolved(action, 'No completed retained result exists. Reconcile authoritative host state; the action was not invoked again.');
+        }
       } else if (this.stoppedRuns.has(action.runId)) {
         result = this._unresolved(action, 'Run has stopped or cancellation was requested. No effect was attempted.');
       } else if (this.actions.size >= this.maxActions) {
@@ -257,10 +298,13 @@ export class AgenticaHost {
         if (this.stoppedRuns.has(action.runId)) throw new Error('Run stopped while the action reservation was being saved.');
         result = await this.onAction(copy(action));
         this._validateResult(action, result);
-        record = { fingerprint, status: 'completed', result: copy(result) };
-        this.actions.set(key, record);
-        try { await this.saveAction?.(key, copy(record)); }
-        catch (error) { this._status('persistence.error', `Result is known in this session but durable storage failed: ${error.message}`); }
+        if (result.disposition === 'unresolved') {
+          record = await this._retainedAction(action, true);
+          if (this._resolved(record)) result = await this._persistResolvedAction(action, record.result);
+          else this._cacheAction(action, { fingerprint, status: 'unresolved', result: copy(result) });
+          // Leave the durable reservation intact. A late host commit may already be
+          // writing its concrete result; uncertainty must not overwrite that result.
+        } else result = await this._persistResolvedAction(action, result);
       }
     } catch (error) {
       result = this._unresolved(action, `Action outcome could not be established: ${error.message}`);

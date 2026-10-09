@@ -1,6 +1,7 @@
 <Solution>
   <Project Path="Agentica.Lab.Web/Agentica.Lab.Web.csproj" />
   <Project Path="Agentica.Lab.Web.Tests/Agentica.Lab.Web.Tests.csproj" />
+  <Project Path="samples/Agentica.Lab.Web.FixtureHost/Agentica.Lab.Web.FixtureHost.csproj" />
   <Project Path="Agentica.Lab/Agentica.Lab.csproj" />
   <Project Path="Agentica.Clients/Agentica.Clients.csproj" />
   <Project Path="Agentica.Mcp/Agentica.Mcp.csproj" />

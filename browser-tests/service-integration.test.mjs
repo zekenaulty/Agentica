@@ -2,8 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { AgenticaHost } from '../Agentica.Lab.Web/wwwroot/sdk/agentica-host.mjs';
 
-// Opt in against an isolated running Lab service. This test only uses provider=demo.
+// Opt in against an isolated running Lab service. Never select a live provider here.
 const baseUrl = process.env.AGENTICA_LAB_TEST_URL;
+const provider = process.env.AGENTICA_LAB_TEST_PROVIDER ?? 'demo';
+if (!['demo', 'fixture'].includes(provider)) throw new Error('Integration qualification accepts only demo or fixture providers.');
 test('browser SDK drives a complete streamed inspect/accept loop with host completion evidence', { skip: !baseUrl, timeout: 20000 }, async () => {
   const id = crypto.randomUUID();
   const session = { hostId: 'sdk-integration', sessionId: `session-${id}`, sessionEpoch: `epoch-${id}`, objectiveId: `objective-${id}` };
@@ -30,8 +32,8 @@ test('browser SDK drives a complete streamed inspect/accept loop with host compl
   });
   try {
     const providers = await (await fetch(`${baseUrl}/api/providers`)).json();
-    assert.ok(providers.some(provider => provider.provider === 'demo' && provider.api === 'scripted-fixture'));
-    const started = await client.start({ ...session, scopeId: 'integration-inventory', perspectiveId: 'operator', objective: 'Accept one eligible record', observation: observe(), provider: { provider: 'demo' },
+    assert.ok(providers.some(entry => entry.provider === provider && entry.configured));
+    const started = await client.start({ ...session, scopeId: 'integration-inventory', perspectiveId: 'operator', objective: 'Accept one eligible record', observation: observe(), provider: { provider },
       capabilities: [
         { id: 'demo.inspect', name: 'Inspect', description: 'Observe inventory.', kind: 'query', effect: 'readOnly', inputSchema: { fields: [] } },
         { id: 'demo.accept', name: 'Accept', description: 'Accept an eligible pending record.', kind: 'action', effect: 'writesLocalState', inputSchema: { fields: [{ name: 'itemId', type: 'string', required: true }] } }

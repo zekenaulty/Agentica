@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AgenticaHost, actionFingerprint } from '../Agentica.Lab.Web/wwwroot/sdk/agentica-host.mjs';
+import { AgenticaHost, actionKey, actionFingerprint } from '../Agentica.Lab.Web/wwwroot/sdk/agentica-host.mjs';
 
 const request = { actionId: 'action-1', runId: 'run-1', runnerRunId: 'runner-1', stepId: 'step-1',
   sessionId: 'session-1', sessionEpoch: 'old-epoch', capabilityId: 'host.accept', manifestHash: 'manifest-1',
@@ -63,4 +63,21 @@ test('different sessions and failed persistence leave durable service custody un
     } });
     assert.equal(calls, 1); assert.equal(results[0].status, 'error'); assert.equal(results[0].resolved, false);
   }
+});
+
+test('legacy completed-unresolved records can use explicit recovery inspection', async () => {
+  const unresolved = { ...completed, result: { ...result, disposition: 'unresolved' } }; let inspections = 0; let posted = false;
+  const host = client({ loadAction: () => unresolved, saveAction: () => {} });
+  const results = await host.recover({ hostId: 'host-1', sessionId: 'session-1', reconcile: (action, retained) => {
+    inspections++; assert.deepEqual(action, request); assert.equal(retained.status, 'unresolved'); return result;
+  }, fetchImpl: async (_, options) => { if (!options) return response([entry]); posted = true; return response({ actionId: 'action-1', resolved: true }); } });
+  assert.equal(inspections, 1); assert.equal(posted, true); assert.equal(results[0].resolved, true);
+});
+
+test('HTTP recovery reloads durable completion even when this client cached an earlier pending record', async () => {
+  let inspections = 0; const host = client({ loadAction: () => completed, saveAction: () => {} });
+  host.actions.set(actionKey(request), { fingerprint: actionFingerprint(request), status: 'pending' });
+  const results = await host.recover({ hostId: 'host-1', sessionId: 'session-1', reconcile: () => { inspections++; return null; },
+    fetchImpl: async (_, options) => response(options ? { actionId: 'action-1', resolved: true } : [entry]) });
+  assert.equal(inspections, 0); assert.equal(results[0].resolved, true);
 });

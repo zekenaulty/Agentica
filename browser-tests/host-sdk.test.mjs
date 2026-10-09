@@ -148,3 +148,60 @@ test('reliable exceptional termination stops new effects while retaining exact r
   assert.deepEqual(await deliver(host, socket, 'action.reconcile'), result);
   assert.equal(calls, 1); host.close();
 });
+
+test('same client refreshes a pending reservation after the host commits a late durable result', async () => {
+  const store = new Map(); let calls = 0;
+  const { host, socket } = await setup({ loadAction: key => store.get(key), saveAction: (key, record) => store.set(key, record),
+    onAction: () => { calls++; throw new Error('Host dispatch was interrupted.'); } });
+  assert.equal((await deliver(host, socket)).disposition, 'unresolved');
+  const request = action(); const result = applied(request);
+  store.set(actionKey(request), { fingerprint: actionFingerprint(request), status: 'completed', result });
+  assert.deepEqual(await deliver(host, socket, 'action.reconcile'), result);
+  assert.equal(calls, 1); assert.equal(host.actions.get(actionKey(request)).status, 'completed'); host.close();
+});
+
+test('an unresolved host response remains uncertain and explicit reconciliation persists before replying', async () => {
+  const store = new Map(); let calls = 0; let inspections = 0; let persistedBeforeReply = false;
+  const { host, socket } = await setup({ loadAction: key => store.get(key), saveAction: (key, record) => store.set(key, record),
+    onAction: request => { calls++; return { ...applied(request), disposition: 'unresolved', summary: 'Awaiting original effect confirmation.' }; },
+    reconcileAction: (request, retained) => { inspections++; assert.equal(retained.status, 'unresolved'); return applied(request); } });
+  await deliver(host, socket);
+  assert.equal(host.actions.get(actionKey(action())).status, 'unresolved');
+  assert.equal(store.get(actionKey(action())).status, 'pending');
+  const originalSend = socket.send.bind(socket);
+  socket.send = text => { const message = JSON.parse(text); if (message.payload.disposition === 'applied') persistedBeforeReply = store.get(actionKey(action())).status === 'completed'; originalSend(text); };
+  assert.equal((await deliver(host, socket, 'action.reconcile')).disposition, 'applied');
+  assert.equal(persistedBeforeReply, true); assert.equal(calls, 1); assert.equal(inspections, 1); host.close();
+});
+
+test('changed durable custody is rejected before state inspection or another effect', async () => {
+  const store = new Map(); let calls = 0; let inspections = 0;
+  const { host, socket } = await setup({ loadAction: key => store.get(key), saveAction: (key, record) => store.set(key, record),
+    onAction: () => { calls++; throw new Error('Unknown original outcome.'); }, reconcileAction: () => { inspections++; return applied(action()); } });
+  await deliver(host, socket);
+  store.set(actionKey(action()), { fingerprint: 'changed-binding', status: 'completed', result: applied(action()) });
+  const reply = await deliver(host, socket, 'action.reconcile');
+  assert.equal(reply.disposition, 'unresolved'); assert.match(reply.summary, /changed/); assert.equal(calls, 1); assert.equal(inspections, 0);
+  assert.equal(host.actions.get(actionKey(action())).status, 'pending'); host.close();
+});
+
+test('a known completed result stays immutable if durable storage later contains another result', async () => {
+  const store = new Map(); let calls = 0;
+  const { host, socket } = await setup({ loadAction: key => store.get(key), saveAction: (key, record) => store.set(key, record), onAction: request => { calls++; return applied(request); } });
+  const original = await deliver(host, socket); const key = actionKey(action());
+  store.set(key, { ...store.get(key), result: { ...original, summary: 'Changed evidence.' } });
+  assert.equal((await deliver(host, socket, 'action.reconcile')).disposition, 'unresolved');
+  assert.deepEqual(host.actions.get(key).result, original); assert.equal(calls, 1); host.close();
+});
+
+test('failed concrete reconciliation persistence stays unresolved and retry preserves known evidence', async () => {
+  const store = new Map(); let calls = 0; let inspections = 0; let failSave = true;
+  const { host, socket } = await setup({ loadAction: key => store.get(key), saveAction: (key, record) => {
+    if (record.status === 'completed' && failSave) throw new Error('Durable result write failed.'); store.set(key, record);
+  }, onAction: () => { calls++; throw new Error('Unknown original outcome.'); }, reconcileAction: request => { inspections++; return applied(request); } });
+  await deliver(host, socket);
+  assert.equal((await deliver(host, socket, 'action.reconcile')).disposition, 'unresolved');
+  failSave = false;
+  assert.equal((await deliver(host, socket, 'action.reconcile')).disposition, 'applied');
+  assert.equal(calls, 1); assert.equal(inspections, 1); host.close();
+});

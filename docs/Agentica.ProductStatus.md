@@ -10,7 +10,7 @@ This is the authoritative high-level status page for Agentica. Detailed goal doc
 
 The initial `Agentica.Lab.Web` service is implemented and locally qualified. It runs the existing Agentica loop with five streaming provider adapters, a browser dashboard, a reusable external-host WebSocket contract, bounded context and evidence tools, and durable original-action custody for reconnect/restart reconciliation. The scoped inventory is a deterministic fixture. The service contains no Maze Battle simulation or domain policy.
 
-Focused evidence: 70 web tests passed; the existing aggregate passed 721 tests with seven explicitly skipped live-provider checks. The SDK and browser qualification are recorded in [the kickoff guide](lab-web-kickoff.md). [The external-host contract](external-host-browser.md) is the adoption boundary for Maze Battle and other hosts.
+Focused evidence: 84 web tests and 30 browser host SDK tests passed; the existing aggregate passed 721 tests with seven explicitly skipped live-provider checks. Browser qualification and the external loopback HTTP streaming fixture are recorded in [the kickoff guide](lab-web-kickoff.md). These fixture passes do not establish live-provider or Maze Battle integration qualification. [The external-host contract](external-host-browser.md) is the adoption boundary for Maze Battle and other hosts.
 
 The remaining proving-ground gate is actual external-host adoption and integration. Live-provider qualification remains deferred; native GenerateContent streaming and full durable runtime/provider continuation are separate follow-ons. This slice adds no public-package readiness claim. The dated hardening-program scores below remain historical evidence for their original bounded gates.
 

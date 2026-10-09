@@ -237,6 +237,12 @@
           "Agentica": "[0.1.0-research.1, )",
           "Agentica.Clients": "[0.1.0-research.1, )"
         }
+      },
+      "agentica.lab.web.fixturehost": {
+        "type": "Project",
+        "dependencies": {
+          "Agentica.Lab.Web": "[1.0.0, )"
+        }
       }
     }
   }
