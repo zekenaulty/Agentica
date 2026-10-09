@@ -58,7 +58,7 @@ jobs:
           dotnet restore Agentica.Clients.Tests/Agentica.Clients.Tests.csproj --locked-mode --configfile NuGet.config
 
       - name: Verify lock files stayed unchanged
-        run: git diff --exit-code -- Agentica/Packages.lock.json Agentica.Clients/Packages.lock.json Agentica.Lab/Packages.lock.json Agentica.Tests/Packages.lock.json Agentica.Clients.Tests/Packages.lock.json
+        run: git diff --exit-code -- '**/Packages.lock.json'
 
       - name: Build Release with warnings as errors
         run: dotnet build Agentica.slnx --configuration Release --no-restore
@@ -80,6 +80,12 @@ jobs:
           --configuration Release
           --no-build
           --no-restore
+
+      - name: Qualify Lab web contracts and real sockets
+        run: dotnet test Agentica.Lab.Web.Tests/Agentica.Lab.Web.Tests.csproj --configuration Release --no-build --no-restore
+
+      - name: Qualify the browser host SDK
+        run: node --test browser-tests/host-sdk.test.mjs browser-tests/host-recovery.test.mjs browser-tests/host-result-validation.test.mjs
 
   quality:
     name: Locked build, proof tests, and package validation
@@ -122,7 +128,7 @@ jobs:
 
       - name: Verify lock files stayed unchanged
         shell: bash
-        run: git diff --exit-code -- Agentica/Packages.lock.json Agentica.Clients/Packages.lock.json Agentica.Lab/Packages.lock.json Agentica.Tests/Packages.lock.json Agentica.Clients.Tests/Packages.lock.json
+        run: git diff --exit-code -- '**/Packages.lock.json'
 
       - name: Reject vulnerable or deprecated dependencies
         shell: pwsh
@@ -164,6 +170,12 @@ jobs:
           --no-build
           --no-restore
           --filter "FullyQualifiedName~LabSubprocessIntegrationTests"
+
+      - name: Qualify Lab web contracts and real sockets
+        run: dotnet test Agentica.Lab.Web.Tests/Agentica.Lab.Web.Tests.csproj --configuration Release --no-build --no-restore
+
+      - name: Qualify the browser host SDK
+        run: node --test browser-tests/host-sdk.test.mjs browser-tests/host-recovery.test.mjs browser-tests/host-result-validation.test.mjs
 
       - name: Run tests with coverage
         run: >-

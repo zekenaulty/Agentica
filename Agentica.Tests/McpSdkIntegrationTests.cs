@@ -185,7 +185,8 @@ public sealed class McpSdkIntegrationTests
         public async ValueTask DisposeAsync()
         {
             _stop.Cancel();
-            _listener.Stop();
+            // Close is the sole listener shutdown. Stop followed by Close repeats Unix
+            // prefix removal, which can try to rebind the already released port.
             _listener.Close();
             await _serve;
             _stop.Dispose();

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Agentica Lab</title><link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="/"><span class="brand-mark">A</span><span>Agentica<span class="brand-sub">LAB / CONTROL ROOM</span></span></a>
+      <div class="side-label">WORKSPACE</div>
+      <a class="nav-item active" href="#runs"><span aria-hidden="true">◉</span> Runs <span id="run-count" class="count">0</span></a>
+      <a class="nav-item" href="#sample"><span aria-hidden="true">◇</span> Scoped inventory</a>
+      <a class="nav-item" href="#providers"><span aria-hidden="true">⌁</span> Providers</a>
+      <div class="sidebar-bottom"><span class="status-dot" id="service-dot"></span><span id="service-status">Connecting to service</span><small>External hosts own their state.<br>Agentica runs the reasoning loop.</small></div>
+    </aside>
+    <main>
+      <header class="page-header"><div><div class="eyebrow">BOUNDED COGNITION / LIVE EXECUTION</div><h1>Lab workspace</h1><p>Follow the plan, the action, and the evidence.</p></div><button class="button secondary" id="refresh">Refresh <span aria-hidden="true">↻</span></button></header>
+      <div id="notice" class="notice" role="status" hidden></div>
+      <section class="overview" aria-label="Workspace totals"><div><span class="metric-label">RUNS</span><strong id="total-runs">0</strong></div><div><span class="metric-label">ACTIVE</span><strong id="active-runs">0</strong></div><div><span class="metric-label">HOSTS CONNECTED</span><strong id="connected-runs">0</strong></div><div><span class="metric-label">PENDING ACTIONS</span><strong id="pending-total">0</strong></div></section>
+      <div class="workspace-grid" id="runs">
+        <section class="panel runs-panel"><div class="section-heading"><h2>Runs</h2><span class="micro">Newest first</span></div><div id="run-list" class="run-list"><div class="empty"><span class="empty-symbol">◇</span><h3>No runs yet</h3><p>Start the scoped inventory example below, or connect your own host.</p></div></div></section>
+        <section class="panel inspector"><div class="section-heading"><h2>Run inspector</h2><span id="stream-state" class="badge neutral">No run selected</span></div>
+          <div id="inspector-empty" class="empty"><span class="empty-symbol">⌁</span><h3>Execution, in view</h3><p>Select a run to inspect its objective, live provider activity, context, actions and receipts.</p></div>
+          <div id="inspector-content" hidden>
+            <div class="run-title"><div><h3 id="objective"></h3><div class="micro" id="run-identity"></div></div><button class="button danger" id="cancel-run">Cancel run</button></div>
+            <div class="identity-grid" id="identity-grid"></div>
+            <div class="telemetry"><div class="telemetry-title"><span class="status-dot" id="thinking-dot"></span><strong id="activity">Waiting for provider activity</strong><span id="provider-kind" class="micro"></span></div><div class="telemetry-counters"><span><b id="output-count">0</b> output characters</span><span><b id="thought-count">0</b> summary characters</span><span><b id="elapsed">0</b> ms</span></div><p class="micro" id="telemetry-loss">Progress is observational. Action receipts establish effects.</p><pre id="thought-summary" class="thought-summary" hidden></pre></div>
+            <div class="tabs" role="tablist" aria-label="Run details"><button role="tab" id="tab-events" aria-controls="pane-events" aria-selected="true" data-pane="events">Activity</button><button role="tab" id="tab-context" aria-controls="pane-context" aria-selected="false" tabindex="-1" data-pane="context">Context</button><button role="tab" id="tab-actions" aria-controls="pane-actions" aria-selected="false" tabindex="-1" data-pane="actions">Actions & outcome</button></div>
+            <div id="pane-events" class="tab-pane" role="tabpanel" aria-labelledby="tab-events"><ol id="event-list" class="event-list"></ol><p class="micro" id="event-retention"></p></div>
+            <div id="pane-context" class="tab-pane" role="tabpanel" aria-labelledby="tab-context" hidden><p class="micro">Host observations and derived context. Inspect evidence references before treating a fact as fulfilled.</p><pre id="context-json" class="json-view"></pre></div>
+            <div id="pane-actions" class="tab-pane" role="tabpanel" aria-labelledby="tab-actions" hidden><h4>Pending actions</h4><pre id="actions-json" class="json-view"></pre><h4>Terminal outcome</h4><pre id="outcome-json" class="json-view"></pre></div>
+          </div>
+        </section>
+      </div>
+      <section class="panel sample-panel" id="sample"><div class="section-heading"><div><span class="eyebrow">BROWSER-OWNED EXAMPLE</span><h2>Scoped inventory</h2></div><span class="badge neutral">Isolated local state</span></div><div class="sample-grid"><div><p class="sample-description">Give the loop a small objective: inspect an inventory, accept one eligible record, and prove the result.</p><div class="sample-flow"><span>Observe</span><span>→</span><span>Plan</span><span>→</span><span>Act</span><span>→</span><span>Verify</span></div><p class="micro">The browser applies effects and retains action results. “Demo” uses a deterministic streaming fixture through the real loop. Selecting a configured provider makes live API calls.</p><div id="inventory" class="inventory"></div></div><form id="sample-form"><label for="sample-provider">Provider</label><select id="sample-provider"><option value="demo">Demo · deterministic fixture</option></select><div id="gemini-transport-field" class="transport-field" hidden><label for="sample-gemini-api">Gemini transport</label><select id="sample-gemini-api" disabled><option value="interactions">Interactions · default</option><option value="generatecontent">GenerateContent · streaming</option></select></div><label for="sample-model">Model <span class="micro">optional override</span></label><input id="sample-model" autocomplete="off" placeholder="Provider default"><label class="check"><input type="checkbox" id="include-thoughts"> Show available provider thought summaries</label><div class="sample-buttons"><button class="button primary" id="start-sample" type="submit">Start example <span aria-hidden="true">↗</span></button><button class="button secondary" id="resume-sample" type="button" disabled>Reconnect</button></div><p id="sample-state" class="micro" role="status">No sample run connected.</p></form></div></section>
+      <section id="providers" class="panel providers-panel"><div class="section-heading"><h2>Providers</h2><span class="micro">Credentials remain on the service</span></div><div id="provider-list" class="provider-grid"></div><p class="micro">Configured means the service has configuration available. It does not establish a successful live-provider check.</p></section>
+      <footer><span>Agentica Lab · External host protocol v1</span><a href="/sdk/agentica-host.mjs">Browser host SDK ↗</a></footer>
+    </main>
+  </div>
+  <script type="module" src="/app.mjs"></script>
+</body>
+</html>

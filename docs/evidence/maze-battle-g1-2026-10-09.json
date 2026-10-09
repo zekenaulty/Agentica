@@ -1,0 +1,159 @@
+{
+  "evidence": "Provider-free Chromium, real SDK, WebSocket, .NET Agentica runner and IndexedDB",
+  "serviceCommit": "10e14c6914f318761ee09b823d7f4b27af0b7c37",
+  "sdkSha256": "4c2d30a5292759da5dc663958c7bd0f909ebdba18f6c64259bf918a074bd1469",
+  "seed": 20261008,
+  "maxStepsPerRun": 128,
+  "maxProviderCallsPerRun": 128,
+  "liveProvider": "NOT EXERCISED",
+  "scenarios": [
+    {
+      "name": "lost acknowledgement",
+      "runId": "labrun_e059c6295117402ab642ca685cf87865",
+      "scopeId": "fd0c74d4-c62c-4a10-8ffc-715cbb03695c",
+      "revision": 107,
+      "visitedSpaces": 3,
+      "chests": 1,
+      "receiptCount": 108,
+      "providerCalls": 109,
+      "completionEvidence": {
+        "objectiveId": "fd0c74d4-c62c-4a10-8ffc-715cbb03695c:first-chest",
+        "evidenceId": "b8be6bf5-b424-4f2d-9855-d48807cca6d2",
+        "summary": "The party has collected its first chest in this expedition."
+      },
+      "replayEqual": true,
+      "liveTextDelta": {
+        "callId": "e82be5fff7b342bd852097f6499318aa",
+        "ordinal": 1,
+        "beganAt": 1791534699599,
+        "delta": {
+          "at": 1791534699600,
+          "outputCharacters": 96
+        },
+        "providerCompletedAt": 1791534699702,
+        "browserCompletedAt": 1791534699704
+      },
+      "exactSourceRecovered": true,
+      "droppedResultReplayedExactly": true,
+      "sourceSha256": "2411400681561ba6899403da3b6e5b889210965c9074fcbd5844828f1a1a0ea5"
+    },
+    {
+      "name": "first chest",
+      "runId": "labrun_8fbac5a1e3fa4b97a611febe28d05bf8",
+      "scopeId": "6410f938-2aee-45b0-8a6e-744b4252c028",
+      "revision": 107,
+      "visitedSpaces": 3,
+      "chests": 1,
+      "receiptCount": 108,
+      "providerCalls": 109,
+      "completionEvidence": {
+        "objectiveId": "6410f938-2aee-45b0-8a6e-744b4252c028:first-chest",
+        "evidenceId": "c7db2751-9ce9-4998-b95d-cc4dd6f5214e",
+        "summary": "The party has collected its first chest in this expedition."
+      },
+      "replayEqual": true,
+      "liveTextDelta": {
+        "callId": "7b70177908ee4012820e48bda3e1bdd2",
+        "ordinal": 1,
+        "beganAt": 1791534653913,
+        "delta": {
+          "at": 1791534653924,
+          "outputCharacters": 96
+        },
+        "providerCompletedAt": 1791534654030,
+        "browserCompletedAt": 1791534654038
+      },
+      "exactSourceRecovered": true,
+      "droppedResultReplayedExactly": false,
+      "sourceSha256": "c2ff84646beaecdec3987c7b6f86ed9d0f31608acb26eb1b671f4b09ea3ba627"
+    },
+    {
+      "name": "takeover and new-epoch continuity",
+      "runIds": [
+        "labrun_3811cb0252d04a3c9ec2ddb9143be808",
+        "labrun_2fe72a054a5c4f3f95e14cd167f8706f"
+      ],
+      "scopeId": "cb355424-1f32-4fec-9190-a25c1a9fa91e",
+      "epochs": [
+        "0",
+        "2"
+      ],
+      "fencedRevision": 8,
+      "rememberedCells": 38,
+      "originalObservedAtPreserved": true,
+      "exactRecoveredEntriesEqual": true,
+      "recoveredReads": 2,
+      "finalRevision": 107,
+      "chests": 1,
+      "boundary": "Host-reprojected saved knowledge in a new epoch, not inherited service hypotheses.",
+      "sourceSha256": "ce8a5b5c2c39b7dda332c88f693df70834ff3ec12806066aab3197093884cf72"
+    }
+  ],
+  "hostRepository": "https://github.com/zekenaulty/maze-battle",
+  "hostSourceState": "Qualification harness in the working tree based on 3a4beda89a68a99e00d396eabceef745f91f652f; exact source hashes captured below. Host commit packaging was pending at capture.",
+  "hostHarnessHashes": [
+    {
+      "path": "scripts/agentica-fixture-context.mjs",
+      "sha256": "80e7309e8faa9fa08c4355b8b5563d77d14fa5065887323c1c37019e19337abf"
+    },
+    {
+      "path": "scripts/agentica-fixture-provider.mjs",
+      "sha256": "8f5a66b32a3ef61e0bcc97c29fbf3713349b9ed18a0c2a7dae1700ccec714b87"
+    },
+    {
+      "path": "tests/e2e/agentica-proving.spec.ts",
+      "sha256": "73221eecaebfbf842722eeeffbce4658839b70fd15726ea028c359c81b8f4192"
+    },
+    {
+      "path": "tests/e2e/agentica-proving.ts",
+      "sha256": "308902d3fef04ebbb4fbe964767623895ab8b12a53ea4c32db4e9b30f41d6b50"
+    },
+    {
+      "path": "tests/e2e/agentica-takeover.spec.ts",
+      "sha256": "dfc4f7ca02d01adc48946e2dbe508533805c497335a5a1c805196e43303b4277"
+    },
+    {
+      "path": "tests/e2e/agentica-evidence.ts",
+      "sha256": "b290fd993db5f836b9f8be87ca561b9a1a47635fe8143dcfa7b99edb64c145d8"
+    }
+  ],
+  "serviceOutcomeVerification": {
+    "observedAt": "2026-10-09T08:36:52.8654302Z",
+    "runtime": "10e14c6914f318761ee09b823d7f4b27af0b7c37",
+    "sdk": "4291c7ff",
+    "runs": [
+      {
+        "runId": "labrun_8fbac5a1e3fa4b97a611febe28d05bf8",
+        "status": "succeeded",
+        "pendingActions": 0,
+        "epoch": "0",
+        "objectiveId": "6410f938-2aee-45b0-8a6e-744b4252c028:first-chest",
+        "receiptCount": 109
+      },
+      {
+        "runId": "labrun_e059c6295117402ab642ca685cf87865",
+        "status": "succeeded",
+        "pendingActions": 0,
+        "epoch": "0",
+        "objectiveId": "fd0c74d4-c62c-4a10-8ffc-715cbb03695c:first-chest",
+        "receiptCount": 109
+      },
+      {
+        "runId": "labrun_3811cb0252d04a3c9ec2ddb9143be808",
+        "status": "cancelled",
+        "pendingActions": 0,
+        "epoch": "0",
+        "objectiveId": "cb355424-1f32-4fec-9190-a25c1a9fa91e:first-chest",
+        "receiptCount": 11
+      },
+      {
+        "runId": "labrun_2fe72a054a5c4f3f95e14cd167f8706f",
+        "status": "succeeded",
+        "pendingActions": 0,
+        "epoch": "2",
+        "objectiveId": "cb355424-1f32-4fec-9190-a25c1a9fa91e:first-chest",
+        "receiptCount": 102
+      }
+    ]
+  }
+}

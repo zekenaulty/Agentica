@@ -420,26 +420,19 @@ public sealed class ChatWorkspaceResourceLimitTests
         Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(10), $"Duration limit took {stopwatch.Elapsed}.");
     }
 
-    [Fact]
-    public async Task Owned_search_duration_also_bounds_missing_process_fallback_path()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task Owned_search_duration_also_bounds_missing_process_fallback_path(int elapsedMilliseconds)
     {
         using var fixture = new WorkspaceFixture();
-        for (var index = 0; index < 200; index++)
-        {
-            await File.WriteAllTextAsync(
-                Path.Combine(fixture.WorkspaceRoot, $"file-{index:D3}.txt"),
-                new string('x', 2048));
-        }
-
+        await File.WriteAllTextAsync(Path.Combine(fixture.WorkspaceRoot, "note.txt"), "needle");
+        var timeProvider = new DelayedTimerTimeProvider(TimeSpan.FromMilliseconds(elapsedMilliseconds));
         var tool = new LabWorkspaceFileSearchTool(
             fixture.WorkspaceRoot,
             MissingProcess(fixture),
-            TestLimits() with
-            {
-                MaxTraversalEntries = 1000,
-                MaxTraversalFiles = 1000,
-                MaxSearchDuration = TimeSpan.FromMilliseconds(1)
-            });
+            TestLimits() with { MaxSearchDuration = TimeSpan.FromMilliseconds(1) },
+            timeProvider);
 
         var result = await tool.ExecuteAsync(
             Invocation(
@@ -450,6 +443,9 @@ public sealed class ChatWorkspaceResourceLimitTests
         Assert.Equal(ReceiptStatus.Refused, result.Receipt.Status);
         Assert.Equal("workspace.search.duration", result.Receipt.Data["code"]);
         Assert.Equal("search_duration", result.Receipt.Data["reason"]);
+        Assert.Equal("workspace_search", result.Receipt.Data["resource"]);
+        Assert.False(result.Receipt.Data.ContainsKey("matches"));
+        Assert.True(timeProvider.TimerCreated);
     }
 
     [Fact]
@@ -587,6 +583,37 @@ public sealed class ChatWorkspaceResourceLimitTests
             ["-c", script],
             AppendRipgrepArguments: false,
             TerminationOverride: terminationOverride);
+
+    // Advance the monotonic clock between samples while withholding the timer
+    // callback, reproducing a deadline that expires before cancellation runs.
+    private sealed class DelayedTimerTimeProvider(TimeSpan elapsedBetweenSamples) : TimeProvider
+    {
+        private long _timestamp;
+
+        public bool TimerCreated { get; private set; }
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp() =>
+            Interlocked.Add(ref _timestamp, elapsedBetweenSamples.Ticks);
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            TimerCreated = true;
+            return new DelayedTimer();
+        }
+
+        private sealed class DelayedTimer : ITimer
+        {
+            public bool Change(TimeSpan dueTime, TimeSpan period) => true;
+
+            public void Dispose()
+            {
+            }
+
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
+    }
 
     private sealed class WorkspaceFixture : IDisposable
     {
