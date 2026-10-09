@@ -282,6 +282,10 @@ The service turns accepted host results into runtime receipts and observations. 
 
 The SDK serializes incoming action processing and reserves the action identity before invoking `onAction`. Its canonical fingerprint binds run, session, epoch, step, capability, manifest, arguments, expected revision and deadline. Repeated matching actions return their retained result. Reusing an identity with changed bindings produces an unresolved response and no second invocation.
 
+Deadline and cancellation are checked again after awaited reservation persistence, immediately before `onAction`. If either changed while storage was pending, the reservation remains and the SDK reports that no effect was attempted; it does not invoke the host. The host still owns any transactional deadline or cancellation check needed inside its own asynchronous operation.
+
+Exceptions from host execution or persistence produce a generic unresolved wire summary. Detailed callback errors remain local through `onStatus`; applications should keep those diagnostics out of provider-visible observations. Expected domain refusals should be returned as deliberate, bounded `HostActionResult` values.
+
 Supply **both** persistence hooks for restart protection:
 
 - `loadAction(key)` returns a retained record or `null`.

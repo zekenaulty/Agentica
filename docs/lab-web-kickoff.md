@@ -4,7 +4,7 @@
 
 `Agentica.Lab.Web` is a local ASP.NET Core host for the existing Agentica loop, streaming provider clients and bounded host context. External applications initiate a WebSocket connection, supply their objective and perspective, and execute their bound capabilities against their own canonical state. The service waits for receipted results and continues planning until completion, cancellation, a blocker or a budget limit.
 
-The implementation is domain-neutral. The included browser-owned scoped inventory is a deterministic proving fixture. Maze Battle can adopt the same protocol using its existing observation and command boundaries; this kickoff has not connected or qualified that integration.
+The implementation is domain-neutral. The included browser-owned scoped inventory is a deterministic proving fixture. Maze Battle has adopted the same protocol for an isolated browser expedition: the real browser, SDK, service and streaming fixture completed the first-chest objective, lost-acknowledgment recovery, and takeover followed by a new bounded run. See the [versioned integration evidence](maze-battle-integration-proof.md).
 
 Delivered pieces:
 
@@ -176,8 +176,8 @@ Recorded focused evidence from this implementation session:
 | --- | --- | --- |
 | Lab web .NET suite | 99 passed | Service/context/custody/provider-factory seams, sourced thought tests, telemetry correlation, compaction and later-run evidence retrieval; missing/corrupt initialized storage is identified before run admission |
 | Focused provider client suite | 119 passed | Includes 20 GenerateContent streaming cases, eight refinement-prompt evidence/accounting cases and two structured-context cases retaining 96 completed steps and exact nested evidence within unchanged budgets; no live provider calls |
-| Aggregate Agentica suite | 751 passed, 7 skipped | Core and provider-client regression scope; seven opt-in live-provider checks remain deferred |
-| Browser host SDK seam suite | 22 passed | In-process protocol, bounded queues, exact deduplication, reservation ordering, disconnect, late durable results, explicit state reconciliation and exceptional terminality |
+| Aggregate Agentica suite | 752 passed, 7 skipped | Core and provider-client regression scope; seven opt-in live-provider checks remain deferred; workspace search also rejects an elapsed deadline when its timer callback is delayed |
+| Browser host SDK seam suite | 27 passed | In-process protocol, bounded queues, exact deduplication, reservation ordering, deadline/cancellation after slow persistence, local-only callback diagnostics, disconnect, late durable results, explicit state reconciliation and exceptional terminality |
 | Restart recovery SDK suite | 8 passed | Mocked recovery HTTP; original identity/fingerprint, no invocation, persistence before resolution, live-run refusal and prior unresolved record recovery |
 | SDK result validation | 33 passed | Revision, observation and completion constraints before completed persistence, including retained results, WebSocket reconciliation and HTTP recovery; invalid results cannot cause another effect |
 | Real SDK to refreshed local service | Passed | Actual WebSocket, scripted provider stream, inspect → replan → accept, two retained results, zero pending actions and succeeded outcome |
@@ -186,18 +186,19 @@ Recorded focused evidence from this implementation session:
 | Browser exceptional termination | Passed | Explicitly unconfigured OpenAI factory rejected before provider network execution; reliable `run.terminated`, null normal outcome, snapshot failure, zero host actions, stopped activity and no page exceptions |
 | Desktop/mobile screenshot review | Visually inspected | Layout and readable execution state; screenshots are local artifacts |
 | Gemini transport controls | Passed | Real browser with intercepted HTTP and WebSocket; Interactions default, optional GenerateContent, no Gemini field on other providers, zero live calls |
+| Maze Battle isolated integration | Three browser scenarios passed | Real SDK/service/provider-fixture loop, same-call live text, refusal and first chest across three spaces, exact result replay, and takeover with exact remembered-cell recovery in a later run; see the versioned proof |
 
-These observations do not establish live-provider parity, a connected Maze Battle integration, full process-restart continuation, production deployment readiness or a benchmark of model reasoning. Provider fixture seams and installed/live-provider execution are separate proof levels. Subsequent changes should rerun the affected focused gate and report its actual result.
+These observations do not establish live-provider parity, ordinary saved-game adoption, full process-restart continuation, production deployment readiness or a benchmark of model reasoning. Provider fixture seams and installed/live-provider execution are separate proof levels. Subsequent changes should rerun the affected focused gate and report its actual result.
 
-The SDK suites total **63 passed**. `node browser-tests/ui-termination-smoke.mjs` reproduces the exceptional browser path only when provider metadata reports an explicitly unconfigured remote provider; it stops before creating a run if none is available. Its purpose is to qualify reliable local setup-failure reporting, with no provider API call.
+The SDK suites total **68 passed**. `node browser-tests/ui-termination-smoke.mjs` reproduces the exceptional browser path only when provider metadata reports an explicitly unconfigured remote provider; it stops before creating a run if none is available. Its purpose is to qualify reliable local setup-failure reporting, with no provider API call.
 
-`node browser-tests/ui-provider-controls.mjs` verifies the Gemini transport controls with fully intercepted fixture traffic. The same Playwright module override applies. Refinement prompt `workflow-plan-refinement-prompt-v2` renders the newest observation once, preserves inclusion decisions and rejects conflicting reuse of an observation identity. The two-run context fixture forces real prompt compaction, reopens the scoped store with a fresh view, and retrieves the original exact evidence through the planner/tool loop. No model intelligence or speed benchmark is inferred from these deterministic checks.
+`node browser-tests/ui-provider-controls.mjs` verifies the Gemini transport controls with fully intercepted fixture traffic. The same Playwright module override applies. Refinement prompt `workflow-plan-refinement-prompt-v3` renders the newest observation once, uses compact JSON, preserves inclusion decisions and rejects conflicting reuse of an observation identity. The two-run context fixture forces real prompt compaction, reopens the scoped store with a fresh view, and retrieves the original exact evidence through the planner/tool loop. No model intelligence or speed benchmark is inferred from these deterministic checks.
 
-## Remaining integration work
+## Subsequent integration slices
 
-- External host adoption: scoped observation compiler, capability mapping, authoritative result persistence, revision checks and takeover rules.
-- A host-owned deterministic corpus covering illegal actions, fog/unknown state, corrections, cancellations and restart recovery.
+- Additional external hosts: their own scoped observation compiler, capability mapping, authoritative result persistence, revision checks and takeover rules.
+- Maze Battle ordinary saved play after single-writer ownership, autosave coordination and reload/reconciliation qualification; combat, inventory, quests and town expand separately.
 - Live-provider qualification selected explicitly by the operator, including model/effort support and actual stream behavior.
 - Richer nested schema contracts and longer-lived durable run continuation as distinct follow-on slices. The initial sourced prediction/counterevidence exercise is described in [Lab thought testing](lab-thought-testing.md).
 
-The initial service, browser surface and reusable adapter seam are qualified independently. After those gates passed, the Maze Battle task received the contract and confirmed its host mapping. Its actual cross-runtime proving-ground integration remains in progress; its separate observed-planner browser proof is not Agentica integration evidence.
+The initial service, browser surface and reusable adapter seam were qualified before Maze Battle adopted the contract. The [cross-runtime proving-ground report](maze-battle-integration-proof.md) records the resulting browser/service evidence and lessons. The separate omniscient baseline and standalone host planner are not used as Agentica integration proof.
