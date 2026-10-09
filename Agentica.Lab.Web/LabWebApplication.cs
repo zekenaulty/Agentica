@@ -164,10 +164,11 @@ public static class LabWebApplication
                 }
                 catch (Exception exception) when (exception is HostProtocolException or JsonException or ArgumentException or InvalidDataException or InvalidOperationException or IOException)
                 {
+                    var storageUnavailable = exception is InvalidDataException or IOException;
                     await connection.SendAsync(new ServiceMessage("error", new
                     {
-                        code = exception is HostProtocolException protocol ? protocol.Code : exception is IOException ? "storage.unavailable" : "message.invalid",
-                        message = exception is HostProtocolException ? exception.Message : exception is IOException ? "Persistent evidence could not be read or written. Reconcile the original action after restoring storage." : "Message failed contract validation."
+                        code = exception is HostProtocolException protocol ? protocol.Code : storageUnavailable ? "storage.unavailable" : "message.invalid",
+                        message = exception is HostProtocolException ? exception.Message : storageUnavailable ? "Persistent evidence could not be read or written. Reconcile the original action after restoring storage." : "Message failed contract validation."
                     }, attached?.RunId, message?.RequestId), context.RequestAborted).ConfigureAwait(false);
                 }
             }

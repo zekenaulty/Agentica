@@ -39,6 +39,8 @@ dotnet run --project Agentica.Lab.Web/Agentica.Lab.Web.csproj -c Release --no-bu
 
 Retain the same storage directory across a service restart when reconciling existing effects. A fresh or deleted directory does not establish that earlier effects are absent. Use one service process per storage directory; shared multi-process custody is not qualified by this kickoff.
 
+Keep live storage outside directories that a build or test runner cleans, such as `test-results`, `playwright-report`, `bin`, and `obj`. A fixture launcher can create a dedicated temporary directory outside its report directory and retain that path until the service stops and its original effects are reconciled. Removing the initialized custody ledger while the service is running fences admission; it must not silently recreate an empty ledger or repeat an effect.
+
 `GET /api/health` proves that the process is serving protocol version 1. It does not contact providers or prove that an external host is connected.
 
 ## First run without provider credentials
@@ -168,7 +170,7 @@ Recorded focused evidence from this implementation session:
 
 | Evidence | Observed result | Qualification boundary |
 | --- | --- | --- |
-| Lab web .NET suite | 97 passed | Service/context/custody/provider-factory seams, sourced thought tests, telemetry correlation, compaction and later-run evidence retrieval |
+| Lab web .NET suite | 99 passed | Service/context/custody/provider-factory seams, sourced thought tests, telemetry correlation, compaction and later-run evidence retrieval; missing/corrupt initialized storage is identified before run admission |
 | Focused provider client suite | 117 passed | Includes 20 GenerateContent streaming cases and eight refinement-prompt evidence/accounting cases; no live provider calls |
 | Aggregate Agentica suite | 749 passed, 7 skipped | Core and provider-client regression scope; seven opt-in live-provider checks remain deferred |
 | Browser host SDK seam suite | 22 passed | In-process protocol, bounded queues, exact deduplication, reservation ordering, disconnect, late durable results, explicit state reconciliation and exceptional terminality |
