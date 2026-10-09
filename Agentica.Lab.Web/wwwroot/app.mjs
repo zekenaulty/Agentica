@@ -58,7 +58,16 @@ function renderProviders() {
   }));
   if (state.providers.some(p => p.provider === previous)) $('sample-provider').value = previous;
   else $('sample-provider').value = 'demo';
-  $('sample-model').placeholder = state.providers.find(p => p.provider === $('sample-provider').value)?.defaultModel ?? 'Provider default';
+  syncProviderControls();
+}
+
+function syncProviderControls(resetTransport = false) {
+  const provider = $('sample-provider').value;
+  const gemini = provider === 'gemini' || provider === 'google';
+  $('gemini-transport-field').hidden = !gemini;
+  $('sample-gemini-api').disabled = !gemini;
+  if (resetTransport) $('sample-gemini-api').value = 'interactions';
+  $('sample-model').placeholder = state.providers.find(p => p.provider === provider)?.defaultModel ?? 'Provider default';
 }
 
 async function selectRun(runId) {
@@ -212,6 +221,7 @@ async function startSample(event) {
     const sample = freshSample(); await sampleLock(() => writeSample(sample)); renderSample();
     const client = createSampleClient();
     const provider = { provider: $('sample-provider').value, includeThoughtSummaries: $('include-thoughts').checked };
+    if (provider.provider === 'gemini' || provider.provider === 'google') provider.geminiApi = $('sample-gemini-api').value;
     if ($('sample-model').value.trim()) provider.model = $('sample-model').value.trim();
     const started = await client.start({ hostId: 'lab-browser-sample', sessionId: sample.sessionId, sessionEpoch: sample.sessionEpoch, scopeId: 'scoped-inventory', perspectiveId: 'inventory-operator', objectiveId: sample.objectiveId, objective: 'Accept one eligible record', observation: observation(sample), provider,
       capabilities: [
@@ -241,7 +251,7 @@ $('resume-sample').addEventListener('click', async () => {
 });
 $('cancel-run').addEventListener('click', async () => { try { await api(`/api/runs/${encodeURIComponent(state.selected)}/cancel`, { method: 'POST' }); await refresh(); } catch (error) { notice(error.message); } });
 $('refresh').addEventListener('click', () => { notice(''); void refresh(); });
-$('sample-provider').addEventListener('change', () => { $('sample-model').value = ''; $('sample-model').placeholder = state.providers.find(p => p.provider === $('sample-provider').value)?.defaultModel ?? 'Provider default'; });
+$('sample-provider').addEventListener('change', () => { $('sample-model').value = ''; syncProviderControls(true); });
 const tabs = [...document.querySelectorAll('[data-pane]')];
 function activateTab(tab) { for (const item of tabs) { const selected = item === tab; item.setAttribute('aria-selected', String(selected)); item.tabIndex = selected ? 0 : -1; $(`pane-${item.dataset.pane}`).hidden = !selected; } }
 for (const tab of tabs) { tab.addEventListener('click', () => activateTab(tab)); tab.addEventListener('keydown', event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (tabs.indexOf(tab) + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length; activateTab(tabs[index]); tabs[index].focus(); } }); }

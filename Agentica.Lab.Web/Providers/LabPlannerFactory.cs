@@ -51,6 +51,8 @@ public sealed class LabPlannerFactory : ILabPlannerFactory, IDisposable
         ILlmStreamingClient client = provider switch
         {
             "openai" => new OpenAiResponsesLlmClient(new(RequireKey("OPENAI_API_KEY"), model), _httpClient),
+            "gemini" when IsGenerateContent(settings.GeminiApi) => new GeminiGenerateContentLlmClient(
+                new(RequireKey("GEMINI_API_KEY", "GOOGLE_API_KEY"), model), _httpClient),
             "gemini" => new GeminiInteractionsLlmClient(new(RequireKey("GEMINI_API_KEY", "GOOGLE_API_KEY"), model), _httpClient),
             "anthropic" => new AnthropicMessagesLlmClient(new(RequireKey("ANTHROPIC_API_KEY"), model), _httpClient),
             "grok" => new XaiResponsesLlmClient(new(RequireKey("XAI_API_KEY"), model), _httpClient),
@@ -139,11 +141,13 @@ public sealed class LabPlannerFactory : ILabPlannerFactory, IDisposable
     private static void ValidateGeminiApi(string? api)
     {
         if (api is null || string.Equals(api, "interactions", StringComparison.OrdinalIgnoreCase)) return;
-        if (string.Equals(api, "legacy", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(api, "generatecontent", StringComparison.OrdinalIgnoreCase))
-            throw new NotSupportedException("Gemini GenerateContent does not yet implement the streaming client contract. Select interactions for this service.");
-        throw new ArgumentException("GeminiApi must be interactions. GenerateContent streaming is not supported by this service.", nameof(api));
+        if (IsGenerateContent(api)) return;
+        throw new ArgumentException("GeminiApi must be interactions, generateContent, or legacy.", nameof(api));
     }
+
+    private static bool IsGenerateContent(string? api) =>
+        string.Equals(api, "legacy", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(api, "generatecontent", StringComparison.OrdinalIgnoreCase);
 
     private string RequireKey(params string[] names)
     {

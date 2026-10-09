@@ -109,7 +109,7 @@ type ProviderSettings = {
   maxOutputTokens?: number; // default 4096
   contextWindowTokens?: number; // default 131072
   includeThoughtSummaries?: boolean; // default false
-  geminiApi?: 'interactions' | null;
+  geminiApi?: 'interactions' | 'generatecontent' | 'legacy' | null; // default interactions; legacy aliases generatecontent
 };
 
 type HostRunLimits = {
@@ -388,6 +388,8 @@ Every host consumer should handle both terminal message types. `run.terminated` 
 
 The dashboard separately reads `GET /api/runs/{runId}/events` as ordinary SSE `data` envelopes with event IDs. EventSource reconnects with `Last-Event-ID`; gaps are explicit. `GET /api/runs/{runId}` returns current run state, context, pending actions and any outcome. Provider display telemetry is bounded and may drop progress while effects are reconciled through separate action results. Native provider signatures and opaque continuation data are not browser display payloads.
 
+Progress payloads contain `{record,droppedRecords,context}`. The optional correlation `context` records service `runId`, `runnerRunId`, `objectiveId`, `planningOperation` (`create` or `refine`), `currentPlanId`, `planVersionCount`, `afterStepId`, and identity-only `frames` (`frameId`, `kind`, `version`, `toolSurfaceId`). Each provider call retains the planning binding captured when it began, including repair calls. At most 512 call associations are kept; unavailable bindings are explicitly null. This metadata connects live call IDs to the existing execution events and retained frames without exposing frame content or private provider state. Run guidance is labeled `lab-host/1` in the planning request.
+
 An outcome fits the normal core envelope when its serialized wire payload is at most 128 KiB. Larger outcomes use `{outcome:{runId,status,stopReason},truncated:true,snapshotUrl,receiptCount,observationCount}`; retrieve the full outcome from `snapshotUrl`. Oversized observational messages preserve their message type with `{truncated:true,snapshotUrl}`. Actions are never truncated: an oversized action fails before dispatch.
 
 The SDK invokes `onMessage` for display only. Exceptions in display callbacks do not execute or repeat effects. `messages` holds bounded recent messages and `droppedMessages` counts evictions.
@@ -433,25 +435,46 @@ type HostContextSnapshot = {
   }>;
   evidence: Array<{ reference: HostEvidenceReference; available: boolean }>;
   retainedObservationCount: number; prunedObservationCount: number; prunedFactCount: number;
+  thoughtTests: HostThoughtTest[];
+  actionEvidence: HostActionEvidence[];
 };
 type HostEvidenceReference = {
   observationId: string; revision: number; observedAt: string; contentHash: string;
+};
+type HostThoughtTest = {
+  testId: string; hypothesisId: string; capabilityId: string;
+  expectedResult: string; falsifier: string; plannedAt: string;
+  plannedObservation: HostEvidenceReference; actionId: string | null;
+  assessment: null | {
+    assessment: 'supported' | 'refuted' | 'inconclusive'; summary: string;
+    actionId: string; hostEvidenceId: string; observationId: string;
+    resultHash: string; observationHash: string; assessedHypothesisId: string; assessedAt: string;
+  };
+};
+type HostActionEvidence = {
+  actionId: string; capabilityId: string; runId: string; requestHash: string;
+  intentRecordedAt: string; thoughtTestIds: string[];
+  result: null | {
+    evidenceId: string; disposition: string; beforeRevision: number; afterRevision: number;
+    resultHash: string; observation: HostEvidenceReference | null;
+  };
 };
 ```
 
 Context content hashes use the context store's canonical SHA-256 lowercase hex representation without the manifest's `sha256:` prefix. Treat hashes as opaque exact source identities. Context files contain host public observations and derived knowledge, not provider-native reasoning state.
 
-Three service-local capabilities are added beside host capabilities:
+Four service-local capabilities are added beside host capabilities:
 
 | Tool | Input | Contract |
 | --- | --- | --- |
 | `lab.evidence.read` | Required `observationId`; optional `contentHash` | Returns exact source or explicit `unknown` / `not_retained`. An expected-hash mismatch is refused |
 | `lab.knowledge.query` | Optional `key` or `keyPrefix` (mutually exclusive), `state`, `limit` (1–32, default 16), `cursor` | Bounded current knowledge with source availability, total/remaining counts and next cursor. Changed knowledge/filter identity invalidates the cursor |
-| `lab.hypothesis.record` | Required `key`, `summary`, `value`, `evidenceObservationIds`; optional `state`, `supersedes` | Records only model `inferred`, `refuted` or `stale` knowledge against 1–8 retained observations; cannot overwrite host knowledge or establish completion |
+| `lab.hypothesis.record` | Required `key`, `summary`, `value`, `evidenceObservationIds`; optional `state`, `supersedes`; optional `expectedResult`, `falsifier`, `capabilityId` together | Records model `inferred`, `refuted` or `stale` knowledge against 1–8 retained observations; the optional triple registers a prediction before the next matching host action |
+| `lab.hypothesis.assess` | Required `hypothesisId`, `actionId`, `hostEvidenceId`, `observationId`, `assessment`, `summary` | Records a model assessment (`supported`, `refuted`, `inconclusive`) only against the exact pre-action prediction and resolved host result; no promotion to host truth or completion |
 
 Host facts may be observed, inferred, supported, refuted or stale. Repeating a current host key refreshes or corrects it; `supersedes` can identify one current host fact by key or ID. Model corrections can supersede only current model hypotheses. A retired entry becomes stale unless already refuted. Missing retained source content is never recreated from its summary or hash.
 
-These capabilities execute inside the Lab context store and do not send `action.request` to the host. They still pass through the normal tool/receipt path. The current implementation supports correction and evidence-based hypotheses; it does not yet define a dedicated prediction/counterevidence experiment protocol.
+These capabilities execute inside the Lab context store and do not send `action.request` to the host. They still pass through the normal tool/receipt path. [Lab thought testing](lab-thought-testing.md) describes prediction chronology, original result binding, model assessment, retention and schema-1 migration. Up to 128 thought tests and 128 action-evidence records are retained separately from authoritative effect custody. A result's `supported` assessment remains `source:model`.
 
 ## Verification
 

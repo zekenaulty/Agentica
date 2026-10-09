@@ -12,7 +12,7 @@ public static class WorkflowPlanPromptBuilder
     public const string SchemaVersionMetadataKey = "agentica.planner.schemaVersion";
     public const string RequestKindMetadataKey = "agentica.planner.requestKind";
     public const string InitialPromptVersion = "workflow-plan-initial-prompt-v1";
-    public const string RefinementPromptVersion = "workflow-plan-refinement-prompt-v1";
+    public const string RefinementPromptVersion = "workflow-plan-refinement-prompt-v2";
     public const string InitialSchemaVersion = "workflow-plan-initial-schema-v1";
     public const string RefinementSchemaVersion = "workflow-plan-refinement-schema-v1";
     public const string InitialRequestKind = "initial_plan";
@@ -64,10 +64,22 @@ public static class WorkflowPlanPromptBuilder
         Observation observation,
         LlmPlannerOptions options)
     {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(observation);
+        ValidateTriggerIdentity(request, observation);
         var compiled = PlanningPromptCompiler.Compile(request,
             EffectivePlanningCeiling(options), options, SystemInstruction,
             new LlmStructuredOutputOptions(JsonSchema: WorkflowPlanJsonSchemas.Refinement),
             value => BuildRefinementPrompt(value, observation));
+        // The trigger is mandatory even if the compiler removes its duplicate history entry.
+        // Preserve all original inclusion decisions and account the trigger's actual rendering.
+        var decisions = compiled.Receipt.Decisions.Select(item =>
+            item.Kind == "observation" && item.RefId == observation.ObservationId
+                ? item with { Included = true, Representation = "trigger" }
+                : item).ToList();
+        if (!decisions.Any(item => item.Kind == "observation" && item.RefId == observation.ObservationId))
+            decisions.Add(new LlmInputDecision("observation", observation.ObservationId, true, "trigger"));
+        var receipt = compiled.Receipt with { Decisions = decisions.ToArray() };
         return new LlmRequest(
             ModelId: options.ModelId,
             Messages:
@@ -82,10 +94,23 @@ public static class WorkflowPlanPromptBuilder
                 RefinementPromptVersion,
                 RefinementSchemaVersion,
                 RefinementRequestKind,
-                compiled.Receipt))
+                receipt))
         {
-            InputCompilationReceipt = compiled.Receipt
+            InputCompilationReceipt = receipt
         };
+    }
+
+    private static void ValidateTriggerIdentity(PlanningRequest request, Observation observation)
+    {
+        JsonElement? trigger = null;
+        foreach (var previous in request.Observations.Where(item => item.ObservationId == observation.ObservationId))
+        {
+            trigger ??= JsonSerializer.SerializeToElement(observation, JsonOptions);
+            // Object-key ordering is irrelevant; differing evidence, metadata, or payload is not.
+            if (!JsonElement.DeepEquals(trigger.Value, JsonSerializer.SerializeToElement(previous, JsonOptions)))
+                throw new LlmPlannerException(
+                    "Refinement observation identity conflicts with an existing observation.");
+        }
     }
 
     public static LlmRequest BuildInitialPlanRepairRequest(
@@ -281,7 +306,7 @@ public static class WorkflowPlanPromptBuilder
         {{Serialize(observation)}}
 
         Existing observations:
-        {{Serialize(request.Observations)}}
+        {{Serialize(request.Observations.Where(item => item.ObservationId != observation.ObservationId).ToArray())}}
 
         Existing receipts:
         {{Serialize(request.Receipts)}}

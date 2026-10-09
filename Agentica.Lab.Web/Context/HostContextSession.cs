@@ -21,6 +21,8 @@ public sealed partial class HostContextSession : IPlanningFrameProjector
     private List<HostKnowledgeEntry> _facts = [];
     private long _prunedObservationCount;
     private long _prunedFactCount;
+    private List<HostActionEvidence> _actions = [];
+    private List<HostThoughtTest> _thoughtTests = [];
 
     internal HostContextSession(HostContextIdentity identity, string path)
     {
@@ -29,16 +31,19 @@ public sealed partial class HostContextSession : IPlanningFrameProjector
         if (!File.Exists(path)) return;
         if (new FileInfo(path).Length > MaximumFileBytes) throw new InvalidDataException("Stored host context exceeds its size bound.");
         ContextFile stored;
+        string payloadHash;
         try
         {
-            stored = JsonSerializer.Deserialize<ContextFile>(File.ReadAllText(path), HostProtocol.Json)
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            stored = document.RootElement.Deserialize<ContextFile>(HostProtocol.Json)
                 ?? throw new InvalidDataException("Stored host context is empty.");
+            payloadHash = ContextJson.Hash(document.RootElement.GetProperty("payload"));
         }
         catch (JsonException exception)
         {
             throw new InvalidDataException("Stored host context is not valid JSON.", exception);
         }
-        if (stored.Version != 1 || stored.Payload.Identity != identity || ContextJson.Hash(stored.Payload) != stored.ContentHash)
+        if (stored.Version is not (1 or 2) || stored.Payload.Identity != identity || payloadHash != stored.ContentHash)
             throw new InvalidDataException("Stored host context identity or content hash does not match.");
         if (stored.Payload.Observations.Count > MaximumObservations || stored.Payload.Facts.Count > MaximumFacts)
             throw new InvalidDataException("Stored host context exceeds its retention bounds.");
@@ -46,6 +51,10 @@ public sealed partial class HostContextSession : IPlanningFrameProjector
         _facts = stored.Payload.Facts.ToList();
         _prunedObservationCount = stored.Payload.PrunedObservationCount;
         _prunedFactCount = stored.Payload.PrunedFactCount;
+        _actions = stored.Payload.Actions?.ToList() ?? [];
+        _thoughtTests = stored.Payload.ThoughtTests?.ToList() ?? [];
+        if (_actions.Count > MaximumActionEvidence || _thoughtTests.Count > MaximumThoughtTests)
+            throw new InvalidDataException("Stored thought testing exceeds its retention bounds.");
         if (_observations.Count == 0 || _observations.Select(item => item.Observation.ObservationId).Distinct(StringComparer.Ordinal).Count() != _observations.Count)
             throw new InvalidDataException("Stored host observation identities are invalid.");
         foreach (var observation in _observations)
@@ -61,6 +70,7 @@ public sealed partial class HostContextSession : IPlanningFrameProjector
                 if (source is not null && Reference(source) != reference)
                     throw new InvalidDataException("Stored knowledge evidence does not match its source.");
             }
+        ValidateThoughtEvidence();
     }
 
     public HostObservation CurrentObservation
@@ -75,38 +85,44 @@ public sealed partial class HostContextSession : IPlanningFrameProjector
         observation = Copy(observation);
         lock (_gate)
         {
-            var hash = ContextJson.Hash(observation);
-            var duplicate = _observations.Find(item => item.Observation.ObservationId == observation.ObservationId);
-            if (duplicate is not null)
-            {
-                if (duplicate.ContentHash != hash) throw new InvalidOperationException("An observation identity cannot be reused for different content.");
-                if (_observations[^1].Observation.ObservationId != observation.ObservationId)
-                    throw new InvalidOperationException("An old observation cannot become the current observation again.");
-                return;
-            }
-            if (_observations.Count > 0 && observation.Revision < _observations[^1].Observation.Revision)
-                throw new InvalidOperationException("An observation cannot rewind the session revision.");
-            // Retained fact references continue to fence reuse after the exact source payload is pruned.
-            var known = _facts.SelectMany(fact => fact.Evidence).FirstOrDefault(reference => reference.ObservationId == observation.ObservationId);
-            if (known is not null) throw new InvalidOperationException("A previously retained observation identity cannot be reused.");
-            var observations = new List<StoredObservation>(_observations) { new(observation, hash) };
-            var facts = new List<HostKnowledgeEntry>(_facts);
-            foreach (var fact in observation.Facts ?? []) AddHostFact(facts, observations, observation, fact);
+            var (observations, facts) = PrepareObservation(observation);
             Commit(observations, facts);
         }
+    }
+
+    private (List<StoredObservation> Observations, List<HostKnowledgeEntry> Facts) PrepareObservation(HostObservation observation)
+    {
+        var hash = ContextJson.Hash(observation);
+        var duplicate = _observations.Find(item => item.Observation.ObservationId == observation.ObservationId);
+        if (duplicate is not null)
+        {
+            if (duplicate.ContentHash != hash) throw new InvalidOperationException("An observation identity cannot be reused for different content.");
+            if (_observations[^1].Observation.ObservationId != observation.ObservationId)
+                throw new InvalidOperationException("An old observation cannot become the current observation again.");
+            return (new(_observations), new(_facts));
+        }
+        if (_observations.Count > 0 && observation.Revision < _observations[^1].Observation.Revision)
+            throw new InvalidOperationException("An observation cannot rewind the session revision.");
+        // Retained fact references continue to fence reuse after the exact source payload is pruned.
+        var known = ReferencedEvidence().FirstOrDefault(reference => reference.ObservationId == observation.ObservationId);
+        if (known is not null) throw new InvalidOperationException("A previously retained observation identity cannot be reused.");
+        var observations = new List<StoredObservation>(_observations) { new(observation, hash) };
+        var facts = new List<HostKnowledgeEntry>(_facts);
+        foreach (var fact in observation.Facts ?? []) AddHostFact(facts, observations, observation, fact);
+        return (observations, facts);
     }
 
     public HostContextSnapshot Snapshot()
     {
         lock (_gate)
         {
-            var evidence = _observations.Select(Reference).Concat(_facts.SelectMany(fact => fact.Evidence))
+            var evidence = _observations.Select(Reference).Concat(ReferencedEvidence())
                 .DistinctBy(reference => reference.ObservationId)
                 .OrderBy(reference => reference.Revision).ThenBy(reference => reference.ObservationId, StringComparer.Ordinal)
                 .Select(reference => new HostEvidenceManifest(reference, _observations.Exists(item => item.Observation.ObservationId == reference.ObservationId)))
                 .ToArray();
             return new(_identity, Copy(_observations[^1].Observation), _facts.Select(Copy).ToArray(), evidence, _observations.Count,
-                _prunedObservationCount, _prunedFactCount);
+                _prunedObservationCount, _prunedFactCount, _thoughtTests.ToArray(), _actions.Select(Copy).ToArray());
         }
     }
 
@@ -117,7 +133,7 @@ public sealed partial class HostContextSession : IPlanningFrameProjector
         {
             var found = _observations.Find(item => item.Observation.ObservationId == observationId);
             if (found is not null) return new("available", Reference(found), Copy(found.Observation));
-            var reference = _facts.SelectMany(fact => fact.Evidence).FirstOrDefault(item => item.ObservationId == observationId);
+            var reference = ReferencedEvidence().FirstOrDefault(item => item.ObservationId == observationId);
             return new(reference is null ? "unknown" : "not_retained", reference, null);
         }
     }
@@ -157,7 +173,8 @@ public sealed partial class HostContextSession : IPlanningFrameProjector
             ["evidenceReadTool"] = "lab.evidence.read",
             ["hypothesisTool"] = "lab.hypothesis.record",
             ["knowledgeQueryTool"] = "lab.knowledge.query",
-            ["guidance"] = "Host observations describe the permitted perspective. Model hypotheses are not host truth or completion proof. Query retained knowledge by key/prefix with bounded pagination when facts are omitted. Read exact retained evidence by observation ID when detail is omitted. Unavailable evidence and inferred, refuted or stale knowledge must not be presented as fresh observation. Actions and completion require host receipts.",
+            ["thoughtAssessmentTool"] = "lab.hypothesis.assess",
+            ["guidance"] = "Host observations describe the permitted perspective. Model hypotheses, including supported assessments, are not host truth or completion proof. For a useful thought test, record an expectedResult, falsifier and capabilityId before requesting the action; then assess its actual host result. Query retained knowledge by key/prefix when facts are omitted. Read exact retained evidence by observation ID. Unavailable evidence and inferred, refuted or stale knowledge must not be presented as fresh observation. Actions and completion require host receipts.",
             ["representation"] = compact ? "compact; current observation data and fact values omitted, source references retained" : "bounded public host context"
         };
         var entries = new List<object>();
@@ -176,6 +193,7 @@ public sealed partial class HostContextSession : IPlanningFrameProjector
                 fact.Source,
                 fact.Change,
                 fact.Supersedes,
+                ThoughtTest = FindThoughtTest(fact.Id),
                 Evidence = fact.Evidence.Select(reference => new HostEvidenceManifest(reference, available.Contains(reference.ObservationId))).ToArray()
             };
             var entryBytes = ContextJson.Size(entry) + 1;
@@ -223,7 +241,8 @@ public sealed partial class HostContextSession : IPlanningFrameProjector
     private static void Retire(List<HostKnowledgeEntry> facts, HostKnowledgeEntry old) =>
         facts[facts.IndexOf(old)] = old with { IsCurrent = false, State = old.State == "refuted" ? "refuted" : "stale" };
 
-    private void Commit(List<StoredObservation> observations, List<HostKnowledgeEntry> facts)
+    private void Commit(List<StoredObservation> observations, List<HostKnowledgeEntry> facts,
+        List<HostActionEvidence>? actions = null, List<HostThoughtTest>? thoughtTests = null)
     {
         var prunedObservations = _prunedObservationCount + Math.Max(0, observations.Count - MaximumObservations);
         var prunedFacts = _prunedFactCount + Math.Max(0, facts.Count - MaximumFacts);
@@ -232,12 +251,18 @@ public sealed partial class HostContextSession : IPlanningFrameProjector
         if (facts.Count > MaximumFacts)
             facts = facts.OrderByDescending(fact => fact.IsCurrent).ThenByDescending(fact => fact.Revision)
                 .ThenByDescending(fact => fact.UpdatedAt).Take(MaximumFacts).OrderBy(fact => fact.Revision).ToList();
-        var payload = new ContextPayload(_identity, observations, facts, prunedObservations, prunedFacts);
+        actions ??= new(_actions);
+        thoughtTests ??= new(_thoughtTests);
+        var payload = new ContextPayload(_identity, observations, facts, prunedObservations, prunedFacts, actions, thoughtTests);
+        if (ContextJson.Size(payload) > MaximumFileBytes - 256)
+            throw new InvalidOperationException("Public context reached its persisted size bound.");
         ContextJson.AtomicWrite(_path, payload);
         _observations = observations;
         _facts = facts;
         _prunedObservationCount = prunedObservations;
         _prunedFactCount = prunedFacts;
+        _actions = actions;
+        _thoughtTests = thoughtTests;
     }
 
     private static HostEvidenceReference Reference(StoredObservation item) => new(

@@ -58,7 +58,7 @@ The service reads credentials and endpoint configuration from its environment. T
 
 | Provider selection | Service configuration | Streamed API |
 | --- | --- | --- |
-| `gemini` / `google` | `GEMINI_API_KEY`, fallback `GOOGLE_API_KEY`; optional `AGENTICA_GEMINI_MODEL` | Gemini Developer API Interactions |
+| `gemini` / `google` | `GEMINI_API_KEY`, fallback `GOOGLE_API_KEY`; optional `AGENTICA_GEMINI_MODEL` | Gemini Developer API Interactions by default; optional streaming GenerateContent |
 | `openai` | `OPENAI_API_KEY`; optional `AGENTICA_OPENAI_MODEL` | OpenAI Responses |
 | `anthropic` / `claude` | `ANTHROPIC_API_KEY`; optional `AGENTICA_ANTHROPIC_MODEL` | Anthropic Messages |
 | `grok` / `xai` | `XAI_API_KEY`; optional `AGENTICA_GROK_MODEL` | xAI Responses |
@@ -77,7 +77,7 @@ The default application context budget is 131,072 tokens. The current estimator 
 
 The web service uses `GeminiInteractionsLlmClient` with streaming and `store:false`. Agentica supplies context and privately retains the native continuation needed within that planner session. It does not depend on a stored provider conversation to resume the run. Provider-native thought signatures and opaque continuation remain private to the planner/client path; the UI receives only the supported summary/telemetry projection.
 
-Interactions is itself a Gemini Developer API path. The existing GenerateContent route is a separate API mode, and the web service currently rejects `geminiApi:"legacy"` or `"generatecontent"` because that client does not implement this service's streaming interface. This kickoff does not silently switch APIs or buffer a nonstreamed call and label it live. Vertex routing is not exposed by the web factory.
+Interactions is itself a Gemini Developer API path. Set `geminiApi:"generatecontent"` (or its `"legacy"` alias) to select the separate Developer API `streamGenerateContent` SSE transport. The sample UI exposes this choice for Gemini. Both routes stream during the call and retain transport-specific native signatures privately; neither reuses the other route's continuation. See [GenerateContent streaming](gemini-generate-content-streaming.md) for supported controls and qualification. Vertex routing is not exposed by the web factory.
 
 Each run gets a fresh planner. A browser disconnect within the same process can reattach to a retained run. A service process restart preserves durable context/effect custody where recorded, while provider conversation and in-memory runtime continuation are lost.
 
@@ -168,8 +168,9 @@ Recorded focused evidence from this implementation session:
 
 | Evidence | Observed result | Qualification boundary |
 | --- | --- | --- |
-| Lab web .NET suite | 84 passed | Service/context/custody/provider-factory seams, reported by the integration owner in this qualification pass |
-| Existing Agentica core suite | 721 passed, 7 skipped | Existing regression scope; skips remain unqualified, reported by the integration owner in this qualification pass |
+| Lab web .NET suite | 97 passed | Service/context/custody/provider-factory seams, sourced thought tests, telemetry correlation, compaction and later-run evidence retrieval |
+| Focused provider client suite | 117 passed | Includes 20 GenerateContent streaming cases and eight refinement-prompt evidence/accounting cases; no live provider calls |
+| Aggregate Agentica suite | 749 passed, 7 skipped | Core and provider-client regression scope; seven opt-in live-provider checks remain deferred |
 | Browser host SDK seam suite | 22 passed | In-process protocol, bounded queues, exact deduplication, reservation ordering, disconnect, late durable results, explicit state reconciliation and exceptional terminality |
 | Restart recovery SDK suite | 8 passed | Mocked recovery HTTP; original identity/fingerprint, no invocation, persistence before resolution, live-run refusal and prior unresolved record recovery |
 | Real SDK to refreshed local service | Passed | Actual WebSocket, scripted provider stream, inspect → replan → accept, two retained results, zero pending actions and succeeded outcome |
@@ -177,16 +178,19 @@ Recorded focused evidence from this implementation session:
 | Browser UI smoke on refreshed service | Passed | Deterministic sample, context inspection, progress counters, disabled terminal cancellation, no page exceptions and no horizontal overflow at 390 px |
 | Browser exceptional termination | Passed | Explicitly unconfigured OpenAI factory rejected before provider network execution; reliable `run.terminated`, null normal outcome, snapshot failure, zero host actions, stopped activity and no page exceptions |
 | Desktop/mobile screenshot review | Visually inspected | Layout and readable execution state; screenshots are local artifacts |
+| Gemini transport controls | Passed | Real browser with intercepted HTTP and WebSocket; Interactions default, optional GenerateContent, no Gemini field on other providers, zero live calls |
 
 These observations do not establish live-provider parity, a connected Maze Battle integration, full process-restart continuation, production deployment readiness or a benchmark of model reasoning. Provider fixture seams and installed/live-provider execution are separate proof levels. Subsequent changes should rerun the affected focused gate and report its actual result.
 
 The SDK suites total **30 passed**. `node browser-tests/ui-termination-smoke.mjs` reproduces the exceptional browser path only when provider metadata reports an explicitly unconfigured remote provider; it stops before creating a run if none is available. Its purpose is to qualify reliable local setup-failure reporting, with no provider API call.
+
+`node browser-tests/ui-provider-controls.mjs` verifies the Gemini transport controls with fully intercepted fixture traffic. The same Playwright module override applies. Refinement prompt `workflow-plan-refinement-prompt-v2` renders the newest observation once, preserves inclusion decisions and rejects conflicting reuse of an observation identity. The two-run context fixture forces real prompt compaction, reopens the scoped store with a fresh view, and retrieves the original exact evidence through the planner/tool loop. No model intelligence or speed benchmark is inferred from these deterministic checks.
 
 ## Remaining integration work
 
 - External host adoption: scoped observation compiler, capability mapping, authoritative result persistence, revision checks and takeover rules.
 - A host-owned deterministic corpus covering illegal actions, fog/unknown state, corrections, cancellations and restart recovery.
 - Live-provider qualification selected explicitly by the operator, including model/effort support and actual stream behavior.
-- Optional native GenerateContent streaming, richer nested schema contracts, prediction/counterevidence experiments and longer-lived durable run continuation as distinct follow-on slices.
+- Richer nested schema contracts and longer-lived durable run continuation as distinct follow-on slices. The initial sourced prediction/counterevidence exercise is described in [Lab thought testing](lab-thought-testing.md).
 
 The initial service, browser surface and reusable adapter seam are qualified independently. After those gates passed, the Maze Battle task received the contract and confirmed its host mapping. Its actual cross-runtime proving-ground integration remains in progress; its separate observed-planner browser proof is not Agentica integration evidence.

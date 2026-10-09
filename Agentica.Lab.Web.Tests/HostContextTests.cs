@@ -283,6 +283,167 @@ public sealed class HostContextTests : IDisposable
         Assert.NotEmpty(session.QueryKnowledge(keyPrefix: "1-").Entries);
     }
 
+    [Theory]
+    [InlineData("supported")]
+    [InlineData("refuted")]
+    [InlineData("inconclusive")]
+    public async Task ThoughtExerciseBindsPriorExpectationToOriginalResultAcrossCompactionAndLaterRun(string assessment)
+    {
+        var session = new HostContextStore(_root).Open(Request(Observation("host", 1, Fact("item.status", "pending"))));
+        var record = session.CreateTools().Single(tool => tool.Descriptor.ToolId == "lab.hypothesis.record").Tool;
+        var planned = await record.ExecuteAsync(ThoughtInvocation("plan"), TestContext.Current.CancellationToken);
+        Assert.Equal(ReceiptStatus.Succeeded, planned.Receipt.Status);
+        var thought = Assert.Single(session.Snapshot().ThoughtTests);
+        var action = ThoughtAction();
+        session.RecordActionDispatch(action);
+        session.RecordActionDispatch(action); // exact pre-send replay must not bind a new prediction
+        var actualRevision = assessment == "refuted" ? 1 : 2;
+        var observation = Observation("actual", actualRevision, Fact("item.status", assessment == "supported" ? "accepted" : "pending")) with
+        { Data = HostProtocol.Element(new { status = assessment == "supported" ? "accepted" : "pending", blocked = assessment == "refuted" }) };
+        var result = new HostActionResult(action.ActionId, action.SessionId, action.SessionEpoch,
+            assessment == "refuted" ? "refused" : "applied", 1, actualRevision, "actual-host-receipt", "Authoritative host result", observation);
+        session.RecordActionResult(action, result);
+        session.RecordActionResult(action, result);
+        var assess = session.CreateTools().Single(tool => tool.Descriptor.ToolId == "lab.hypothesis.assess").Tool;
+        var invocation = AssessmentInvocation(thought.HypothesisId, assessment);
+        var invented = invocation with { Input = new Dictionary<string, object?>(invocation.Input) { ["hostEvidenceId"] = "invented" } };
+        var mismatched = invocation with { Input = new Dictionary<string, object?>(invocation.Input) { ["observationId"] = "host" } };
+        Assert.Equal(ReceiptStatus.Refused, (await assess.ExecuteAsync(invented, TestContext.Current.CancellationToken)).Receipt.Status);
+        Assert.Equal(ReceiptStatus.Refused, (await assess.ExecuteAsync(mismatched, TestContext.Current.CancellationToken)).Receipt.Status);
+        var qualified = await assess.ExecuteAsync(invocation, TestContext.Current.CancellationToken);
+        Assert.Equal(ReceiptStatus.Succeeded, qualified.Receipt.Status);
+        Assert.Null(qualified.Artifact); // An assessment does not supply a host completion artifact.
+        var snapshot = session.Snapshot();
+        var tested = Assert.Single(snapshot.ThoughtTests);
+        var retainedAction = Assert.Single(snapshot.ActionEvidence);
+        Assert.True(tested.PlannedAt <= retainedAction.IntentRecordedAt);
+        Assert.Equal(action.ActionId, tested.ActionId);
+        Assert.Equal("The item becomes accepted.", tested.ExpectedResult);
+        Assert.Equal("The host refuses and the item remains pending.", tested.Falsifier);
+        Assert.Equal(retainedAction.Result!.ResultHash, tested.Assessment!.ResultHash);
+        Assert.Equal(ProtocolValidation.Digest(result), tested.Assessment.ResultHash);
+        Assert.Equal(ProtocolValidation.Digest(action), retainedAction.RequestHash);
+        Assert.Equal("actual-host-receipt", tested.Assessment.HostEvidenceId);
+        Assert.Equal(assessment, tested.Assessment.Assessment);
+        var model = Assert.Single(snapshot.Facts, fact => fact.Source == "model" && fact.IsCurrent);
+        Assert.Equal(assessment == "inconclusive" ? "inferred" : assessment, model.State);
+        Assert.Equal(thought.HypothesisId, model.Supersedes);
+        Assert.Equal("observed", Assert.Single(snapshot.Facts, fact => fact.Source == "host" && fact.IsCurrent).State);
+
+        var later = new HostContextStore(_root).Open(Request(Observation("later-run-current", 3)) with { ObjectiveId = "later-bounded-run" });
+        var frame = Assert.Single(later.Project(new("later-run", 1, new RunRequest("Revisit learned evidence"), PlanningExecutionContext.Empty, [], [], [], null)));
+        var compact = JsonSerializer.Serialize(frame.CompactPayload, HostProtocol.Json);
+        Assert.Contains("actual-host-receipt", compact, StringComparison.Ordinal);
+        Assert.Contains("\"source\":\"model\"", compact, StringComparison.Ordinal);
+        Assert.Contains("\"source\":\"host\"", compact, StringComparison.Ordinal);
+        var queried = Assert.Single(later.QueryKnowledge(key: "prediction/accept").Entries);
+        Assert.Equal(assessment, queried.ThoughtTest!.Assessment!.Assessment);
+        var exact = later.ReadEvidence(queried.ThoughtTest.Assessment.ObservationId);
+        Assert.Equal("available", exact.Status);
+        Assert.Equal(queried.ThoughtTest.Assessment.ObservationHash, exact.Reference!.ContentHash);
+        Assert.Equal("later-run-current", later.CurrentObservation.ObservationId);
+    }
+
+    [Fact]
+    public async Task PostActionPredictionAndUnresolvedResultCannotBeAssessed()
+    {
+        var session = new HostContextStore(_root).Open(Request(Observation("host", 1)));
+        var action = ThoughtAction();
+        session.RecordActionDispatch(action);
+        var tools = session.CreateTools();
+        var record = tools.Single(tool => tool.Descriptor.ToolId == "lab.hypothesis.record").Tool;
+        await record.ExecuteAsync(ThoughtInvocation("too-late"), TestContext.Current.CancellationToken);
+        var late = Assert.Single(session.Snapshot().ThoughtTests);
+        session.RecordActionResult(action, new(action.ActionId, action.SessionId, action.SessionEpoch, "applied", 1, 2,
+            "actual-host-receipt", "Applied", Observation("actual", 2)));
+        var assess = tools.Single(tool => tool.Descriptor.ToolId == "lab.hypothesis.assess").Tool;
+        var refused = await assess.ExecuteAsync(AssessmentInvocation(late.HypothesisId, "supported"), TestContext.Current.CancellationToken);
+        Assert.Equal(ReceiptStatus.Refused, refused.Receipt.Status);
+        Assert.Null(Assert.Single(session.Snapshot().ThoughtTests).Assessment);
+
+        var next = ThoughtAction() with { ActionId = "next-action", ExpectedRevision = 2 };
+        session.RecordActionDispatch(next); // The same prediction can bind only a future action.
+        session.RecordActionResult(next, new(next.ActionId, next.SessionId, next.SessionEpoch, "unresolved", 2, 2,
+            "unknown-host-receipt", "Result is unknown", Observation("unknown", 2)));
+        var unknownAssessment = AssessmentInvocation(late.HypothesisId, "inconclusive") with
+        {
+            Input = new Dictionary<string, object?>
+            {
+                ["hypothesisId"] = late.HypothesisId,
+                ["actionId"] = "next-action",
+                ["hostEvidenceId"] = "unknown-host-receipt",
+                ["observationId"] = "unknown",
+                ["assessment"] = "inconclusive",
+                ["summary"] = "Unknown delivery is not test evidence."
+            }
+        };
+        Assert.Equal(ReceiptStatus.Refused, (await assess.ExecuteAsync(unknownAssessment, TestContext.Current.CancellationToken)).Receipt.Status);
+    }
+
+    [Fact]
+    public async Task PredictionRequiresFalsifierAndSupportedCannotBypassResultAssessment()
+    {
+        var session = new HostContextStore(_root).Open(Request(Observation("host", 1)));
+        var record = session.CreateTools().Single(tool => tool.Descriptor.ToolId == "lab.hypothesis.record").Tool;
+        var incomplete = ThoughtInvocation("missing-falsifier");
+        var input = new Dictionary<string, object?>(incomplete.Input);
+        input.Remove("falsifier");
+        Assert.Equal(ReceiptStatus.Refused, (await record.ExecuteAsync(incomplete with { Input = input }, TestContext.Current.CancellationToken)).Receipt.Status);
+        var unsupportedPromotion = Hypothesis("promotion", "prediction/accept", "accepted", "supported");
+        Assert.Equal(ReceiptStatus.Refused, (await record.ExecuteAsync(unsupportedPromotion, TestContext.Current.CancellationToken)).Receipt.Status);
+        Assert.Empty(session.Snapshot().ThoughtTests);
+        Assert.Empty(session.Snapshot().Facts);
+    }
+
+    [Fact]
+    public void LegacyContextWithoutThoughtExtensionsMigratesWithoutLosingEvidence()
+    {
+        new HostContextStore(_root).Open(Request(Observation("legacy", 1, Fact("legacy-key", "retained"))));
+        var path = Assert.Single(Directory.GetFiles(_root, "*.json"));
+        var document = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        document["version"] = 1;
+        var payload = document["payload"]!.AsObject();
+        payload.Remove("actions");
+        payload.Remove("thoughtTests");
+        document["contentHash"] = ProtocolValidation.Digest(JsonSerializer.SerializeToElement(payload, HostProtocol.Json))[7..];
+        File.WriteAllText(path, document.ToJsonString(HostProtocol.Json));
+
+        var migrated = new HostContextStore(_root).Open(Request(Observation("fresh", 2)));
+        Assert.Equal("retained", Assert.Single(migrated.Snapshot().Facts).Value.GetString());
+        Assert.Equal("available", migrated.ReadEvidence("legacy").Status);
+        Assert.Empty(migrated.Snapshot().ThoughtTests);
+        using var saved = JsonDocument.Parse(File.ReadAllText(path));
+        Assert.Equal(2, saved.RootElement.GetProperty("version").GetInt32());
+    }
+
+    private static ToolInvocation ThoughtInvocation(string step) => Hypothesis(step, "prediction/accept", "acceptance predicted", "inferred") with
+    {
+        Input = new Dictionary<string, object?>
+        {
+            ["key"] = "prediction/accept",
+            ["summary"] = "An acceptance prediction",
+            ["value"] = "acceptance predicted",
+            ["evidenceObservationIds"] = new[] { "host" },
+            ["expectedResult"] = "The item becomes accepted.",
+            ["falsifier"] = "The host refuses and the item remains pending.",
+            ["capabilityId"] = "host.accept"
+        }
+    };
+
+    private static HostActionRequest ThoughtAction() => new("tested-action", "lab-run", "run", "action-step", "session", "epoch", "host.accept",
+        "manifest", HostProtocol.Element(new { itemId = "sample" }), 1, DateTimeOffset.UtcNow.AddMinutes(1));
+
+    private static ToolInvocation AssessmentInvocation(string hypothesisId, string assessment) => new("run", "assess", "lab.hypothesis.assess",
+        new Dictionary<string, object?>
+        {
+            ["hypothesisId"] = hypothesisId,
+            ["actionId"] = "tested-action",
+            ["hostEvidenceId"] = "actual-host-receipt",
+            ["observationId"] = "actual",
+            ["assessment"] = assessment,
+            ["summary"] = "The model compared the expected result and falsifier to the bound host receipt."
+        });
+
     private static HostRunRequest Request(HostObservation observation) => new(
         1, "host", "session", "epoch", "scope", "perspective", "objective-id", "Do bounded work", observation, []);
 

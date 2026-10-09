@@ -171,7 +171,7 @@ public sealed class HostRun : IDisposable
             ValidateResult(action, result);
             _custody?.PrevalidateResolution(Request.HostId, Request.SessionId, result.ActionId, result,
                 _context.CurrentObservation.Revision);
-            if (result.Observation is not null) _context.Record(result.Observation);
+            _context.RecordActionResult(action.Request, result);
             _custody?.Resolve(Request.HostId, Request.SessionId, result.ActionId, result);
             action.Result = result;
             action.Unresolved = result.Disposition == "unresolved";
@@ -218,16 +218,16 @@ public sealed class HostRun : IDisposable
 
     private async Task ExecuteAsync()
     {
-        using var feed = new LlmTelemetryFeed(Request.Provider?.Provider ?? "gemini",
+        using var feed = new CorrelatedPlannerTelemetry(RunId, Request.ObjectiveId, Request.Provider?.Provider ?? "gemini",
             includeThoughtSummaries: Request.Provider?.IncludeThoughtSummaries ?? false);
         var pumping = PumpTelemetryAsync(feed);
         try
         {
             SetStatus("running");
             var settings = Request.Provider ?? new ProviderSettings();
-            var planner = settings.Provider == "demo"
+            var planner = feed.Wrap(settings.Provider == "demo"
                 ? DemoPlanner.Create(feed.Report)
-                : _planners.Create(settings, feed.Report);
+                : _planners.Create(settings, feed.Report));
             var registrations = Request.Capabilities.Select(CreateRegistration).Concat(_context.CreateTools()).ToArray();
             var limits = Request.Limits ?? new HostRunLimits();
             var runner = new AgenticaRunner(planner, ToolCatalog.Create(registrations), new RunSink(this),
@@ -251,6 +251,7 @@ public sealed class HostRun : IDisposable
                     ["sessionId"] = Request.SessionId,
                     ["scopeId"] = Request.ScopeId,
                     ["perspectiveId"] = Request.PerspectiveId,
+                    ["guidanceVersion"] = "lab-host/1",
                     ["guidance"] = "Use only scoped host observations. Verify the objective through host result evidence. " +
                         "Query exact retained evidence when needed; keep hypotheses separate from observed facts."
                 }), _lifetime.Token).ConfigureAwait(false);
@@ -281,7 +282,7 @@ public sealed class HostRun : IDisposable
         }
     }
 
-    private async Task PumpTelemetryAsync(LlmTelemetryFeed feed)
+    private async Task PumpTelemetryAsync(CorrelatedPlannerTelemetry feed)
     {
         await foreach (var delivery in feed.ReadAllAsync().ConfigureAwait(false)) Publish("progress", delivery);
     }
@@ -402,6 +403,9 @@ public sealed class HostRun : IDisposable
 
     private void Reserve(PendingAction action)
     {
+        // Bind predictions before any possible delivery. This is intent, not proof
+        // of an effect; a later custody failure still prevents dispatch.
+        _context.RecordActionDispatch(action.Request);
         // Persist custody before the first possible delivery. A failed write grants no dispatch.
         _custody?.Reserve(Request.HostId, Request.SessionId, Request.SessionEpoch, RunId,
             action.Request, action.Capability, Request.ObjectiveId);

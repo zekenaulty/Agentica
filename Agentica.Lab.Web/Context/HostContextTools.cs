@@ -26,14 +26,23 @@ public sealed partial class HostContextSession
                 new("cursor", Description: "Continuation cursor returned by the previous page with the same filters.")),
             QueryKnowledgeTool),
         Registration("lab.hypothesis.record", "Record a sourced hypothesis", ToolKind.PlannerAssist, ToolEffect.WritesLocalState,
-            "Record or revise a model hypothesis with retained observation evidence. State is inferred, refuted or stale. This does not alter host observations, authorize actions, or establish completion.",
+            "Record a sourced model hypothesis. For a thought test, supply expectedResult, falsifier and capabilityId together before requesting that capability; then assess its actual result with lab.hypothesis.assess. This never alters host truth or completion.",
             ToolInputSchema.Create(
                 new("key", Required: true), new("summary", Required: true),
                 new("value", ToolInputValueType.Any, Required: true),
                 new("evidenceObservationIds", ToolInputValueType.Array, Required: true),
                 new("state", AllowedValues: ["inferred", "refuted", "stale"]),
-                new("supersedes", Description: "Optional current model hypothesis ID or key to correct.")),
-            RecordHypothesisTool)
+                new("supersedes", Description: "Optional current model hypothesis ID or key to correct."),
+                new("expectedResult", Description: "Expected observable result, at most 2048 characters; requires falsifier and capabilityId."),
+                new("falsifier", Description: "Observable result that would refute the prediction, at most 2048 characters."),
+                new("capabilityId", Description: "The next invocation of this host capability will bind the thought test.")),
+            RecordHypothesisTool),
+        Registration("lab.hypothesis.assess", "Assess a pre-action thought test", ToolKind.PlannerAssist, ToolEffect.WritesLocalState,
+            "Compare a recorded expectation and falsifier to a resolved original host action. Exact action, host evidence and observation IDs must match retained evidence. Supported/refuted/inconclusive are model assessments, never host truth or completion proof.",
+            ToolInputSchema.Create(new("hypothesisId", Required: true), new("actionId", Required: true),
+                new("hostEvidenceId", Required: true), new("observationId", Required: true),
+                new("assessment", Required: true, AllowedValues: ["supported", "refuted", "inconclusive"]), new("summary", Required: true)),
+            AssessHypothesisTool)
     ];
 
     public HostKnowledgeQueryResult QueryKnowledge(string? key = null, string? keyPrefix = null, string? state = null, int limit = 16, string? cursor = null)
@@ -49,7 +58,7 @@ public sealed partial class HostContextSession
                 (keyPrefix is null || fact.Key.StartsWith(keyPrefix, StringComparison.Ordinal)) && (state is null || fact.State == state))
                 .OrderBy(fact => fact.Key, StringComparer.Ordinal).ThenBy(fact => fact.Source, StringComparer.Ordinal).ThenBy(fact => fact.Id, StringComparer.Ordinal).ToArray();
             var queryHash = ContextJson.Hash(new { _identity, key, keyPrefix, state });
-            var knowledgeHash = ContextJson.Hash(matches);
+            var knowledgeHash = ContextJson.Hash(new { Facts = matches, Tests = matches.Select(fact => FindThoughtTest(fact.Id)).ToArray() });
             var offset = 0;
             if (cursor is not null)
             {
@@ -75,7 +84,7 @@ public sealed partial class HostContextSession
             foreach (var fact in matches.Skip(offset).Take(limit))
             {
                 var item = new HostKnowledgeQueryItem(Copy(fact), fact.Evidence.Select(reference => new HostEvidenceManifest(reference,
-                    available.Contains(reference.ObservationId))).ToArray());
+                    available.Contains(reference.ObservationId))).ToArray(), FindThoughtTest(fact.Id));
                 var itemBytes = ContextJson.Size(item);
                 if (page.Count > 0 && bytes + itemBytes > 32_768) break;
                 page.Add(item);
@@ -121,6 +130,13 @@ public sealed partial class HostContextSession
         var summary = InputString(invocation, "summary", required: true)!;
         var state = InputString(invocation, "state", required: false) ?? "inferred";
         var supersedes = InputString(invocation, "supersedes", required: false);
+        var expectedResult = InputString(invocation, "expectedResult", false);
+        var falsifier = InputString(invocation, "falsifier", false);
+        var capabilityId = InputString(invocation, "capabilityId", false);
+        var isThoughtTest = expectedResult is not null || falsifier is not null || capabilityId is not null;
+        if (isThoughtTest && (expectedResult is null || falsifier is null || capabilityId is null || state != "inferred"))
+            throw new ArgumentException("A thought test requires expectedResult, falsifier and capabilityId together on an inferred hypothesis.");
+        if (capabilityId is not null) ValidateText(capabilityId, 128, nameof(capabilityId));
         ValidateText(key, 256, nameof(key));
         ValidateText(summary, 1_024, nameof(summary));
         if (state is not ("inferred" or "refuted" or "stale")) throw new ArgumentException("Models can only record inferred, refuted or stale hypotheses.");
@@ -134,7 +150,9 @@ public sealed partial class HostContextSession
         lock (_gate)
         {
             var evidence = ResolveReferences(_observations, evidenceIds);
-            var id = "hypothesis_" + ContextJson.Hash(new { invocation.RunId, invocation.StepId, key, summary, value, state, supersedes, evidenceIds });
+            var id = "hypothesis_" + (isThoughtTest
+                ? ContextJson.Hash(new { invocation.RunId, invocation.StepId, key, summary, value, state, supersedes, evidenceIds, expectedResult, falsifier, capabilityId })
+                : ContextJson.Hash(new { invocation.RunId, invocation.StepId, key, summary, value, state, supersedes, evidenceIds }));
             var duplicate = _facts.Find(fact => fact.Id == id);
             if (duplicate is not null) entry = duplicate;
             else
@@ -152,7 +170,7 @@ public sealed partial class HostContextSession
                 var facts = new List<HostKnowledgeEntry>(_facts);
                 if (old is not null) Retire(facts, old);
                 facts.Add(entry);
-                Commit(new(_observations), facts);
+                Commit(new(_observations), facts, thoughtTests: isThoughtTest ? AddThoughtTest(entry, capabilityId!, expectedResult!, falsifier!, facts) : null);
             }
         }
         return Result(invocation, ReceiptStatus.Succeeded, "Sourced model hypothesis recorded; host truth and completion are unchanged.",
@@ -197,7 +215,7 @@ public sealed partial class HostContextSession
         var value = InputElement(invocation, name);
         if (value.ValueKind != JsonValueKind.String) throw new ArgumentException($"{name} must be a string.");
         var text = value.GetString();
-        ValidateText(text!, name switch { "summary" => 1_024, "cursor" => 512, _ => 256 }, name);
+        ValidateText(text!, name switch { "expectedResult" or "falsifier" => 2_048, "summary" => 1_024, "cursor" => 512, _ => 256 }, name);
         return text;
     }
 

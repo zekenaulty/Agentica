@@ -72,11 +72,26 @@ public sealed class ProviderFactoryTests
     [Theory]
     [InlineData("legacy")]
     [InlineData("generateContent")]
-    public void Nonstreaming_Gemini_route_is_explicitly_unsupported(string api)
+    public async Task Explicit_GenerateContent_route_uses_real_streaming(string api)
     {
-        using var factory = new LabPlannerFactory(environment: ConfiguredEnvironment);
-        var error = Assert.Throws<NotSupportedException>(() => factory.Create(new ProviderSettings(GeminiApi: api), _ => { }));
-        Assert.Contains("streaming", error.Message, StringComparison.Ordinal);
+        using var handler = new StreamHandler("generateContent");
+        using var client = new HttpClient(handler);
+        using var factory = new LabPlannerFactory(client, ConfiguredEnvironment);
+        var events = new List<LlmStreamEvent>();
+        var plan = await factory.Create(new ProviderSettings(Model: "fixture-model", GeminiApi: api,
+            ThinkingEffort: "high", IncludeThoughtSummaries: true), events.Add).CreatePlanAsync(
+            new PlanningRequest(new RunRequest("Inspect."), [], [], []));
+        Assert.Equal("provider-plan", plan.PlanId);
+        Assert.EndsWith("/models/fixture-model:streamGenerateContent", handler.Endpoint!.AbsolutePath, StringComparison.Ordinal);
+        Assert.Equal("?alt=sse", handler.Endpoint.Query);
+        using var sent = JsonDocument.Parse(handler.Body!);
+        var config = sent.RootElement.GetProperty("generationConfig");
+        Assert.Equal("high", config.GetProperty("thinkingConfig").GetProperty("thinkingLevel").GetString());
+        Assert.True(config.GetProperty("thinkingConfig").GetProperty("includeThoughts").GetBoolean());
+        Assert.Equal(4096, config.GetProperty("maxOutputTokens").GetInt32());
+        Assert.False(sent.RootElement.TryGetProperty("previous_interaction_id", out _));
+        Assert.Contains(events, item => item.Kind == LlmStreamEventKind.TextDelta);
+        Assert.Equal(LlmStreamEventKind.Completed, events[^1].Kind);
     }
 
     [Theory]
@@ -175,6 +190,10 @@ public sealed class ProviderFactoryTests
                     Event("step.delta", new { event_type = "step.delta", index = 0, delta = new { type = "text", text = PlanJson } }) +
                     Event("step.stop", new { event_type = "step.stop", index = 0 }) +
                     Event("interaction.completed", new { event_type = "interaction.completed", interaction = new { id = "interaction_1", status = "completed" } }),
+                "generateContent" => Event("message", new
+                {
+                    candidates = new[] { new { index = 0, content = new { role = "model", parts = new[] { new { text = PlanJson } } } } }
+                }) + Event("message", new { candidates = new[] { new { index = 0, finishReason = "STOP" } } }),
                 "anthropic" => Event("message_start", new { type = "message_start", message = new { id = "message_1", usage = new { input_tokens = 10 } } }) +
                     Event("content_block_start", new { type = "content_block_start", index = 0, content_block = new { type = "text", text = "" } }) +
                     Event("content_block_delta", new { type = "content_block_delta", index = 0, delta = new { type = "text_delta", text = PlanJson } }) +

@@ -53,6 +53,17 @@ public sealed class HostRuntimeTests
         }
         Assert.Equal(["demo.inspect", "demo.accept"], actions.Select(action => action.CapabilityId));
         Assert.Equal(2, progress.Select(item => item.GetProperty("record").GetProperty("callId").GetString()).Distinct().Count());
+        Assert.All(progress, item =>
+        {
+            var binding = item.GetProperty("context");
+            Assert.Equal(actions[0].RunId, binding.GetProperty("runId").GetString());
+            Assert.Equal(actions[0].RunnerRunId, binding.GetProperty("runnerRunId").GetString());
+            Assert.Equal("fixture-objective", binding.GetProperty("objectiveId").GetString());
+            Assert.All(binding.GetProperty("frames").EnumerateArray(), frame =>
+                Assert.Contains(outcome.Details.PlanningFrames, retained => retained.FrameId == frame.GetProperty("frameId").GetString()));
+        });
+        Assert.Contains(progress, item => item.GetProperty("context").GetProperty("planningOperation").GetString() == "refine"
+            && item.GetProperty("context").GetProperty("afterStepId").GetString() == actions[0].StepId);
         Assert.Contains(progress, item => item.GetProperty("record").GetProperty("outputCharacters").GetInt64() > 0);
         Assert.Equal(RunOutcomeStatus.Succeeded, outcome.Outcome.Status);
         Assert.Equal(2, outcome.Receipts.Items.Count);

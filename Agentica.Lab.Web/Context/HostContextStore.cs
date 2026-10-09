@@ -90,7 +90,7 @@ internal static class ContextJson
         {
             using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
-                JsonSerializer.Serialize(stream, new ContextFile(1, payload, Hash(payload)), HostProtocol.Json);
+                JsonSerializer.Serialize(stream, new ContextFile(2, payload, Hash(payload)), HostProtocol.Json);
                 stream.Flush(flushToDisk: true);
             }
             File.Move(temporary, path, overwrite: true);
