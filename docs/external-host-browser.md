@@ -422,6 +422,8 @@ The host sends only the perspective it permits the planner to know. Its canonica
 
 The context store retains at most 128 exact observations and 256 knowledge entries per context identity. It preferentially retains current knowledge; omission/pruning counts and source availability remain visible. Projection selects up to 48 current facts within an 81,920-byte frame target. The compact representation keeps up to 12 facts within 16,384 bytes and omits current observation data and fact values while retaining references. The client prompt compiler may compact or further trim bounded recent observations/receipts under its own input budget.
 
+During refinement, the newest normalized action result also carries its validated host observation in `data.observation`, linked to the action receipt. A compact frame omitting its copy does not make that result unavailable. Use the current result when its observation identity, revision and permitted scope match the frame and its receipt establishes the result. Query `lab.evidence.read` when the needed source is absent; a read after every action is unnecessary when the action already supplied that source. Consuming a current action result and retrieving retained exact evidence are distinct evidence paths.
+
 Context snapshots contain:
 
 ```ts

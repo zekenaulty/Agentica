@@ -166,6 +166,8 @@ No frontend package build is required: the dashboard uses static HTML, CSS and E
 
 Use the [loopback fixture launcher](../samples/Agentica.Lab.Web.FixtureHost/README.md) to connect a host-owned deterministic planner to the real service without provider calls or service source edits. It injects the existing streaming Responses client through `LabWebApplication.Create`, accepts an explicit loopback HTTP fixture endpoint, and disables redirects/proxies. The included Node fixture demonstrates the SSE protocol with the isolated inventory. Other hosts supply their own observed-state planning fixture behind that endpoint.
 
+Responses input may contain retained earlier user and assistant messages before the current user prompt. A scripted fixture must select the last user message, require its planning sections, and derive both the frame and refinement evidence from that same message. Do not scan arbitrary strings or fall back to an older prompt if the current message is malformed. The included fixture follows this ordering. When a frame is compacted, first check the current action-result observation before requesting a retained-source read; see [context evidence paths](external-host-browser.md#bounded-context-and-learned-knowledge).
+
 The actual browser SDK → service → loopback HTTP SSE fixture → planning/refinement → host action/receipt path passed locally. This additionally exercises the real planner session's default input budget, which the built-in demo does not configure. The integration test accepts only `demo` or `fixture`; it rejects a live provider selection.
 
 Recorded focused evidence from this implementation session:
