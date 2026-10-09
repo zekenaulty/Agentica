@@ -24,7 +24,7 @@ public sealed class RefinementObservationPromptTests
         var prompt = result.Messages.Single(item => item.Role == LlmMessageRole.User).Content;
         Assert.Equal(1, Count(prompt, payload));
         Assert.Contains("older-evidence-marker", prompt, StringComparison.Ordinal);
-        Assert.Equal("workflow-plan-refinement-prompt-v2", result.Metadata![WorkflowPlanPromptBuilder.PromptVersionMetadataKey]);
+        Assert.Equal("workflow-plan-refinement-prompt-v3", result.Metadata![WorkflowPlanPromptBuilder.PromptVersionMetadataKey]);
         var receipt = Assert.IsType<LlmInputCompilationReceipt>(result.InputCompilationReceipt);
         Assert.True(receipt.EstimatedInputTokens <= receipt.InputAllowanceTokens);
         // The former duplicate alone would put this exact request above its token allowance.

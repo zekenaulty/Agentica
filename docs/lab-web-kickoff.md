@@ -117,6 +117,8 @@ The service stores generic facts and source references. It can support learned m
 
 The frame is bounded and can omit values. `lab.knowledge.query` retrieves bounded current knowledge pages, and `lab.evidence.read` retrieves exact retained source observations. Source hashes, omission counts, pruning counts and availability prevent an omitted or pruned source from becoming implied knowledge. An expired cursor requires restarting the query against the changed knowledge snapshot.
 
+Planner JSON sections use compact serialization. This reduces formatting overhead while preserving the objective, capability schemas, completed-step identities and exact newest evidence. Both character and estimated-token ceilings still apply. A scripted provider fixture should parse each JSON section and use evidence references when a frame is compacted; whitespace is not a data contract. If mandatory content still exceeds the budget, the run reports a planning failure rather than silently dropping required evidence.
+
 A first external integration should prove:
 
 1. One host-owned objective and permitted perspective.
@@ -171,8 +173,8 @@ Recorded focused evidence from this implementation session:
 | Evidence | Observed result | Qualification boundary |
 | --- | --- | --- |
 | Lab web .NET suite | 99 passed | Service/context/custody/provider-factory seams, sourced thought tests, telemetry correlation, compaction and later-run evidence retrieval; missing/corrupt initialized storage is identified before run admission |
-| Focused provider client suite | 117 passed | Includes 20 GenerateContent streaming cases and eight refinement-prompt evidence/accounting cases; no live provider calls |
-| Aggregate Agentica suite | 749 passed, 7 skipped | Core and provider-client regression scope; seven opt-in live-provider checks remain deferred |
+| Focused provider client suite | 119 passed | Includes 20 GenerateContent streaming cases, eight refinement-prompt evidence/accounting cases and two structured-context cases retaining 96 completed steps and exact nested evidence within unchanged budgets; no live provider calls |
+| Aggregate Agentica suite | 751 passed, 7 skipped | Core and provider-client regression scope; seven opt-in live-provider checks remain deferred |
 | Browser host SDK seam suite | 22 passed | In-process protocol, bounded queues, exact deduplication, reservation ordering, disconnect, late durable results, explicit state reconciliation and exceptional terminality |
 | Restart recovery SDK suite | 8 passed | Mocked recovery HTTP; original identity/fingerprint, no invocation, persistence before resolution, live-run refusal and prior unresolved record recovery |
 | SDK result validation | 33 passed | Revision, observation and completion constraints before completed persistence, including retained results, WebSocket reconciliation and HTTP recovery; invalid results cannot cause another effect |

@@ -11,8 +11,8 @@ public static class WorkflowPlanPromptBuilder
     public const string PromptVersionMetadataKey = "agentica.planner.promptVersion";
     public const string SchemaVersionMetadataKey = "agentica.planner.schemaVersion";
     public const string RequestKindMetadataKey = "agentica.planner.requestKind";
-    public const string InitialPromptVersion = "workflow-plan-initial-prompt-v1";
-    public const string RefinementPromptVersion = "workflow-plan-refinement-prompt-v2";
+    public const string InitialPromptVersion = "workflow-plan-initial-prompt-v2";
+    public const string RefinementPromptVersion = "workflow-plan-refinement-prompt-v3";
     public const string InitialSchemaVersion = "workflow-plan-initial-schema-v1";
     public const string RefinementSchemaVersion = "workflow-plan-refinement-schema-v1";
     public const string InitialRequestKind = "initial_plan";
@@ -22,7 +22,9 @@ public static class WorkflowPlanPromptBuilder
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        WriteIndented = true
+        // Structured evidence can be deeply nested. Whitespace consumes the same
+        // bounded provider input as evidence, without adding planning information.
+        WriteIndented = false
     };
 
     static WorkflowPlanPromptBuilder()

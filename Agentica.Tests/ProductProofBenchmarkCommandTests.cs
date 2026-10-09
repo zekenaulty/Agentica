@@ -411,7 +411,7 @@ public sealed class ProductProofBenchmarkCommandTests
                             ThinkingTokens: 0,
                             TotalTokens: 120,
                             CachedPromptTokens: 40),
-                        PromptVersion: "workflow-plan-initial-prompt-v1",
+                        PromptVersion: configuration.InitialPromptVersion,
                         SchemaVersion: "workflow-plan-initial-schema-v1",
                         RequestKind: "initial_plan",
                         IsRepair: false,
