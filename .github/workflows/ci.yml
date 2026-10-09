@@ -85,7 +85,7 @@ jobs:
         run: dotnet test Agentica.Lab.Web.Tests/Agentica.Lab.Web.Tests.csproj --configuration Release --no-build --no-restore
 
       - name: Qualify the browser host SDK
-        run: node --test browser-tests/host-sdk.test.mjs browser-tests/host-recovery.test.mjs
+        run: node --test browser-tests/host-sdk.test.mjs browser-tests/host-recovery.test.mjs browser-tests/host-result-validation.test.mjs
 
   quality:
     name: Locked build, proof tests, and package validation
@@ -175,7 +175,7 @@ jobs:
         run: dotnet test Agentica.Lab.Web.Tests/Agentica.Lab.Web.Tests.csproj --configuration Release --no-build --no-restore
 
       - name: Qualify the browser host SDK
-        run: node --test browser-tests/host-sdk.test.mjs browser-tests/host-recovery.test.mjs
+        run: node --test browser-tests/host-sdk.test.mjs browser-tests/host-recovery.test.mjs browser-tests/host-result-validation.test.mjs
 
       - name: Run tests with coverage
         run: >-

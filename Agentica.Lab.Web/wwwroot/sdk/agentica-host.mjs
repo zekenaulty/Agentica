@@ -15,6 +15,48 @@ const copy = value => JSON.parse(JSON.stringify(value));
 const requiredText = (value, name) => {
   if (typeof value !== 'string' || !value.trim()) throw new TypeError(`${name} is required.`);
 };
+const boundedText = (value, name, maximum, identifier = false) => {
+  requiredText(value, name);
+  if (value.length > maximum || (identifier ? /[\u0000-\u001f\u007f-\u009f]/ : /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/).test(value))
+    throw new TypeError(`Invalid ${name}.`);
+};
+const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const fields = (value, allowed, name) => {
+  if (!object(value) || Object.keys(value).some(key => !allowed.includes(key))) throw new TypeError(`Invalid ${name} fields.`);
+};
+// These are wire-byte checks. The service also measures its own escaped JSON and
+// materialized optional fields; it remains authoritative for those storage limits.
+const jsonBytes = value => new TextEncoder().encode(JSON.stringify(value)).length;
+const validateDepth = (value, depth = 1) => {
+  if (value === null || typeof value !== 'object') return;
+  // One additional object level belongs to either the WebSocket or recovery envelope.
+  if (depth > 31) throw new Error('Host result exceeds the protocol nesting bound.');
+  for (const child of Object.values(value)) validateDepth(child, depth + 1);
+};
+
+function validateObservation(observation, revision) {
+  fields(observation, ['observationId', 'revision', 'observedAt', 'data', 'facts'], 'observation');
+  boundedText(observation.observationId, 'observationId', 128, true);
+  if (observation.revision !== revision || !Number.isSafeInteger(observation.revision) || observation.revision < 0)
+    throw new Error('Observation must describe the resulting revision.');
+  if (typeof observation.observedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?(?:Z|[+-]\d{2}:\d{2})$/.test(observation.observedAt)
+    || !Number.isFinite(Date.parse(observation.observedAt)) || Date.parse(observation.observedAt) === -62135596800000)
+    throw new Error('Observation requires a valid timestamp.');
+  if (!object(observation.data) || jsonBytes(observation) > 65536) throw new Error('Invalid or oversized observation data.');
+  if (observation.facts != null && (!Array.isArray(observation.facts) || observation.facts.length > 64)) throw new Error('Invalid observation facts.');
+  const keys = new Set();
+  for (const fact of observation.facts ?? []) {
+    fields(fact, ['key', 'summary', 'value', 'state', 'evidenceObservationIds', 'supersedes'], 'fact');
+    boundedText(fact.key, 'fact key', 256); boundedText(fact.summary, 'fact summary', 1024);
+    if (keys.has(fact.key)) throw new Error('Observation fact keys must be unique.');
+    keys.add(fact.key);
+    if (!Object.hasOwn(fact, 'value') || jsonBytes(fact.value) > 8192 ||
+      !['observed', 'inferred', 'supported', 'refuted', 'stale'].includes(Object.hasOwn(fact, 'state') ? fact.state : 'observed')) throw new Error('Invalid observation fact.');
+    if (fact.evidenceObservationIds != null && (!Array.isArray(fact.evidenceObservationIds) || fact.evidenceObservationIds.length > 8 ||
+      fact.evidenceObservationIds.some(id => typeof id !== 'string'))) throw new Error('Invalid fact evidence references.');
+    if (fact.supersedes != null && typeof fact.supersedes !== 'string') throw new Error('Invalid superseded fact identity.');
+  }
+}
 
 export function actionKey(action) {
   return canonicalJson([action.sessionId, action.sessionEpoch, action.runId, action.actionId]);
@@ -130,7 +172,8 @@ export class AgenticaHost {
 
   async start(request) {
     for (const field of ['hostId', 'sessionId', 'sessionEpoch', 'scopeId', 'perspectiveId', 'objectiveId', 'objective']) requiredText(request[field], field);
-    const binding = { sessionId: request.sessionId, sessionEpoch: request.sessionEpoch };
+    const binding = { sessionId: request.sessionId, sessionEpoch: request.sessionEpoch,
+      objectiveId: request.objectiveId, ...(request.capabilities ? { capabilities: copy(request.capabilities) } : {}) };
     const response = await this.request('start', { ...request, protocolVersion: PROTOCOL_VERSION }, { binding });
     const runId = response.payload.runId ?? response.runId;
     requiredText(runId, 'runId');
@@ -140,8 +183,11 @@ export class AgenticaHost {
 
   async resume({ runId, sessionId, sessionEpoch }) {
     for (const [name, value] of Object.entries({ runId, sessionId, sessionEpoch })) requiredText(value, name);
-    this.runs.set(runId, { sessionId, sessionEpoch });
-    return this.request('resume', { runId, sessionId, sessionEpoch }, { runId });
+    const retained = this.runs.get(runId);
+    const binding = retained?.sessionId === sessionId && retained?.sessionEpoch === sessionEpoch
+      ? { ...retained } : { sessionId, sessionEpoch };
+    this.runs.set(runId, binding);
+    return this.request('resume', { runId, sessionId, sessionEpoch }, { runId, binding });
   }
 
   async stop(runId) { requiredText(runId, 'runId'); this.stoppedRuns.add(runId); return this.request('cancel', { runId }, { runId }); }
@@ -173,11 +219,11 @@ export class AgenticaHost {
       try {
         if (!action || entry.hostId !== hostId || entry.sessionId !== sessionId || action.sessionId !== sessionId || (entry.runId && entry.runId !== action.runId) || (entry.sessionEpoch && entry.sessionEpoch !== action.sessionEpoch)) throw new Error('Recovery entry does not match the requested host/session identity.');
         for (const field of ['actionId', 'runId', 'runnerRunId', 'stepId', 'sessionId', 'sessionEpoch', 'capabilityId', 'manifestHash']) requiredText(action[field], field);
-        const retained = await this._retainedAction(action, true);
+        const retained = await this._retainedAction(action, true, entry);
         const inspect = reconcile ?? this.reconcileAction;
         let result = this._resolved(retained) ? retained.result : await inspect?.(copy(action), retained ? copy(retained) : null, copy(entry));
         if (!result || result.disposition === 'unresolved') { outcomes.push({ ...identity, status: 'unresolved', resolved: false }); continue; }
-        result = await this._persistResolvedAction(action, result);
+        result = await this._persistResolvedAction(action, result, entry);
         const response = await read(endpoint.href, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hostId, sessionId, result }) });
         if (response.actionId !== action.actionId) throw new Error('Recovery response action identity differs.');
         outcomes.push({ ...identity, status: response.resolved ? 'resolved' : 'unresolved', resolved: response.resolved === true, duplicate: response.duplicate === true });
@@ -204,7 +250,11 @@ export class AgenticaHost {
       this.pending.delete(message.requestId);
       if (message.type === 'error') pending.reject(Object.assign(new Error(message.payload.message ?? message.payload.error ?? 'Service rejected request.'), { code: message.payload.code }));
       else {
-        if (message.type === 'started' && pending.binding) this.runs.set(message.payload.runId ?? message.runId, pending.binding);
+        if (['started', 'resumed'].includes(message.type) && pending.binding) {
+          const binding = { ...pending.binding };
+          if (binding.objectiveId === undefined && message.payload.objectiveId !== undefined) binding.objectiveId = message.payload.objectiveId;
+          this.runs.set(message.payload.runId ?? message.runId, binding);
+        }
         pending.resolve(message);
       }
     }
@@ -229,13 +279,13 @@ export class AgenticaHost {
     if (this.actions.has(key) || this.actions.size < this.maxActions) this.actions.set(key, copy(record));
   }
 
-  async _retainedAction(action, refresh = false) {
+  async _retainedAction(action, refresh = false, context) {
     const fingerprint = actionFingerprint(action);
     const checked = record => {
       if (!record) return null;
       if (record.fingerprint !== fingerprint) throw new Error('Action identity was reused with changed arguments or bindings. No effect was attempted.');
       if (!['pending', 'unresolved', 'completed'].includes(record.status)) throw new Error('Invalid retained action status.');
-      if (record.result) this._validateResult(action, record.result);
+      if (record.result) this._validateResult(action, record.result, context);
       if (record.status === 'completed' && !record.result) throw new Error('Completed custody is missing its result.');
       // Older SDK records could mark an unresolved response as completed.
       return copy(record.result?.disposition === 'unresolved' ? { ...record, status: 'unresolved' } : record);
@@ -251,10 +301,10 @@ export class AgenticaHost {
     return retained;
   }
 
-  async _persistResolvedAction(action, result) {
-    this._validateResult(action, result);
+  async _persistResolvedAction(action, result, context) {
+    this._validateResult(action, result, context);
     if (result.disposition === 'unresolved') throw new Error('Unresolved custody cannot be committed as completed.');
-    const retained = await this._retainedAction(action, true);
+    const retained = await this._retainedAction(action, true, context);
     if (this._resolved(retained) && canonicalJson(retained.result) !== canonicalJson(result))
       throw new Error('A completed original action result cannot be replaced.');
     const record = { fingerprint: actionFingerprint(action), status: 'completed', result: copy(result) };
@@ -314,11 +364,37 @@ export class AgenticaHost {
     else this._status('action.retained', action.actionId);
   }
 
-  _validateResult(action, result) {
-    if (!result || result.actionId !== action.actionId || result.sessionId !== action.sessionId || result.sessionEpoch !== action.sessionEpoch) throw new Error('Host result identity does not match the action.');
+  _validateResult(action, result, context) {
+    // Validate the exact JSON representation that persistence and transport will retain.
+    result = copy(result);
+    validateDepth(result);
+    fields(result, ['actionId', 'sessionId', 'sessionEpoch', 'disposition', 'beforeRevision', 'afterRevision', 'evidenceId', 'summary', 'observation', 'completion'], 'host result');
+    if (result.actionId !== action.actionId || result.sessionId !== action.sessionId || result.sessionEpoch !== action.sessionEpoch) throw new Error('Host result identity does not match the action.');
     if (!['applied', 'refused', 'conflict', 'unavailable', 'unresolved'].includes(result.disposition)) throw new Error('Unsupported action disposition.');
     if (!Number.isSafeInteger(result.beforeRevision) || !Number.isSafeInteger(result.afterRevision) || result.beforeRevision < 0 || result.afterRevision < result.beforeRevision) throw new Error('Invalid host result revisions.');
-    requiredText(result.evidenceId, 'evidenceId'); requiredText(result.summary, 'summary');
-    if (result.observation && result.observation.revision !== result.afterRevision) throw new Error('Observation must describe the resulting revision.');
+    if (['applied', 'refused'].includes(result.disposition) && result.beforeRevision !== action.expectedRevision)
+      throw new Error('A stale action must be reported as a conflict.');
+    if (['refused', 'conflict', 'unavailable'].includes(result.disposition) && result.beforeRevision !== result.afterRevision)
+      throw new Error('A non-applied result cannot claim an effect.');
+    const metadata = { ...this.runs.get(action.runId), ...context };
+    const capability = metadata.capability ?? metadata.capabilities?.find(item => item.id === action.capabilityId);
+    if (capability && capability.id !== action.capabilityId) throw new Error('Result capability binding differs from the original action.');
+    if (capability?.effect === 'readOnly' && result.beforeRevision !== result.afterRevision)
+      throw new Error('A read-only capability cannot change the host revision.');
+    boundedText(result.evidenceId, 'evidenceId', 128, true); boundedText(result.summary, 'summary', 4000);
+    if (['applied', 'refused', 'conflict'].includes(result.disposition) && result.observation == null)
+      throw new Error('A resolved host action requires an observation.');
+    if (result.observation != null) validateObservation(result.observation, result.afterRevision);
+    if (result.completion != null) {
+      fields(result.completion, ['objectiveId', 'evidenceId', 'summary'], 'completion');
+      if (result.disposition !== 'applied' || result.observation == null ||
+        (metadata.objectiveId !== undefined && result.completion.objectiveId !== metadata.objectiveId))
+        throw new Error('Completion must bind an applied result to the active objective.');
+      boundedText(result.completion.objectiveId, 'completion objectiveId', 128, true);
+      boundedText(result.completion.evidenceId, 'completion evidenceId', 128, true);
+      boundedText(result.completion.summary, 'completion summary', 4000);
+    }
+    if (jsonBytes(result) > 262144 || jsonBytes({ protocolVersion: PROTOCOL_VERSION, type: 'action.result', runId: action.runId, payload: result }) > this.maxMessageBytes)
+      throw new Error('Host result exceeds the protocol size bound.');
   }
 }

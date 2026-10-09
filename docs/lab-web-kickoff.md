@@ -132,7 +132,7 @@ Use the pinned SDK from the repository root:
 
 ```powershell
 dotnet test Agentica.Lab.Web.Tests/Agentica.Lab.Web.Tests.csproj -c Release --no-restore
-node --test browser-tests/host-sdk.test.mjs browser-tests/host-recovery.test.mjs
+node --test browser-tests/host-sdk.test.mjs browser-tests/host-recovery.test.mjs browser-tests/host-result-validation.test.mjs
 ```
 
 The .NET suite owns provider factory seams, host context, reliable remote execution and service boundaries. Read the current test output for the exact number and outcomes; a test name alone is not a pass claim.
@@ -173,6 +173,7 @@ Recorded focused evidence from this implementation session:
 | Aggregate Agentica suite | 749 passed, 7 skipped | Core and provider-client regression scope; seven opt-in live-provider checks remain deferred |
 | Browser host SDK seam suite | 22 passed | In-process protocol, bounded queues, exact deduplication, reservation ordering, disconnect, late durable results, explicit state reconciliation and exceptional terminality |
 | Restart recovery SDK suite | 8 passed | Mocked recovery HTTP; original identity/fingerprint, no invocation, persistence before resolution, live-run refusal and prior unresolved record recovery |
+| SDK result validation | 33 passed | Revision, observation and completion constraints before completed persistence, including retained results, WebSocket reconciliation and HTTP recovery; invalid results cannot cause another effect |
 | Real SDK to refreshed local service | Passed | Actual WebSocket, scripted provider stream, inspect → replan → accept, two retained results, zero pending actions and succeeded outcome |
 | External HTTP streaming fixture | Passed | Actual browser SDK → service → loopback HTTP SSE fixture → planning/refinement → host actions/receipts; deterministic fixture only, with no provider API call |
 | Browser UI smoke on refreshed service | Passed | Deterministic sample, context inspection, progress counters, disabled terminal cancellation, no page exceptions and no horizontal overflow at 390 px |
@@ -182,7 +183,7 @@ Recorded focused evidence from this implementation session:
 
 These observations do not establish live-provider parity, a connected Maze Battle integration, full process-restart continuation, production deployment readiness or a benchmark of model reasoning. Provider fixture seams and installed/live-provider execution are separate proof levels. Subsequent changes should rerun the affected focused gate and report its actual result.
 
-The SDK suites total **30 passed**. `node browser-tests/ui-termination-smoke.mjs` reproduces the exceptional browser path only when provider metadata reports an explicitly unconfigured remote provider; it stops before creating a run if none is available. Its purpose is to qualify reliable local setup-failure reporting, with no provider API call.
+The SDK suites total **63 passed**. `node browser-tests/ui-termination-smoke.mjs` reproduces the exceptional browser path only when provider metadata reports an explicitly unconfigured remote provider; it stops before creating a run if none is available. Its purpose is to qualify reliable local setup-failure reporting, with no provider API call.
 
 `node browser-tests/ui-provider-controls.mjs` verifies the Gemini transport controls with fully intercepted fixture traffic. The same Playwright module override applies. Refinement prompt `workflow-plan-refinement-prompt-v2` renders the newest observation once, preserves inclusion decisions and rejects conflicting reuse of an observation identity. The two-run context fixture forces real prompt compaction, reopens the scoped store with a fresh view, and retrieves the original exact evidence through the planner/tool loop. No model intelligence or speed benchmark is inferred from these deterministic checks.
 

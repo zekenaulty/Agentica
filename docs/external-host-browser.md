@@ -307,6 +307,8 @@ Reconnection is explicit. The service requests `action.reconcile` for a previous
 
 If no completed result exists, the optional constructor callback `reconcileAction(action, retainedRecord)` may inspect authoritative state and the original attempt journal. It returns the original `HostActionResult`, or `null`/`undefined`/an unresolved result if the outcome remains unknown. It must not execute or repeat the capability. The SDK validates and persists concrete resolution before sending it; a failed persistence write keeps the service response unresolved. Missing evidence without a callback stays unresolved. A cached completed result cannot be replaced by a later changed record.
 
+Before retaining a completed result, the SDK checks disposition-specific revision rules, required observations, completion bindings, field shapes and wire bounds. It uses capability/objective metadata from `start`, retains it on same-client resume, and uses the original custody metadata during HTTP recovery. A fresh resume can recover the objective from the service snapshot; capability details unavailable to that client remain service-validated. Invalid results preserve unresolved custody and cannot trigger another invocation. These checks do not reproduce the service's escaped/null-expanded serialization sizes or retained-context reference checks; the service remains authoritative for acceptance.
+
 `stop` requests cancellation and prevents queued, unstarted actions from invoking the host. An action already executing may still finish; the host must retain its result. Cancellation does not roll back an external effect. Control-request timeouts are reported without automatic repetition.
 
 Each client uses one connection, one action-processing queue, bounded display messages (256), bounded queued actions (64) and an action retention limit (2,048). Action records are never evicted to make room for another effect. Hitting the limit refuses further new execution until the host deliberately starts a fresh client/store lifecycle with appropriate retained evidence. Change limits through the constructor when the host has a defined retention policy.
@@ -483,6 +485,7 @@ Run the dependency-free SDK seam tests:
 ```text
 node --test browser-tests/host-sdk.test.mjs
 node --test browser-tests/host-recovery.test.mjs
+node --test browser-tests/host-result-validation.test.mjs
 ```
 
 They exercise duplicate action results, changed arguments, reservation ordering, durable-store failures, new-client reconciliation, disconnected completion, session and epoch mismatch, invalid results, bounds and control correlation. These tests do not establish live-provider success or a connected external game integration.
