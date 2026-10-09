@@ -32,11 +32,12 @@ test('identical repeated action invokes the host once and replays the exact resu
 
 test('argument key order is stable while changed arguments or deadline under the same action ID are refused', async () => {
   assert.equal(actionFingerprint(action({ arguments: { a: 1, b: 2 } })), actionFingerprint(action({ arguments: { b: 2, a: 1 } })));
-  let calls = 0; const { host, socket } = await setup({ onAction: request => { calls++; return applied(request); } });
+  const statuses = []; let calls = 0;
+  const { host, socket } = await setup({ onAction: request => { calls++; return applied(request); }, onStatus: status => statuses.push(status) });
   await deliver(host, socket); const second = await deliver(host, socket, 'action.request', action({ arguments: { itemId: 'item-2' } }));
-  assert.equal(second.disposition, 'unresolved'); assert.match(second.summary, /changed/);
+  assert.equal(second.disposition, 'unresolved'); assert.equal(statuses.at(-1).state, 'action.error'); assert.match(statuses.at(-1).detail, /changed/);
   const changedDeadline = await deliver(host, socket, 'action.request', action({ deadlineAt: new Date(Date.parse(actionDeadline) + 1000).toISOString() }));
-  assert.equal(changedDeadline.disposition, 'unresolved'); assert.match(changedDeadline.summary, /changed/);
+  assert.equal(changedDeadline.disposition, 'unresolved'); assert.equal(statuses.at(-1).state, 'action.error'); assert.match(statuses.at(-1).detail, /changed/);
   assert.equal(calls, 1); host.close();
 });
 
@@ -50,6 +51,52 @@ test('failed reservation storage prevents execution and returns unresolved', asy
   let calls = 0; const { host, socket } = await setup({ loadAction: () => null, saveAction: () => { throw new Error('storage unavailable'); }, onAction: request => { calls++; return applied(request); } });
   const result = await deliver(host, socket); assert.equal(calls, 0); assert.equal(result.disposition, 'unresolved');
   await deliver(host, socket); assert.equal(calls, 0); host.close();
+});
+
+test('deadline expiry during reservation prevents execution and retains the original attempt', async t => {
+  let now = Date.now(); const deadline = now + 1000;
+  t.mock.method(Date, 'now', () => now);
+  const request = action({ deadlineAt: new Date(deadline).toISOString() });
+  const records = new Map(), saves = []; let calls = 0;
+  const { host, socket } = await setup({ loadAction: key => records.get(key),
+    saveAction: (key, record) => { records.set(key, record); saves.push(record.status); now = deadline; },
+    onAction: value => { calls++; return applied(value); } });
+  const result = await deliver(host, socket, 'action.request', request);
+  assert.equal(result.disposition, 'unresolved'); assert.match(result.summary, /deadline expired.*No effect was attempted/);
+  assert.equal(calls, 0); assert.deepEqual(saves, ['pending']);
+  assert.deepEqual(records.get(actionKey(request)), { fingerprint: actionFingerprint(request), status: 'pending' });
+  now = deadline - 1000;
+  assert.equal((await deliver(host, socket, 'action.request', request)).disposition, 'unresolved');
+  assert.equal((await deliver(host, socket, 'action.reconcile', request)).disposition, 'unresolved');
+  assert.equal(calls, 0); assert.deepEqual(saves, ['pending']); host.close();
+});
+
+test('cancellation during reservation reports no effect and preserves pending custody', async () => {
+  const records = new Map(); let calls = 0;
+  const { host, socket } = await setup({ loadAction: key => records.get(key),
+    saveAction: (key, record) => { records.set(key, record); host.stoppedRuns.add(binding.runId); },
+    onAction: request => { calls++; return applied(request); } });
+  const result = await deliver(host, socket);
+  assert.equal(result.disposition, 'unresolved'); assert.match(result.summary, /Run stopped.*No effect was attempted/);
+  assert.equal(calls, 0); assert.equal(records.get(actionKey(action())).status, 'pending');
+  assert.equal((await deliver(host, socket, 'action.reconcile')).disposition, 'unresolved');
+  assert.equal(calls, 0); host.close();
+});
+
+for (const failingHook of ['loadAction', 'saveAction', 'onAction']) test(`${failingHook} exception details stay local and never enter action result messages`, async () => {
+  const secret = `private-${failingHook}-credential`; const records = new Map(), statuses = []; let calls = 0;
+  const { host, socket } = await setup({
+    loadAction: key => { if (failingHook === 'loadAction') throw new Error(secret); return records.get(key); },
+    saveAction: (key, record) => { if (failingHook === 'saveAction') throw new Error(secret); records.set(key, record); },
+    onAction: request => { calls++; if (failingHook === 'onAction') throw new Error(secret); return applied(request); },
+    onStatus: status => statuses.push(status) });
+  const result = await deliver(host, socket);
+  assert.equal(result.disposition, 'unresolved'); assert.match(result.summary, /Reconcile the original action/);
+  assert.ok(statuses.some(status => status.state === 'action.error' && status.detail === secret));
+  assert.equal((await deliver(host, socket)).disposition, 'unresolved');
+  assert.equal(calls, failingHook === 'onAction' ? 1 : 0);
+  assert.ok(socket.sent.length >= 2); assert.ok(socket.sent.every(message => message.type === 'action.result'));
+  assert.ok(!JSON.stringify(socket.sent).includes(secret)); host.close();
 });
 
 test('reconcile missing or pending retained result never re-executes', async () => {
@@ -175,13 +222,15 @@ test('an unresolved host response remains uncertain and explicit reconciliation 
 });
 
 test('changed durable custody is rejected before state inspection or another effect', async () => {
-  const store = new Map(); let calls = 0; let inspections = 0;
+  const store = new Map(), statuses = []; let calls = 0; let inspections = 0;
   const { host, socket } = await setup({ loadAction: key => store.get(key), saveAction: (key, record) => store.set(key, record),
-    onAction: () => { calls++; throw new Error('Unknown original outcome.'); }, reconcileAction: () => { inspections++; return applied(action()); } });
+    onAction: () => { calls++; throw new Error('Unknown original outcome.'); }, reconcileAction: () => { inspections++; return applied(action()); },
+    onStatus: status => statuses.push(status) });
   await deliver(host, socket);
   store.set(actionKey(action()), { fingerprint: 'changed-binding', status: 'completed', result: applied(action()) });
   const reply = await deliver(host, socket, 'action.reconcile');
-  assert.equal(reply.disposition, 'unresolved'); assert.match(reply.summary, /changed/); assert.equal(calls, 1); assert.equal(inspections, 0);
+  assert.equal(reply.disposition, 'unresolved'); assert.equal(statuses.at(-1).state, 'action.error'); assert.match(statuses.at(-1).detail, /changed/);
+  assert.equal(calls, 1); assert.equal(inspections, 0);
   assert.equal(host.actions.get(actionKey(action())).status, 'pending'); host.close();
 });
 

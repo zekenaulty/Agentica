@@ -345,19 +345,24 @@ export class AgenticaHost {
         record = { fingerprint, status: 'pending' };
         this.actions.set(key, copy(record));
         await this.saveAction?.(key, copy(record));
-        if (this.stoppedRuns.has(action.runId)) throw new Error('Run stopped while the action reservation was being saved.');
-        result = await this.onAction(copy(action));
-        this._validateResult(action, result);
-        if (result.disposition === 'unresolved') {
-          record = await this._retainedAction(action, true);
-          if (this._resolved(record)) result = await this._persistResolvedAction(action, record.result);
-          else this._cacheAction(action, { fingerprint, status: 'unresolved', result: copy(result) });
-          // Leave the durable reservation intact. A late host commit may already be
-          // writing its concrete result; uncertainty must not overwrite that result.
-        } else result = await this._persistResolvedAction(action, result);
+        if (this.stoppedRuns.has(action.runId)) {
+          result = this._unresolved(action, 'Run stopped while the action reservation was being saved. No effect was attempted.');
+        } else if (Date.parse(action.deadlineAt) <= Date.now()) {
+          result = this._unresolved(action, 'Action deadline expired while the reservation was being saved. No effect was attempted.');
+        } else {
+          result = await this.onAction(copy(action));
+          this._validateResult(action, result);
+          if (result.disposition === 'unresolved') {
+            record = await this._retainedAction(action, true);
+            if (this._resolved(record)) result = await this._persistResolvedAction(action, record.result);
+            else this._cacheAction(action, { fingerprint, status: 'unresolved', result: copy(result) });
+            // Leave the durable reservation intact. A late host commit may already be
+            // writing its concrete result; uncertainty must not overwrite that result.
+          } else result = await this._persistResolvedAction(action, result);
+        }
       }
     } catch (error) {
-      result = this._unresolved(action, `Action outcome could not be established: ${error.message}`);
+      result = this._unresolved(action, 'Action outcome could not be established. Reconcile the original action before further effects.');
       this._status('action.error', error.message);
     }
     if (this.connected) this._send({ type: 'action.result', runId: action.runId, payload: result });
