@@ -44,11 +44,11 @@ public sealed class OpenAiResponsesLlmClientTests
                     """);
         });
         var client = CreateClient(handler);
-        var firstRequest = new LlmRequest("gpt-test",
+        var firstRequest = new LlmRequest("gpt-6-luna",
             [new LlmMessage(LlmMessageRole.System, "Answer as JSON."),
              new LlmMessage(LlmMessageRole.User, "How many?")],
             new LlmGenerationOptions(MaxOutputTokens: 128,
-                Thinking: LlmThinkingOptions.Dynamic(includeThoughts: true)),
+                Thinking: LlmThinkingOptions.AtEffort(LlmReasoningEffort.High, includeThoughts: true)),
             new LlmStructuredOutputOptions(JsonSchema: "{\"type\":\"object\"}"));
         var events = new List<LlmStreamEvent>();
         await foreach (var item in client.StreamAsync(firstRequest)) events.Add(item);
@@ -62,16 +62,27 @@ public sealed class OpenAiResponsesLlmClientTests
         var continuation = Assert.IsType<LlmNativeContinuation>(first.NativeContinuation);
         Assert.DoesNotContain("opaque-secret", JsonSerializer.Serialize(first));
         Assert.DoesNotContain("opaque-secret", JsonSerializer.Serialize(firstRequest));
+        Assert.DoesNotContain("opaque-secret", JsonSerializer.Serialize(events));
         Assert.DoesNotContain("opaque-secret", continuation.ToString());
 
-        var second = await client.GenerateAsync(new LlmRequest("gpt-test",
+        var second = await client.GenerateAsync(new LlmRequest("gpt-6-luna",
             [new LlmMessage(LlmMessageRole.System, "Answer as JSON."),
              new LlmMessage(LlmMessageRole.User, "And twice that?")],
+            GenerationOptions: firstRequest.GenerationOptions,
             NativeContinuation: continuation));
         Assert.Equal("eight", second.Text);
+        Assert.Equal(2, sent.Count);
+        foreach (var body in sent)
+        {
+            using var requestBody = JsonDocument.Parse(body);
+            Assert.Equal("gpt-6-luna", requestBody.RootElement.GetProperty("model").GetString());
+            Assert.Equal("high", requestBody.RootElement.GetProperty("reasoning")
+                .GetProperty("effort").GetString());
+            Assert.False(requestBody.RootElement.GetProperty("store").GetBoolean());
+            Assert.True(requestBody.RootElement.GetProperty("stream").GetBoolean());
+            Assert.False(requestBody.RootElement.TryGetProperty("previous_response_id", out _));
+        }
         using var firstBody = JsonDocument.Parse(sent[0]);
-        Assert.False(firstBody.RootElement.GetProperty("store").GetBoolean());
-        Assert.True(firstBody.RootElement.GetProperty("stream").GetBoolean());
         Assert.Equal("json_object", firstBody.RootElement.GetProperty("text")
             .GetProperty("format").GetProperty("type").GetString());
         Assert.Equal("auto", firstBody.RootElement.GetProperty("reasoning")

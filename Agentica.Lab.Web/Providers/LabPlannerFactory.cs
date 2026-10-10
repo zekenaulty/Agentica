@@ -19,14 +19,17 @@ public sealed class LabPlannerFactory : ILabPlannerFactory, IDisposable
     public const int MaxContextWindowTokens = 1048576;
     private readonly HttpClient _httpClient;
     private readonly Func<string, string?> _environment;
+    private readonly OpenAiProviderConfiguration _openAiConfiguration;
     private readonly bool _ownsHttpClient;
     private bool _disposed;
 
-    public LabPlannerFactory(HttpClient? httpClient = null, Func<string, string?>? environment = null)
+    public LabPlannerFactory(HttpClient? httpClient = null, Func<string, string?>? environment = null,
+        OpenAiProviderConfiguration? openAiConfiguration = null)
     {
         _ownsHttpClient = httpClient is null;
         _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
         _environment = environment ?? Environment.GetEnvironmentVariable;
+        _openAiConfiguration = openAiConfiguration ?? new OpenAiProviderConfiguration(_environment);
     }
 
     public IWorkflowPlanner Create(ProviderSettings settings, Action<LlmStreamEvent> onStreamEvent)
@@ -35,7 +38,8 @@ public sealed class LabPlannerFactory : ILabPlannerFactory, IDisposable
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(onStreamEvent);
         var provider = NormalizeProvider(settings.Provider);
-        var model = settings.Model ?? DefaultModel(provider);
+        var openAi = provider == "openai" ? _openAiConfiguration.Capture() : null;
+        var model = settings.Model ?? openAi?.Model ?? DefaultModel(provider);
         if (string.IsNullOrWhiteSpace(model) || model.Length > 200 || model.Any(char.IsControl))
             throw new ArgumentException("A model name of at most 200 characters is required.", nameof(settings));
         if (settings.MaxOutputTokens is < 256 or > MaxOutputTokenLimit)
@@ -43,6 +47,9 @@ public sealed class LabPlannerFactory : ILabPlannerFactory, IDisposable
         if (settings.ContextWindowTokens is < 8192 or > MaxContextWindowTokens ||
             settings.ContextWindowTokens <= settings.MaxOutputTokens + 4096)
             throw new ArgumentOutOfRangeException(nameof(settings), "Context budget must be between 8192 and 1048576 tokens, with more than 4096 tokens remaining after output reservation.");
+        // Per-run overrides win. A different model does not inherit the configured model's effort.
+        if (openAi is not null && settings.ThinkingEffort is null && model == openAi.Model)
+            settings = settings with { ThinkingEffort = openAi.ThinkingEffort };
         var thinking = ParseThinking(settings);
         if (provider == "gemini") ValidateGeminiApi(settings.GeminiApi);
         else if (settings.GeminiApi is not null)
@@ -50,7 +57,8 @@ public sealed class LabPlannerFactory : ILabPlannerFactory, IDisposable
 
         ILlmStreamingClient client = provider switch
         {
-            "openai" => new OpenAiResponsesLlmClient(new(RequireKey("OPENAI_API_KEY"), model), _httpClient),
+            "openai" => new OpenAiResponsesLlmClient(new(openAi!.ApiKey ??
+                throw new InvalidOperationException("Provider credential is not configured on the service."), model), _httpClient),
             "gemini" when IsGenerateContent(settings.GeminiApi) => new GeminiGenerateContentLlmClient(
                 new(RequireKey("GEMINI_API_KEY", "GOOGLE_API_KEY"), model), _httpClient),
             "gemini" => new GeminiInteractionsLlmClient(new(RequireKey("GEMINI_API_KEY", "GOOGLE_API_KEY"), model), _httpClient),
@@ -82,6 +90,13 @@ public sealed class LabPlannerFactory : ILabPlannerFactory, IDisposable
 
     private ProviderMetadata Describe(string provider, string api, params string[] keyNames)
     {
+        if (provider == "openai")
+        {
+            var settings = _openAiConfiguration.GetSettings();
+            return new(provider, settings.Model, settings.Configured,
+                settings.Configured ? null : "Provider credential is not configured on the service.", api,
+                DefaultThinkingEffort: settings.ThinkingEffort);
+        }
         var model = DefaultModel(provider);
         var configured = keyNames.Length == 0 || keyNames.Any(name => Value(name) is not null);
         var issue = configured ? null : "Provider credential is not configured on the service.";
@@ -102,7 +117,7 @@ public sealed class LabPlannerFactory : ILabPlannerFactory, IDisposable
     private string? DefaultModel(string provider) => provider switch
     {
         "gemini" => Value("AGENTICA_GEMINI_MODEL") ?? GeminiModelId.Flash25,
-        "openai" => Value("AGENTICA_OPENAI_MODEL") ?? new OpenAiResponsesClientOptions().DefaultModelId,
+        "openai" => _openAiConfiguration.GetSettings().Model,
         "anthropic" => Value("AGENTICA_ANTHROPIC_MODEL") ?? new AnthropicMessagesClientOptions().DefaultModelId,
         "grok" => Value("AGENTICA_GROK_MODEL") ?? new XaiResponsesClientOptions().DefaultModelId,
         "ollama" => Value("OLLAMA_MODEL"),

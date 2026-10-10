@@ -2,6 +2,8 @@ import { AgenticaHost, actionKey, actionFingerprint } from './sdk/agentica-host.
 
 const $ = id => document.getElementById(id);
 const state = { runs: [], providers: [], selected: null, events: [], droppedEvents: 0, source: null, summary: '', callId: null, client: null, busy: false };
+const openaiSettings = { value: null, modelDirty: false, effortDirty: false, busy: false, generation: 0 };
+let sampleThinkingOverride = false;
 const terminal = value => ['completed', 'succeeded', 'planinvalid', 'partiallycomplete', 'waitingforapproval', 'failed', 'cancelled', 'canceled', 'stopped', 'indeterminate', 'blocked', 'timedout'].includes(String(value).toLowerCase());
 const json = value => JSON.stringify(value ?? null, null, 2);
 const text = (id, value) => { $(id).textContent = value ?? ''; };
@@ -17,13 +19,16 @@ async function api(path, options) {
 }
 
 async function refresh() {
-  const results = await Promise.allSettled([api('/api/runs'), api('/api/providers')]);
+  const settingsGeneration = openaiSettings.generation;
+  const results = await Promise.allSettled([api('/api/runs'), api('/api/providers'), openaiSettings.busy ? Promise.resolve(null) : api('/api/providers/openai/settings')]);
   if (results[0].status === 'fulfilled') {
     state.runs = results[0].value;
     renderRuns(); text('service-status', 'Service online'); $('service-dot').className = 'status-dot live';
     if (state.selected) await refreshSelected();
   } else { text('service-status', 'Service unavailable'); $('service-dot').className = 'status-dot'; notice(`Cannot reach the Lab service. ${results[0].reason.message}`); }
-  if (results[1].status === 'fulfilled') { state.providers = results[1].value; renderProviders(); }
+  if (results[1].status === 'fulfilled' && settingsGeneration === openaiSettings.generation) { state.providers = results[1].value; renderProviders(); }
+  if (results[2].status === 'fulfilled' && results[2].value && settingsGeneration === openaiSettings.generation) renderOpenaiSettings(results[2].value);
+  else if (results[2].status === 'rejected' && !openaiSettings.value && settingsGeneration === openaiSettings.generation) text('openai-credential-state', 'Credential status unavailable. Refresh to retry.');
 }
 
 function renderRuns() {
@@ -63,11 +68,55 @@ function renderProviders() {
 
 function syncProviderControls(resetTransport = false) {
   const provider = $('sample-provider').value;
+  const metadata = state.providers.find(p => p.provider === provider);
   const gemini = provider === 'gemini' || provider === 'google';
   $('gemini-transport-field').hidden = !gemini;
   $('sample-gemini-api').disabled = !gemini;
   if (resetTransport) $('sample-gemini-api').value = 'interactions';
-  $('sample-model').placeholder = state.providers.find(p => p.provider === provider)?.defaultModel ?? 'Provider default';
+  $('sample-model').placeholder = metadata?.defaultModel ?? 'Provider default';
+  $('sample-reasoning-field').hidden = provider !== 'openai';
+  $('sample-thinking-effort').disabled = provider !== 'openai';
+  const defaultEffort = provider === 'openai' && openaiSettings.value ? openaiSettings.value.thinkingEffort : metadata && Object.hasOwn(metadata, 'defaultThinkingEffort') ? metadata.defaultThinkingEffort : metadata ? null : 'high';
+  if (resetTransport || !sampleThinkingOverride) $('sample-thinking-effort').value = defaultEffort ?? '';
+  text('sample-thinking-source', sampleThinkingOverride ? 'per-run override' : 'saved default');
+}
+
+function renderOpenaiSettings(settings) {
+  openaiSettings.value = settings;
+  if (!openaiSettings.modelDirty) $('openai-model').value = settings.model;
+  if (!openaiSettings.effortDirty) $('openai-thinking-effort').value = settings.thinkingEffort ?? '';
+  const source = { serviceMemory: 'Service memory · cleared when the service restarts', environment: 'Service environment', none: 'No credential configured' }[settings.credentialSource] ?? 'Unavailable';
+  text('openai-credential-state', `Credential: ${source}. ${settings.configured ? 'Configured; live verification is pending.' : 'Add a key or configure the service environment.'}`);
+  syncProviderControls();
+}
+
+async function saveOpenaiSettings(credentialAction) {
+  if (openaiSettings.busy || !$('openai-settings-form').reportValidity()) return;
+  const payload = { model: $('openai-model').value.trim(), thinkingEffort: $('openai-thinking-effort').value || null, credentialAction };
+  if (credentialAction === 'set') payload.apiKey = $('openai-api-key').value;
+  // Retain a submitted credential only for this request, never in browser persistence or run configuration.
+  $('openai-api-key').value = '';
+  openaiSettings.busy = true; openaiSettings.generation++;
+  const controls = [...$('openai-settings-form').querySelectorAll('input, select, button')];
+  controls.forEach(control => { control.disabled = true; });
+  text('openai-settings-status', 'Saving configuration…');
+  try {
+    const settings = await api('/api/providers/openai/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    openaiSettings.modelDirty = false; openaiSettings.effortDirty = false;
+    renderOpenaiSettings(settings);
+    const provider = state.providers.find(provider => provider.provider === 'openai');
+    if (provider) { provider.defaultModel = settings.model; provider.defaultThinkingEffort = settings.thinkingEffort; provider.configured = settings.configured; if (settings.configured) provider.configurationIssue = null; }
+    renderProviders();
+    text('openai-settings-status', 'Settings saved for new runs. No provider call was made.');
+  } catch {
+    // Do not render a server error that could contain submitted credential material.
+    text('openai-settings-status', 'Could not save settings. Check the model, reasoning effort and credential, then retry. No run was started.');
+  } finally {
+    $('openai-api-key').value = '';
+    delete payload.apiKey;
+    openaiSettings.busy = false; openaiSettings.generation++;
+    controls.forEach(control => { control.disabled = false; });
+  }
 }
 
 async function selectRun(runId) {
@@ -222,6 +271,7 @@ async function startSample(event) {
     const client = createSampleClient();
     const provider = { provider: $('sample-provider').value, includeThoughtSummaries: $('include-thoughts').checked };
     if (provider.provider === 'gemini' || provider.provider === 'google') provider.geminiApi = $('sample-gemini-api').value;
+    if (provider.provider === 'openai' && $('sample-thinking-effort').value) provider.thinkingEffort = $('sample-thinking-effort').value;
     if ($('sample-model').value.trim()) provider.model = $('sample-model').value.trim();
     const started = await client.start({ hostId: 'lab-browser-sample', sessionId: sample.sessionId, sessionEpoch: sample.sessionEpoch, scopeId: 'scoped-inventory', perspectiveId: 'inventory-operator', objectiveId: sample.objectiveId, objective: 'Accept one eligible record', observation: observation(sample), provider,
       capabilities: [
@@ -235,6 +285,11 @@ async function startSample(event) {
 }
 
 $('sample-form').addEventListener('submit', startSample);
+$('openai-model').addEventListener('input', () => { openaiSettings.modelDirty = true; });
+$('openai-thinking-effort').addEventListener('change', () => { openaiSettings.effortDirty = true; });
+$('openai-settings-form').addEventListener('invalid', () => { $('openai-api-key').value = ''; }, true);
+$('openai-settings-form').addEventListener('submit', event => { event.preventDefault(); void saveOpenaiSettings($('openai-api-key').value ? 'set' : 'keep'); });
+$('use-openai-environment').addEventListener('click', () => { void saveOpenaiSettings('environment'); });
 $('resume-sample').addEventListener('click', async () => {
   if (state.busy) return; state.busy = true;
   try {
@@ -251,7 +306,8 @@ $('resume-sample').addEventListener('click', async () => {
 });
 $('cancel-run').addEventListener('click', async () => { try { await api(`/api/runs/${encodeURIComponent(state.selected)}/cancel`, { method: 'POST' }); await refresh(); } catch (error) { notice(error.message); } });
 $('refresh').addEventListener('click', () => { notice(''); void refresh(); });
-$('sample-provider').addEventListener('change', () => { $('sample-model').value = ''; syncProviderControls(true); });
+$('sample-provider').addEventListener('change', () => { $('sample-model').value = ''; sampleThinkingOverride = false; syncProviderControls(true); });
+$('sample-thinking-effort').addEventListener('change', () => { sampleThinkingOverride = true; syncProviderControls(); });
 const tabs = [...document.querySelectorAll('[data-pane]')];
 function activateTab(tab) { for (const item of tabs) { const selected = item === tab; item.setAttribute('aria-selected', String(selected)); item.tabIndex = selected ? 0 : -1; $(`pane-${item.dataset.pane}`).hidden = !selected; } }
 for (const tab of tabs) { tab.addEventListener('click', () => activateTab(tab)); tab.addEventListener('keydown', event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (tabs.indexOf(tab) + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length; activateTab(tabs[index]); tabs[index].focus(); } }); }

@@ -405,7 +405,9 @@ The SDK invokes `onMessage` for display only. Exceptions in display callbacks do
 | Route | Result |
 | --- | --- |
 | `GET /api/health` | `{status:"ready",protocolVersion:1}`; process readiness only |
-| `GET /api/providers` | Array of `{provider,defaultModel,configured,configurationIssue,api,streams}` |
+| `GET /api/providers` | Array of `{provider,defaultModel,configured,configurationIssue,api,streams,defaultThinkingEffort}`; default effort is nullable |
+| `GET /api/providers/openai/settings` | Safe OpenAI settings metadata; no credential bytes |
+| `PUT /api/providers/openai/settings` | Update process-local OpenAI defaults/key for new planners; no provider call |
 | `GET /api/runs` | Retained snapshots, newest first; `context:null` |
 | `GET /api/runs/{runId}` | Full snapshot including context |
 | `GET /api/runs/{runId}/events` | SSE observational envelopes |
@@ -419,6 +421,14 @@ Run statuses include `starting`, `running`, `awaiting_host`, and terminal core s
 The process retains at most 64 run objects. At capacity it can evict the oldest terminal run without unresolved custody; it never evicts an unresolved run to make room. An unretained run produces `run.not_found` (HTTP 404); that is not permission to replay its effects. Other handled HTTP contract errors use 409 with `{code,message}`. Persistent storage read/write failures use HTTP 503 with `code:"storage.unavailable"`; resolve storage before dispatching more work. HTTP request bodies use the same 256 KiB ceiling as host messages.
 
 SSE retains 512 events per run and up to 128 queued events per observer, with at most 32 observers per run. Pass `Last-Event-ID` or `?after=N` to resume retained display history. Event IDs are per-run monotonic sequence numbers; `telemetry.gap` includes `{after,next,snapshotUrl}` when history or the observer queue has a gap. The WebSocket progress queue holds 64 messages and may drop its oldest progress; its `telemetry.gap` payload uses `{dropped,snapshotUrl}`. Use SSE for sequence-visible operator replay. Required action/control/terminal sends use the separate awaited send path with a five-second send timeout. Receipt custody and result correlation resolve an effect beyond transport delivery.
+
+### OpenAI operator settings
+
+`GET /api/providers/openai/settings` and a successful `PUT` return `{provider:"openai",model,thinkingEffort,configured,credentialSource,credentialLifetime:"serviceProcess",supportedReasoningEfforts}`. `credentialSource` is `serviceMemory`, `environment` or `none`. `thinkingEffort` is nullable: null leaves the provider default unchanged. These responses use `Cache-Control: no-store` and never return a key. `configured` records credential presence, not successful live access.
+
+`PUT` accepts exactly `{model,thinkingEffort,credentialAction,apiKey?}`. Model, effort and action fields are required; effort accepts null or `none|low|medium|high|xhigh|max`. `credentialAction:"keep"` retains the current key, `"set"` requires a nonempty key without whitespace, and `"environment"` drops the service-memory key in favor of `OPENAI_API_KEY`. The latter two actions affect new planners; existing planners retain their captured credential. Supplying `apiKey` for keep/environment is invalid. Invalid updates return 400 with `configuration.invalid` and leave the configuration unchanged. The model is at most 200 characters; a submitted key is at most 8,192 characters. The existing HTTP body ceiling applies.
+
+Overrides last until process restart and are not written to context or custody. The startup default is `gpt-6-luna` with `high`; `AGENTICA_OPENAI_MODEL` preserves a custom startup model without injecting Luna's effort. Per-run explicit model and effort override these defaults. When effort is omitted, the service effort applies only to the configured model. See [Lab setup](lab-web-kickoff.md#openai-luna-preparation) for the dashboard and first-test payload.
 
 ## Bounded context and learned knowledge
 
