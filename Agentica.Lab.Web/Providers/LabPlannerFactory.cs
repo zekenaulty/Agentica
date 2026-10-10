@@ -47,8 +47,9 @@ public sealed class LabPlannerFactory : ILabPlannerFactory, IDisposable
         if (settings.ContextWindowTokens is < 8192 or > MaxContextWindowTokens ||
             settings.ContextWindowTokens <= settings.MaxOutputTokens + 4096)
             throw new ArgumentOutOfRangeException(nameof(settings), "Context budget must be between 8192 and 1048576 tokens, with more than 4096 tokens remaining after output reservation.");
+        // A retained null is an intentional provider default, not another lookup of mutable service settings.
         // Per-run overrides win. A different model does not inherit the configured model's effort.
-        if (openAi is not null && settings.ThinkingEffort is null && model == openAi.Model)
+        if (openAi is not null && !settings.ThinkingEffortResolved && settings.ThinkingEffort is null && model == openAi.Model)
             settings = settings with { ThinkingEffort = openAi.ThinkingEffort };
         var thinking = ParseThinking(settings);
         if (provider == "gemini") ValidateGeminiApi(settings.GeminiApi);

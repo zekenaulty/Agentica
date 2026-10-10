@@ -58,6 +58,37 @@ function validateObservation(observation, revision) {
   }
 }
 
+function validateOperationUsage(usage) {
+  if (usage != null && (!object(usage) || jsonBytes(usage) > 8192)) throw new Error('Invalid or oversized operation usage.');
+}
+
+function validateOperationEvent(event) {
+  validateDepth(event);
+  fields(event, ['hostId', 'sessionId', 'sessionEpoch', 'actionId', 'operationId', 'sequence', 'eventId', 'kind',
+    'observation', 'summary', 'usage', 'completion', 'nextSessionEpoch'], 'operation event');
+  for (const field of ['hostId', 'sessionId', 'sessionEpoch', 'actionId', 'operationId', 'eventId']) boundedText(event[field], field, 128, true);
+  if (!Number.isSafeInteger(event.sequence) || event.sequence < 1) throw new Error('Operation sequence must be a positive safe integer.');
+  if (!['progress', 'transfer', 'completed', 'blocked', 'cancelled', 'decision'].includes(event.kind)) throw new Error('Invalid operation event kind.');
+  boundedText(event.summary, 'operation summary', 4000);
+  validateObservation(event.observation, event.observation?.revision);
+  validateOperationUsage(event.usage);
+  if (event.kind === 'transfer') {
+    boundedText(event.nextSessionEpoch, 'nextSessionEpoch', 128, true);
+    if (event.nextSessionEpoch === event.sessionEpoch) throw new Error('Operation transfer requires a new epoch.');
+  } else if (event.nextSessionEpoch != null) throw new Error('Only transfer may change the operation epoch.');
+  if (event.kind === 'completed' && event.completion == null) throw new Error('A completed event requires objective completion evidence.');
+  if (event.completion != null) {
+    fields(event.completion, ['objectiveId', 'evidenceId', 'summary'], 'operation completion');
+    if (event.kind !== 'completed') throw new Error('Only a completed operation event may carry completion evidence.');
+    boundedText(event.completion.objectiveId, 'completion objectiveId', 128, true);
+    boundedText(event.completion.evidenceId, 'completion evidenceId', 128, true);
+    boundedText(event.completion.summary, 'completion summary', 4000);
+  }
+  if (jsonBytes(event) > 262144) throw new Error('Operation event exceeds the protocol size bound.');
+}
+
+const operationKey = value => canonicalJson([value.hostId, value.sessionId, value.actionId, value.operationId]);
+
 export function actionKey(action) {
   return canonicalJson([action.sessionId, action.sessionEpoch, action.runId, action.actionId]);
 }
@@ -94,6 +125,7 @@ export class AgenticaHost {
     this.actions = new Map();
     this.pending = new Map();
     this.runs = new Map();
+    this.operations = new Map();
     this.stoppedRuns = new Set();
     this.actionQueue = Promise.resolve();
     this.socket = null;
@@ -164,7 +196,7 @@ export class AgenticaHost {
         this.pending.delete(requestId);
         reject(new Error(`${type} response timed out; outcome is unresolved. Do not automatically repeat it.`));
       }, timeoutMs);
-      this.pending.set(requestId, { resolve, reject, timer, binding });
+      this.pending.set(requestId, { resolve, reject, timer, binding, type });
       try { this._send({ type, payload, requestId, ...(runId ? { runId } : {}) }); }
       catch (error) { clearTimeout(timer); this.pending.delete(requestId); reject(error); }
     });
@@ -191,6 +223,72 @@ export class AgenticaHost {
   }
 
   async stop(runId) { requiredText(runId, 'runId'); this.stoppedRuns.add(runId); return this.request('cancel', { runId }, { runId }); }
+
+  async _operationHttp(path, fetchImpl, options) {
+    if (typeof fetchImpl !== 'function') throw new TypeError('fetchImpl is required.');
+    const endpoint = new URL(this.url);
+    endpoint.protocol = endpoint.protocol === 'wss:' ? 'https:' : 'http:';
+    endpoint.pathname = path; endpoint.search = ''; endpoint.hash = '';
+    if (options?.query) for (const [key, value] of Object.entries(options.query)) endpoint.searchParams.set(key, value);
+    const response = await fetchImpl(endpoint.href, options?.body === undefined ? undefined : {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options.body),
+    });
+    const raw = await response.text();
+    if (new TextEncoder().encode(raw).length > 4194304) throw new Error('Operation response exceeds the supported size.');
+    const body = raw ? JSON.parse(raw) : null;
+    if (!response.ok) throw Object.assign(new Error(body?.message ?? `Operation request failed (${response.status}).`), { code: body?.code });
+    return body;
+  }
+
+  _operationEntry(entry, hostId, sessionId) {
+    if (!object(entry) || !object(entry.request) || !object(entry.action)
+      || entry.request.hostId !== hostId || entry.request.sessionId !== sessionId || entry.action.sessionId !== sessionId
+      || entry.action.sessionEpoch !== entry.request.sessionEpoch
+      || !Array.isArray(entry.request.capabilities)
+      || !['reserved', 'parked', 'waking', 'continued', 'completed', 'blocked', 'cancelled'].includes(entry.state)) throw new Error('Invalid operation inventory entry.');
+    for (const name of ['hostId', 'sessionId', 'sessionEpoch', 'scopeId', 'perspectiveId', 'objectiveId']) boundedText(entry.request[name], name, 128, true);
+    for (const name of ['actionId', 'runId', 'runnerRunId', 'stepId', 'sessionId', 'sessionEpoch', 'capabilityId', 'manifestHash']) boundedText(entry.action[name], name, 128, true);
+    boundedText(entry.activeEpoch, 'activeEpoch', 128, true);
+    if (entry.admission != null) {
+      this._validateResult(entry.action, entry.admission, entry.request);
+      if (!entry.admission.operation) throw new Error('Operation inventory is missing its admission.');
+    }
+    return copy(entry);
+  }
+
+  _rememberOperation(entry) {
+    if (!entry.admission?.operation) return;
+    const key = operationKey({ ...entry.request, actionId: entry.action.actionId, operationId: entry.admission.operation.operationId });
+    if (this.operations.has(key) || this.operations.size < this.maxActions) this.operations.set(key, copy(entry));
+  }
+
+  /** Read durable operation state explicitly. This never polls, executes an effect, or activates cognition. */
+  async listOperations({ hostId, sessionId, fetchImpl = globalThis.fetch } = {}) {
+    boundedText(hostId, 'hostId', 128, true); boundedText(sessionId, 'sessionId', 128, true);
+    const entries = await this._operationHttp('/api/operations', fetchImpl, { query: { hostId, sessionId } });
+    if (!Array.isArray(entries) || entries.length > this.maxActions) throw new Error('Invalid or oversized operation inventory.');
+    const checked = entries.map(entry => this._operationEntry(entry, hostId, sessionId));
+    for (const entry of checked) this._rememberOperation(entry);
+    return checked;
+  }
+
+  /** Deliver one immutable progress, transfer, or terminal event. Never invokes the planner. */
+  async signalOperation(event, { fetchImpl = globalThis.fetch } = {}) {
+    event = copy(event); validateOperationEvent(event);
+    if (event.kind === 'decision') throw new Error('A decision event must use wakeOperation.');
+    return this._operationHttp('/api/operations/events', fetchImpl, { body: event });
+  }
+
+  /** Request one new bounded cognition window. The host persists the event first; no automatic retry occurs. */
+  async wakeOperation(event) {
+    event = copy(event); validateOperationEvent(event);
+    if (event.kind !== 'decision') throw new Error('Only a decision event may wake cognition.');
+    const original = this.operations.get(operationKey(event))?.request;
+    const binding = { hostId: event.hostId, sessionId: event.sessionId, sessionEpoch: event.sessionEpoch,
+      ...(original ? { objectiveId: original.objectiveId, capabilities: copy(original.capabilities) } : {}) };
+    const response = await this.request('operation.wake', event, { binding });
+    return { ...response.payload, runId: response.payload.runId ?? response.runId };
+  }
 
   /**
    * Reconcile durable custody after a service restart. This never invokes onAction.
@@ -250,6 +348,14 @@ export class AgenticaHost {
       this.pending.delete(message.requestId);
       if (message.type === 'error') pending.reject(Object.assign(new Error(message.payload.message ?? message.payload.error ?? 'Service rejected request.'), { code: message.payload.code }));
       else {
+        if (pending.type === 'operation.wake' && (message.type !== 'started'
+          || typeof (message.payload.runId ?? message.runId) !== 'string'
+          || !message.payload.objectiveId || message.payload.hostId !== pending.binding.hostId
+          || message.payload.sessionId !== pending.binding.sessionId || message.payload.sessionEpoch !== pending.binding.sessionEpoch
+          || (pending.binding.objectiveId !== undefined && message.payload.objectiveId !== pending.binding.objectiveId))) {
+          pending.reject(new Error('Operation wake response binding differs from the requested host session.'));
+          return;
+        }
         if (['started', 'resumed'].includes(message.type) && pending.binding) {
           const binding = { ...pending.binding };
           if (binding.objectiveId === undefined && message.payload.objectiveId !== undefined) binding.objectiveId = message.payload.objectiveId;
@@ -257,6 +363,16 @@ export class AgenticaHost {
         }
         pending.resolve(message);
       }
+    }
+    if (message.type === 'operation.parked') {
+      try {
+        const entry = this._operationEntry(message.payload, message.payload.request?.hostId, message.payload.request?.sessionId);
+        const run = this.runs.get(message.runId);
+        if (entry.action.runId !== message.runId || !run || run.sessionId !== entry.request.sessionId
+          || run.sessionEpoch !== entry.request.sessionEpoch || (run.objectiveId !== undefined && run.objectiveId !== entry.request.objectiveId))
+          throw new Error('Parked operation run binding differs.');
+        this._rememberOperation(entry);
+      } catch (error) { this._status('protocol.error', error.message); return; }
     }
     try { this.onMessage(copy(message)); } catch { /* Display failures must not repeat effects. */ }
     if (message.type === 'action.request' || message.type === 'action.reconcile') {
@@ -373,7 +489,7 @@ export class AgenticaHost {
     // Validate the exact JSON representation that persistence and transport will retain.
     result = copy(result);
     validateDepth(result);
-    fields(result, ['actionId', 'sessionId', 'sessionEpoch', 'disposition', 'beforeRevision', 'afterRevision', 'evidenceId', 'summary', 'observation', 'completion'], 'host result');
+    fields(result, ['actionId', 'sessionId', 'sessionEpoch', 'disposition', 'beforeRevision', 'afterRevision', 'evidenceId', 'summary', 'observation', 'completion', 'operation'], 'host result');
     if (result.actionId !== action.actionId || result.sessionId !== action.sessionId || result.sessionEpoch !== action.sessionEpoch) throw new Error('Host result identity does not match the action.');
     if (!['applied', 'refused', 'conflict', 'unavailable', 'unresolved'].includes(result.disposition)) throw new Error('Unsupported action disposition.');
     if (!Number.isSafeInteger(result.beforeRevision) || !Number.isSafeInteger(result.afterRevision) || result.beforeRevision < 0 || result.afterRevision < result.beforeRevision) throw new Error('Invalid host result revisions.');
@@ -390,6 +506,15 @@ export class AgenticaHost {
     if (['applied', 'refused', 'conflict'].includes(result.disposition) && result.observation == null)
       throw new Error('A resolved host action requires an observation.');
     if (result.observation != null) validateObservation(result.observation, result.afterRevision);
+    if (result.operation != null) {
+      fields(result.operation, ['operationId', 'summary', 'usage'], 'operation admission');
+      if (result.disposition !== 'applied' || result.observation == null || result.completion != null
+        || (capability && capability.durableHandoff !== true)
+        || (metadata.capabilities && !capability)) throw new Error('Operation admission requires an applied, observed, durably bound capability without completion.');
+      boundedText(result.operation.operationId, 'operationId', 128, true);
+      boundedText(result.operation.summary, 'operation summary', 4000);
+      validateOperationUsage(result.operation.usage);
+    }
     if (result.completion != null) {
       fields(result.completion, ['objectiveId', 'evidenceId', 'summary'], 'completion');
       if (result.disposition !== 'applied' || result.observation == null ||

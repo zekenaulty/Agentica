@@ -19,6 +19,15 @@ public sealed class HostContextStore
 
     public HostContextSession Open(HostRunRequest request)
     {
+        var session = GetSession(request);
+        session.Record(request.Observation);
+        return session;
+    }
+
+    public void ValidateObservation(HostRunRequest request) => GetSession(request).ValidateNextObservation(request.Observation);
+
+    private HostContextSession GetSession(HostRunRequest request)
+    {
         ArgumentNullException.ThrowIfNull(request);
         var identity = new HostContextIdentity(
             Required(request.HostId), Required(request.SessionId), Required(request.SessionEpoch),
@@ -34,8 +43,6 @@ public sealed class HostContextStore
                 session = new HostContextSession(identity, Path.Combine(_rootDirectory, key + ".json"));
                 _sessions[key] = new(session);
             }
-            // Every new run supplies an observation, even when a compatible context was restored.
-            session.Record(request.Observation);
             return session;
         }
     }

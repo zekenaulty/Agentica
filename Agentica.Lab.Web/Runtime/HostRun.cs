@@ -32,6 +32,11 @@ public sealed class HostRun : IDisposable
     private readonly HostContextSession _context;
     private readonly ILabPlannerFactory _planners;
     private readonly ActionCustodyStore? _custody;
+    private readonly HostOperationStore? _operations;
+    private readonly HostOperationEntry? _continuation;
+    private readonly HostRunUsage _initialUsage;
+    private HostRunUsage _usage;
+    private HostOperationEntry? _parked;
     private IHostConnection? _connection;
     private Task? _task;
     private string _status = "starting";
@@ -40,12 +45,18 @@ public sealed class HostRun : IDisposable
     private DateTimeOffset _updatedAt = DateTimeOffset.UtcNow;
     private bool _disposed;
 
-    public HostRun(HostRunRequest request, HostContextSession context, ILabPlannerFactory planners, ActionCustodyStore? custody = null)
+    public HostRun(HostRunRequest request, HostContextSession context, ILabPlannerFactory planners, ActionCustodyStore? custody = null,
+        HostOperationStore? operations = null, HostRunUsage? usage = null, string? runId = null,
+        HostOperationEntry? continuation = null)
     {
         Request = request;
         _context = context;
         _planners = planners;
         _custody = custody;
+        _operations = operations;
+        _usage = _initialUsage = usage ?? new HostRunUsage();
+        _continuation = continuation;
+        if (runId is not null) RunId = runId;
         ManifestHash = ProtocolValidation.Digest(request.Capabilities);
     }
 
@@ -76,6 +87,20 @@ public sealed class HostRun : IDisposable
                 updatedAt = _updatedAt,
                 connected = _connection is not null,
                 manifestHash = ManifestHash,
+                usage = _usage,
+                continuation = _continuation is null ? null : new
+                {
+                    parentRunId = _continuation.Action.RunId,
+                    admissionActionId = _continuation.Action.ActionId,
+                    _continuation.Admission!.Operation!.OperationId,
+                    wakeEventId = _continuation.LatestEvent?.EventId
+                },
+                operation = _parked is null ? null : new
+                {
+                    _parked.Action.ActionId,
+                    _parked.Admission!.Operation!.OperationId,
+                    state = _operations?.Get(Request.HostId, Request.SessionId, _parked.Action.ActionId).State
+                },
                 pendingActions = _actions.Values.Where(a => a.Result is null || a.Unresolved)
                     .Select(a => new { request = a.Request, a.DeliveryAttempted, a.Unresolved }).ToArray(),
                 outcome = includeContext ? _outcome : _outcome is null ? null : DisplayOutcome(_outcome),
@@ -147,7 +172,12 @@ public sealed class HostRun : IDisposable
         OutcomeEnvelope? outcome;
         lock (_gate) outcome = _outcome;
         if (outcome is not null)
+        {
+            if (_parked is not null && _operations is not null)
+                await connection.SendAsync(new ServiceMessage("operation.parked",
+                    _operations.Get(Request.HostId, Request.SessionId, _parked.Action.ActionId), RunId), cancellationToken).ConfigureAwait(false);
             await connection.SendAsync(new ServiceMessage("outcome", DisplayOutcome(outcome), RunId), cancellationToken).ConfigureAwait(false);
+        }
         object? termination;
         lock (_gate) termination = _termination;
         if (termination is not null)
@@ -171,6 +201,13 @@ public sealed class HostRun : IDisposable
             ValidateResult(action, result);
             _custody?.PrevalidateResolution(Request.HostId, Request.SessionId, result.ActionId, result,
                 _context.CurrentObservation.Revision);
+            // Intent was retained before dispatch. Persist admission before resolving custody so a
+            // crash at either write can be reconciled using the original immutable host result.
+            if (result.Operation is not null)
+            {
+                if (_operations is null) ProtocolValidation.Fail("operation.unsupported", "Durable operation storage is unavailable.");
+                _parked = _operations!.Admit(Request.HostId, Request.SessionId, result);
+            }
             _context.RecordActionResult(action.Request, result);
             _custody?.Resolve(Request.HostId, Request.SessionId, result.ActionId, result);
             action.Result = result;
@@ -185,6 +222,7 @@ public sealed class HostRun : IDisposable
     private void ValidateResult(PendingAction action, HostActionResult result)
     {
         if (!action.DeliveryAttempted) ProtocolValidation.Fail("action.not_dispatched", "Action has not been sent to the host.");
+        if (result.Operation is not null) HostOperationStore.ValidateAdmission(Request, action.Request, result);
         if (result.Disposition is not ("applied" or "refused" or "conflict" or "unavailable" or "unresolved"))
             ProtocolValidation.Fail("action.disposition", "Unknown action disposition.");
         ProtocolValidation.Identifier(result.EvidenceId);
@@ -225,16 +263,22 @@ public sealed class HostRun : IDisposable
         {
             SetStatus("running");
             var settings = Request.Provider ?? new ProviderSettings();
-            var planner = feed.Wrap(settings.Provider == "demo"
-                ? DemoPlanner.Create(feed.Report)
-                : _planners.Create(settings, feed.Report));
-            var registrations = Request.Capabilities.Select(CreateRegistration).Concat(_context.CreateTools()).ToArray();
+            void Report(LlmStreamEvent item)
+            {
+                if (item.Kind == LlmStreamEventKind.Started)
+                    lock (_gate) _usage = _usage with { ProviderCalls = checked(_usage.ProviderCalls + 1) };
+                feed.Report(item);
+            }
+            var underlying = settings.Provider == "demo" ? DemoPlanner.Create(Report) : _planners.Create(settings, Report);
+            var planner = feed.Wrap(AccountingPlanner.Wrap(this, underlying));
+            var registrations = Request.Capabilities.Select(CreateRegistration).Concat(_context.CreateTools())
+                .Select(registration => registration with { Tool = new AccountingTool(this, registration.Tool) }).ToArray();
             var limits = Request.Limits ?? new HostRunLimits();
             var runner = new AgenticaRunner(planner, ToolCatalog.Create(registrations), new RunSink(this),
                 new DeterministicOutcomeReporter(), new ExecutionPolicy(
-                    MaxSteps: limits.MaxSteps, MaxRefinements: limits.MaxRefinements,
+                    MaxSteps: limits.MaxSteps - _initialUsage.Steps, MaxRefinements: limits.MaxRefinements - _initialUsage.Refinements,
                     Timeout: TimeSpan.FromSeconds(limits.TimeoutSeconds),
-                    MaxPlanContinuations: limits.MaxPlanContinuations,
+                    MaxPlanContinuations: limits.MaxPlanContinuations - _initialUsage.Continuations,
                     PlanningContext: new PlanningContextOptions(limits.MaxRecentObservations, limits.MaxRecentReceipts),
                     MaxBlockedRetries: 0, MaxParallelism: 1, MaxBatchSize: 1,
                     AllowReadOnlyParallelBatches: false, EvaluateCompletionAfterEachBatch: true,
@@ -251,18 +295,34 @@ public sealed class HostRun : IDisposable
                     ["sessionId"] = Request.SessionId,
                     ["scopeId"] = Request.ScopeId,
                     ["perspectiveId"] = Request.PerspectiveId,
-                    ["guidanceVersion"] = "lab-host/1",
+                    ["guidanceVersion"] = "lab-host/2",
+                    ["continuation"] = _continuation is null ? null : HostProtocol.Element(new
+                    {
+                        parentRunId = _continuation.Action.RunId,
+                        admission = _continuation.Admission,
+                        wake = _continuation.LatestEvent,
+                        cumulativeUsage = _initialUsage
+                    }),
                     ["guidance"] = "Use only scoped host observations. Verify the objective through host result evidence. " +
                         "Query exact retained evidence when needed; keep hypotheses separate from observed facts."
                 }), _lifetime.Token).ConfigureAwait(false);
             lock (_gate) _outcome = outcome;
-            SetStatus(outcome.Outcome.Status.ToString().ToLowerInvariant());
+            if (_continuation is not null && _operations is not null)
+                _operations.FinishWake(Request.HostId, Request.SessionId, _continuation.Action.ActionId, RunId,
+                    _parked is not null ? "continued" : outcome.Outcome.Status == RunOutcomeStatus.Succeeded ? "completed" :
+                    outcome.Outcome.Status == RunOutcomeStatus.Cancelled ? "cancelled" : "blocked", _usage);
+            SetStatus(_parked is null ? outcome.Outcome.Status.ToString().ToLowerInvariant() : "parked");
+            if (_parked is not null && _operations is not null)
+                await SendTerminalMessageAsync(new ServiceMessage("operation.parked",
+                    _operations.Get(Request.HostId, Request.SessionId, _parked.Action.ActionId), RunId)).ConfigureAwait(false);
             Publish("outcome", DisplayOutcome(outcome));
             await SendTerminalAsync(outcome).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             SetStatus(_lifetime.IsCancellationRequested ? "cancelled" : "failed");
+            // A failure may have occurred after provider dispatch. Keep a durable waking claim
+            // fenced unless a normal, receipted runner outcome settled this execution window.
             var termination = new
             {
                 status = _status,
@@ -374,6 +434,7 @@ public sealed class HostRun : IDisposable
         };
         var status = result.Disposition switch
         {
+            "applied" when result.Operation is not null => ReceiptStatus.Accepted,
             "applied" => ReceiptStatus.Succeeded,
             "refused" or "conflict" => ReceiptStatus.Refused,
             _ => ReceiptStatus.Unavailable
@@ -406,6 +467,11 @@ public sealed class HostRun : IDisposable
         // Bind predictions before any possible delivery. This is intent, not proof
         // of an effect; a later custody failure still prevents dispatch.
         _context.RecordActionDispatch(action.Request);
+        if (action.Capability.DurableHandoff)
+        {
+            if (_operations is null) ProtocolValidation.Fail("operation.unsupported", "Durable operation storage is unavailable.");
+            _operations!.Reserve(Request, action.Request, _usage);
+        }
         // Persist custody before the first possible delivery. A failed write grants no dispatch.
         _custody?.Reserve(Request.HostId, Request.SessionId, Request.SessionEpoch, RunId,
             action.Request, action.Capability, Request.ObjectiveId);
@@ -478,6 +544,95 @@ public sealed class HostRun : IDisposable
         public Task<ToolResult> ExecuteAsync(ToolInvocation invocation, CancellationToken cancellationToken) =>
             run.InvokeAsync(capability, invocation, cancellationToken);
     }
+
+    private sealed class AccountingTool(HostRun run, ITool inner) : ITool
+    {
+        public Task<ToolResult> ExecuteAsync(ToolInvocation invocation, CancellationToken cancellationToken)
+        {
+            lock (run._gate) run._usage = run._usage with { Steps = checked(run._usage.Steps + 1) };
+            return inner.ExecuteAsync(invocation, cancellationToken);
+        }
+    }
+
+    private class AccountingPlanner(HostRun run, IWorkflowPlanner inner) : IWorkflowPlanner
+    {
+        private bool _created;
+
+        public static IWorkflowPlanner Wrap(HostRun run, IWorkflowPlanner planner)
+        {
+            if (planner is IWorkflowPlannerSessionFactory factory)
+                return planner is IExternalWorkflowPlanner
+                    ? new ExternalAccountingFactoryPlanner(run, planner, factory)
+                    : new AccountingFactoryPlanner(run, planner, factory);
+            if (planner is IWorkflowPlannerSession session) return WrapSession(run, session);
+            return planner is IExternalWorkflowPlanner
+                ? new ExternalAccountingPlanner(run, planner) : new AccountingPlanner(run, planner);
+        }
+
+        public static IWorkflowPlannerSession WrapSession(HostRun run, IWorkflowPlannerSession session) =>
+            session is IExternalWorkflowPlanner
+                ? new ExternalAccountingSessionPlanner(run, session)
+                : new AccountingSessionPlanner(run, session);
+
+        public Task<WorkflowPlan> CreatePlanAsync(PlanningRequest request, CancellationToken cancellationToken = default)
+        {
+            if (_created)
+                lock (run._gate) run._usage = run._usage with { Continuations = checked(run._usage.Continuations + 1) };
+            _created = true;
+            return inner.CreatePlanAsync(request, cancellationToken);
+        }
+
+        public Task<WorkflowPlan> RefinePlanAsync(PlanningRequest request, Observation observation, CancellationToken cancellationToken = default)
+        {
+            lock (run._gate) run._usage = run._usage with { Refinements = checked(run._usage.Refinements + 1) };
+            return inner.RefinePlanAsync(request, observation, cancellationToken);
+        }
+    }
+
+    private sealed class ExternalAccountingPlanner(HostRun run, IWorkflowPlanner inner) : AccountingPlanner(run, inner), IExternalWorkflowPlanner;
+
+    private class AccountingFactoryPlanner : AccountingPlanner, IWorkflowPlannerSessionFactory
+    {
+        private readonly HostRun _run;
+        private readonly IWorkflowPlannerSessionFactory _factory;
+
+        public AccountingFactoryPlanner(HostRun run, IWorkflowPlanner inner, IWorkflowPlannerSessionFactory factory)
+            : base(run, inner)
+        {
+            _run = run;
+            _factory = factory;
+        }
+
+        public IWorkflowPlannerSession BeginSession(PlanningSessionContext context) => WrapSession(_run, _factory.BeginSession(context));
+    }
+
+    private sealed class ExternalAccountingFactoryPlanner(HostRun run, IWorkflowPlanner inner, IWorkflowPlannerSessionFactory factory)
+        : AccountingFactoryPlanner(run, inner, factory), IExternalWorkflowPlanner;
+
+    private class AccountingSessionPlanner : AccountingPlanner, IWorkflowPlannerSession
+    {
+        private readonly IWorkflowPlannerSession _inner;
+        private int _disposed;
+
+        public AccountingSessionPlanner(HostRun run, IWorkflowPlannerSession inner) : base(run, inner)
+        {
+            _inner = inner;
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (disposing && Interlocked.Exchange(ref _disposed, 1) == 0) _inner.Dispose();
+        }
+    }
+
+    private sealed class ExternalAccountingSessionPlanner(HostRun run, IWorkflowPlannerSession inner)
+        : AccountingSessionPlanner(run, inner), IExternalWorkflowPlanner;
 
     private sealed class RunSink(HostRun run) : IEventSink
     {

@@ -2,9 +2,13 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Agentica.Clients.Llm;
+using Agentica.Lab.Web.Context;
+using Agentica.Lab.Web.Contracts;
 using Agentica.Lab.Web.Providers;
+using Agentica.Lab.Web.Runtime;
 using Agentica.Planning;
 using Agentica.Requests;
+using Agentica.Tools;
 
 namespace Agentica.Lab.Web.Tests;
 
@@ -154,6 +158,64 @@ public sealed class ProviderFactoryTests
         Assert.Equal("http://127.0.0.1:12400/api/chat", handler.Endpoint!.AbsoluteUri);
         using var sent = JsonDocument.Parse(handler.Body!);
         Assert.Equal("local-model", sent.RootElement.GetProperty("model").GetString());
+    }
+
+    [Fact]
+    public async Task Retained_provider_default_effort_stays_omitted_after_service_configuration_changes()
+    {
+        using var handler = new StreamHandler("openai");
+        using var client = new HttpClient(handler);
+        var configuration = new OpenAiProviderConfiguration(ConfiguredEnvironment);
+        configuration.Update(new OpenAiSettingsUpdate { Model = "fixture-model", ThinkingEffort = null, CredentialAction = "keep" });
+        using var factory = new LabPlannerFactory(client, ConfiguredEnvironment, configuration);
+        var storage = Directory.CreateTempSubdirectory("agentica-provider-freeze-");
+        try
+        {
+            using var registry = new HostRunRegistry(new HostContextStore(storage.FullName), factory,
+                new ActionCustodyStore(Path.Combine(storage.FullName, "custody")));
+            var request = new HostRunRequest(1, "host", "session", "epoch", "scope", "actor", "objective", "Inspect.",
+                new HostObservation("observation", 0, DateTimeOffset.UtcNow, HostProtocol.Element(new { })),
+                [new HostCapability("observe", "Observe", "Read host state.", ToolKind.Query, ToolEffect.ReadOnly, new ToolInputSchema([]))],
+                Provider: new ProviderSettings("openai"));
+            var retained = registry.Create(request).Request.Provider!;
+            Assert.True(retained.ThinkingEffortResolved);
+            Assert.Null(retained.ThinkingEffort);
+            Assert.Equal("fixture-model", retained.Model);
+
+            var planning = new PlanningRequest(new RunRequest("Inspect."), [], [], []);
+            await factory.Create(retained, _ => { }).CreatePlanAsync(planning);
+            using (var initial = JsonDocument.Parse(handler.Body!))
+                Assert.False(initial.RootElement.TryGetProperty("reasoning", out _));
+
+            // The operation store reloads this provider snapshot when constructing a successor window.
+            var restored = JsonSerializer.Deserialize<ProviderSettings>(JsonSerializer.Serialize(retained, HostProtocol.Json), HostProtocol.Json)!;
+            configuration.Update(new OpenAiSettingsUpdate { Model = "fixture-model", ThinkingEffort = "high", CredentialAction = "keep" });
+            await factory.Create(restored, _ => { }).CreatePlanAsync(planning);
+            using (var resumed = JsonDocument.Parse(handler.Body!))
+            {
+                Assert.Equal("fixture-model", resumed.RootElement.GetProperty("model").GetString());
+                Assert.False(resumed.RootElement.TryGetProperty("reasoning", out _));
+            }
+
+            // New ordinary requests still inherit the operator's changed setting.
+            await factory.Create(new ProviderSettings("openai"), _ => { }).CreatePlanAsync(planning);
+            using var fresh = JsonDocument.Parse(handler.Body!);
+            Assert.Equal("high", fresh.RootElement.GetProperty("reasoning").GetProperty("effort").GetString());
+            Assert.Equal(3, handler.Calls);
+        }
+        finally { storage.Delete(recursive: true); }
+    }
+
+    [Fact]
+    public void Unresolved_provider_settings_keep_the_original_serialized_shape()
+    {
+        const string legacy = """
+            {"provider":"openai","model":"fixture-model","thinkingEffort":null,"maxOutputTokens":4096,"contextWindowTokens":131072,"includeThoughtSummaries":false,"geminiApi":null}
+            """;
+        var restored = JsonSerializer.Deserialize<ProviderSettings>(legacy, HostProtocol.Json)!;
+        Assert.False(restored.ThinkingEffortResolved);
+        Assert.Equal(legacy, JsonSerializer.Serialize(restored, HostProtocol.Json));
+        Assert.Equal(ProtocolValidation.Digest(JsonSerializer.Deserialize<JsonElement>(legacy)), ProtocolValidation.Digest(restored));
     }
 
     private static string? ConfiguredEnvironment(string name) => name.EndsWith("API_KEY", StringComparison.Ordinal) ? "fixture-key" : null;

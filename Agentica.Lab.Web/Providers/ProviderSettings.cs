@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Agentica.Lab.Web.Providers;
 
 /// <summary>Per-run controls. Credentials and endpoints belong to service configuration.</summary>
@@ -8,7 +10,8 @@ public sealed record ProviderSettings(
     int MaxOutputTokens = 4096,
     int ContextWindowTokens = 131072,
     bool IncludeThoughtSummaries = false,
-    string? GeminiApi = null);
+    string? GeminiApi = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool ThinkingEffortResolved = false);
 
 /// <summary>Local configuration readiness only; no provider request is made.</summary>
 public sealed record ProviderMetadata(

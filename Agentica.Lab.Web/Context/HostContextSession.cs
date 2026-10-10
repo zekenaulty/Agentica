@@ -90,6 +90,14 @@ public sealed partial class HostContextSession : IPlanningFrameProjector
         }
     }
 
+    /// <summary>Validate the next source against retained identity and fact history without committing it.</summary>
+    public void ValidateNextObservation(HostObservation observation)
+    {
+        ArgumentNullException.ThrowIfNull(observation);
+        ValidateObservation(observation);
+        lock (_gate) _ = PrepareObservation(Copy(observation));
+    }
+
     private (List<StoredObservation> Observations, List<HostKnowledgeEntry> Facts) PrepareObservation(HostObservation observation)
     {
         var hash = ContextJson.Hash(observation);

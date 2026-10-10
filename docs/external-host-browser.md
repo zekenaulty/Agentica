@@ -4,6 +4,8 @@
 
 The Lab web service runs the existing bounded Agentica planner and execution loop. A browser or another application owns its authoritative state, observes its domain, and applies its bound capabilities. The service and browser exchange generic JSON over a browser-initiated WebSocket. No game vocabulary is required.
 
+[Durable host operations](durable-host-operations.md) extends this contract with an explicit admission/park boundary, provider-free progress, ownership transfer and semantic wake. Objective, host operation and bounded execution window have distinct lifetimes.
+
 The dashboard at `/` lists runs and configured providers, follows provider progress, inspects context and receipts, and cancels runs. The scoped inventory example is an isolated browser-owned host. Its `demo` provider is a deterministic streaming fixture through the real planner/runtime path. Choosing another configured provider makes live API requests. Provider credentials remain on the service.
 
 ## Ownership and authority
@@ -368,6 +370,8 @@ const outstanding = recovery.filter(item => !item.resolved);
 ```
 
 `recover()` never calls `onAction`. It refreshes durable records, compares original fingerprints, preserves action/session/epoch identities, persists an established host result before POST, and returns per-entry `resolved`, `unresolved`, `live_run`, or `error` outcomes. Its explicit `reconcile` callback takes precedence over the constructor's `reconcileAction` callback; if neither exists, missing evidence stays unresolved. A prior unresolved response, including a legacy record marked completed, does not prevent this state inspection. An expired original deadline does not prevent reporting a previously established result; it still prevents a new invocation. Recovering an effect does not retroactively turn the lost run into a successful completed run. Recovery resolves custody only; a subsequent new run must supply a fresh observation, since the HTTP recovery route does not rebuild lost planner context or update its old completion outcome.
+
+For a declared durable handoff, recovery also commits the exact original admission to the operation ledger and records its resulting context before resolving custody. The host then uses operation inventory and events to continue that objective; it cannot replace admission with later arrival evidence or start the same retained objective afresh.
 
 The browser example checks recovery before replacing an earlier sample session. Its Reconnect button switches to this recovery path when the old service run is no longer retained. Pending host reservations without a proven result remain visible as a block to starting another example.
 

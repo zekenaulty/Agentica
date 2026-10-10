@@ -26,7 +26,8 @@ public sealed record HostCapability(
     string Description,
     ToolKind Kind,
     ToolEffect Effect,
-    ToolInputSchema InputSchema);
+    ToolInputSchema InputSchema,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool DurableHandoff = false);
 
 public sealed record HostObservation(
     string ObservationId,
@@ -75,7 +76,8 @@ public sealed record HostActionResult(
     string EvidenceId,
     string Summary,
     HostObservation? Observation = null,
-    HostCompletion? Completion = null);
+    HostCompletion? Completion = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] HostOperationAdmission? Operation = null);
 
 public sealed record HostCompletion(string ObjectiveId, string EvidenceId, string Summary);
 
