@@ -1,6 +1,6 @@
 namespace Agentica.Lab.Web.Providers;
 
-/// <summary>Per-run controls. Credentials and endpoints belong to the service environment.</summary>
+/// <summary>Per-run controls. Credentials and endpoints belong to service configuration.</summary>
 public sealed record ProviderSettings(
     string Provider = "gemini",
     string? Model = null,
@@ -17,4 +17,5 @@ public sealed record ProviderMetadata(
     bool Configured,
     string? ConfigurationIssue,
     string Api,
-    bool Streams = true);
+    bool Streams = true,
+    string? DefaultThinkingEffort = null);

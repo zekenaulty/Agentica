@@ -56,12 +56,12 @@ Progress arrives during the provider call. Actions execute only after a complete
 
 ## Provider configuration
 
-The service reads credentials and endpoint configuration from its environment. The browser receives only metadata and submits model/budget controls. Never put a credential in a start payload, browser URL or host observation.
+The service reads credentials and endpoint configuration from its environment. OpenAI also supports an operator-supplied key held in service memory through the dashboard. Read endpoints return only configuration metadata. Never put a credential in a start payload, browser URL or host observation.
 
 | Provider selection | Service configuration | Streamed API |
 | --- | --- | --- |
 | `gemini` / `google` | `GEMINI_API_KEY`, fallback `GOOGLE_API_KEY`; optional `AGENTICA_GEMINI_MODEL` | Gemini Developer API Interactions by default; optional streaming GenerateContent |
-| `openai` | `OPENAI_API_KEY`; optional `AGENTICA_OPENAI_MODEL` | OpenAI Responses |
+| `openai` | `OPENAI_API_KEY` or a service-memory key; optional `AGENTICA_OPENAI_MODEL`; Lab default `gpt-6-luna` | OpenAI Responses |
 | `anthropic` / `claude` | `ANTHROPIC_API_KEY`; optional `AGENTICA_ANTHROPIC_MODEL` | Anthropic Messages |
 | `grok` / `xai` | `XAI_API_KEY`; optional `AGENTICA_GROK_MODEL` | xAI Responses |
 | `ollama` | `OLLAMA_MODEL` or an explicit run model; optional `AGENTICA_OLLAMA_ENDPOINT` or `OLLAMA_HOST` | Ollama chat |
@@ -74,6 +74,29 @@ The service reads credentials and endpoint configuration from its environment. T
 Per-run settings are `provider`, `model`, `thinkingEffort`, `maxOutputTokens`, `contextWindowTokens`, `includeThoughtSummaries`, and `geminiApi`. The default provider is Gemini; the browser sample deliberately selects demo. See the contract document for exact limits. Unsupported provider/model reasoning controls can fail closed in the underlying adapter; setting a generic effort does not promise identical behavior across models.
 
 The default application context budget is 131,072 tokens. The current estimator conservatively counts UTF-8 bytes as tokens; the default accommodates the mandatory runtime/tool contract plus a scoped observation. This budget is an application limit, not discovery of a model's actual capacity. Hosts targeting a smaller model must choose a compatible budget; compilation fails before dispatch if mandatory context cannot fit.
+
+### OpenAI Luna preparation
+
+Under **Providers → OpenAI configuration**, select the model and reasoning effort, then **Save settings**. The Lab defaults to `gpt-6-luna` with **High** reasoning. `AGENTICA_OPENAI_MODEL` remains the startup model override. A typed API key replaces the environment credential for new OpenAI planners; an empty key keeps the current credential. **Use service environment key** discards the service-memory override. Model, effort and key overrides reset when the service restarts. Active planners retain the settings and credential captured when they were created.
+
+Saving settings makes no provider request. `configured` means a credential is available; account access, model availability and successful live execution remain unverified until a run is deliberately started. The browser clears the password after submission and does not persist it. The service returns no credential bytes and writes no settings or keys to its context/custody store.
+
+The sample remains on **Demo** by default. Select **OpenAI** to see the model and per-run reasoning controls. For an external host's first Luna test, use the existing start field:
+
+```json
+"provider": {
+  "provider": "openai",
+  "model": "gpt-6-luna",
+  "thinkingEffort": "high",
+  "includeThoughtSummaries": true
+}
+```
+
+An omitted model uses the configured service default. An omitted effort inherits the service effort when using that configured model; an explicit different model does not inherit it. Explicit per-run efforts, including `none`, take precedence. The Lab settings form exposes Luna's `none`, `low`, `medium`, `high`, `xhigh`, and `max` efforts plus **Provider default** to omit the control. A custom startup `AGENTICA_OPENAI_MODEL` retains omitted reasoning until an operator selects an effort. Other model names remain operator choices and may reject unsupported controls.
+
+[OpenAI's Luna documentation](https://developers.openai.com/api/docs/models/gpt-6-luna) confirms High effort on Responses. It is a named effort, not a numeric thinking-token budget. The adapter uses `stream:true`, `store:false` and private encrypted continuation within each planner. Available provider summaries may appear in telemetry; encrypted carriers remain private. See [stateless reasoning](https://developers.openai.com/api/docs/guides/reasoning#preserve-reasoning-without-stored-responses).
+
+This configuration slice prepares the initial live test. It does not qualify NS-6 temporal continuity, long-distance travel or the Maze Battle PR under review.
 
 ### Stateless Gemini and reasoning custody
 
@@ -193,6 +216,8 @@ These observations do not establish live-provider parity, ordinary saved-game ad
 The SDK suites total **68 passed**. `node browser-tests/ui-termination-smoke.mjs` reproduces the exceptional browser path only when provider metadata reports an explicitly unconfigured remote provider; it stops before creating a run if none is available. Its purpose is to qualify reliable local setup-failure reporting, with no provider API call.
 
 `node browser-tests/ui-provider-controls.mjs` verifies the Gemini transport controls with fully intercepted fixture traffic. The same Playwright module override applies. Refinement prompt `workflow-plan-refinement-prompt-v3` renders the newest observation once, uses compact JSON, preserves inclusion decisions and rejects conflicting reuse of an observation identity. The two-run context fixture forces real prompt compaction, reopens the scoped store with a fresh view, and retrieves the original exact evidence through the planner/tool loop. No model intelligence or speed benchmark is inferred from these deterministic checks.
+
+`node browser-tests/ui-provider-settings.mjs` qualifies OpenAI settings and per-run reasoning through intercepted HTTP/WebSocket traffic: credential set/keep/environment, clearing on failure, no key in browser storage or run payloads, preserved edits, stale refresh handling, and mobile layout. It makes no paid calls. `OpenAiSettingsTests` qualifies the real settings HTTP endpoint, metadata redaction, validation atomicity, process lifetime and captured per-planner credentials. The Responses replay regression uses Luna/high on both turns and checks that opaque reasoning never reaches stream telemetry.
 
 ## Subsequent integration slices
 

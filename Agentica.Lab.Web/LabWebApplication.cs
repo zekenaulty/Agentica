@@ -10,7 +10,8 @@ namespace Agentica.Lab.Web;
 
 public static class LabWebApplication
 {
-    public static WebApplication Create(string[] args, ILabPlannerFactory? plannerFactory = null, string? storageDirectory = null)
+    public static WebApplication Create(string[] args, ILabPlannerFactory? plannerFactory = null, string? storageDirectory = null,
+        OpenAiProviderConfiguration? openAiConfiguration = null)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -26,7 +27,9 @@ public static class LabWebApplication
             options.SerializerOptions.MaxDepth = HostProtocol.Json.MaxDepth;
             foreach (var converter in HostProtocol.Json.Converters) options.SerializerOptions.Converters.Add(converter);
         });
-        if (plannerFactory is null) builder.Services.AddSingleton<ILabPlannerFactory, LabPlannerFactory>();
+        var openAi = openAiConfiguration ?? new OpenAiProviderConfiguration();
+        builder.Services.AddSingleton(openAi);
+        if (plannerFactory is null) builder.Services.AddSingleton<ILabPlannerFactory>(_ => new LabPlannerFactory(openAiConfiguration: openAi));
         else builder.Services.AddSingleton(plannerFactory);
         var storageRoot = storageDirectory ?? builder.Configuration["Agentica:StorageDirectory"] ??
             Path.Combine(builder.Environment.ContentRootPath, ".agentica", "lab-web");
@@ -56,6 +59,12 @@ public static class LabWebApplication
         app.MapGet("/api/health", () => new { status = "ready", protocolVersion = HostProtocol.Version });
         app.MapGet("/api/providers", (ILabPlannerFactory factory) =>
             factory.GetProviders().Prepend(new ProviderMetadata("demo", "scripted-inventory", true, null, "scripted-fixture", true)));
+        app.MapGet("/api/providers/openai/settings", (HttpContext context, OpenAiProviderConfiguration configuration) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            return configuration.GetSettings();
+        });
+        app.MapPut("/api/providers/openai/settings", UpdateOpenAiSettingsAsync);
         app.MapGet("/api/runs", (HostRunRegistry registry) => registry.List());
         app.MapGet("/api/recovery", (string hostId, string sessionId, ActionCustodyStore custody) =>
         {
@@ -78,6 +87,28 @@ public static class LabWebApplication
         app.Map("/api/host", HandleHostAsync);
         return app;
     }
+
+    private static async Task<IResult> UpdateOpenAiSettingsAsync(HttpContext context, OpenAiProviderConfiguration configuration)
+    {
+        context.Response.Headers.CacheControl = "no-store";
+        try
+        {
+            if (!context.Request.HasJsonContentType()) return InvalidSettings();
+            var update = await context.Request.ReadFromJsonAsync<OpenAiSettingsUpdate>(HostProtocol.Json, context.RequestAborted).ConfigureAwait(false);
+            return update is null ? InvalidSettings() : Results.Ok(configuration.Update(update));
+        }
+        catch (Exception exception) when (exception is JsonException or ArgumentException or BadHttpRequestException)
+        {
+            // Never reflect submitted credentials or parser diagnostics into an HTTP response.
+            return InvalidSettings();
+        }
+    }
+
+    private static IResult InvalidSettings() => Results.BadRequest(new
+    {
+        code = "configuration.invalid",
+        message = "Supply a model, supported reasoning effort, and credential action. A key is required only for set."
+    });
 
     private static async Task StreamEventsAsync(HttpContext context, string runId, HostRunRegistry registry)
     {
