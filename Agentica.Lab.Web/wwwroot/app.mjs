@@ -4,7 +4,7 @@ const $ = id => document.getElementById(id);
 const state = { runs: [], providers: [], selected: null, events: [], droppedEvents: 0, source: null, summary: '', callId: null, client: null, busy: false };
 const openaiSettings = { value: null, modelDirty: false, effortDirty: false, busy: false, generation: 0 };
 let sampleThinkingOverride = false;
-const terminal = value => ['completed', 'succeeded', 'planinvalid', 'partiallycomplete', 'waitingforapproval', 'failed', 'cancelled', 'canceled', 'stopped', 'indeterminate', 'blocked', 'timedout'].includes(String(value).toLowerCase());
+const terminal = value => ['parked', 'completed', 'succeeded', 'planinvalid', 'partiallycomplete', 'waitingforapproval', 'failed', 'cancelled', 'canceled', 'stopped', 'indeterminate', 'blocked', 'timedout'].includes(String(value).toLowerCase());
 const json = value => JSON.stringify(value ?? null, null, 2);
 const text = (id, value) => { $(id).textContent = value ?? ''; };
 const node = (tag, className, value) => { const element = document.createElement(tag); if (className) element.className = className; if (value !== undefined) element.textContent = value; return element; };

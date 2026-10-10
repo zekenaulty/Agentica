@@ -160,6 +160,16 @@ public sealed class ActionCustodyStore
 
     public static void ValidateResolution(ActionCustodyEntry entry, HostActionResult result, long? minimumRevision = null)
     {
+        if (result.Operation is { } operation)
+        {
+            if (!entry.Capability.DurableHandoff || result.Disposition != "applied" || result.Observation is null || result.Completion is not null)
+                Fail("operation.admission", "Only a bound durable capability may admit incomplete host work with a fresh observation.");
+            ProtocolValidation.Identifier(operation.OperationId);
+            ProtocolValidation.Text(operation.Summary, 4000, "operation summary");
+            if (operation.Usage is { } usage && (usage.ValueKind != JsonValueKind.Object ||
+                JsonSerializer.SerializeToUtf8Bytes(usage, HostProtocol.Json).Length > 8192))
+                Fail("operation.usage", "Host operation accounting must be a bounded object.");
+        }
         ArgumentNullException.ThrowIfNull(entry);
         ArgumentNullException.ThrowIfNull(result);
         if (result.ActionId != entry.Request.ActionId || result.SessionId != entry.SessionId || result.SessionEpoch != entry.SessionEpoch)

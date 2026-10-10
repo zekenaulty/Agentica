@@ -35,6 +35,7 @@ public static class LabWebApplication
             Path.Combine(builder.Environment.ContentRootPath, ".agentica", "lab-web");
         builder.Services.AddSingleton(new HostContextStore(Path.Combine(storageRoot, "context")));
         builder.Services.AddSingleton(new ActionCustodyStore(Path.Combine(storageRoot, "custody")));
+        builder.Services.AddSingleton(new HostOperationStore(Path.Combine(storageRoot, "operations")));
         builder.Services.AddSingleton<HostRunRegistry>();
         builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
         var app = builder.Build();
@@ -66,6 +67,8 @@ public static class LabWebApplication
         });
         app.MapPut("/api/providers/openai/settings", UpdateOpenAiSettingsAsync);
         app.MapGet("/api/runs", (HostRunRegistry registry) => registry.List());
+        app.MapGet("/api/operations", (string hostId, string sessionId, HostRunRegistry registry) => registry.ListOperations(hostId, sessionId));
+        app.MapPost("/api/operations/events", (HostOperationEvent item, HostRunRegistry registry) => registry.ApplyOperationEvent(item));
         app.MapGet("/api/recovery", (string hostId, string sessionId, ActionCustodyStore custody) =>
         {
             ProtocolValidation.Identifier(hostId);
@@ -160,6 +163,19 @@ public static class LabWebApplication
                             attached?.Detach(connection);
                             attached = registry.Create(request);
                             attached.Attach(connection);
+                            try { await connection.SendAsync(new ServiceMessage("started", attached.Snapshot(false), attached.RunId, message.RequestId), context.RequestAborted).ConfigureAwait(false); }
+                            finally { attached.Start(); }
+                            break;
+                        case "operation.wake":
+                            var signal = message.Payload.Deserialize<HostOperationEvent>(HostProtocol.Json)
+                                ?? throw new HostProtocolException("operation.event", "A semantic decision event is required.");
+                            if (attached is not null && (!attached.Terminal || attached.HasUnresolvedActions) &&
+                                !registry.IsWakeReplay(signal, attached.RunId))
+                                ProtocolValidation.Fail("connection.busy", "Finish or reconcile the retained execution window first.");
+                            var awakened = registry.Wake(signal);
+                            awakened.Attach(connection);
+                            if (attached != awakened) attached?.Detach(connection);
+                            attached = awakened;
                             try { await connection.SendAsync(new ServiceMessage("started", attached.Snapshot(false), attached.RunId, message.RequestId), context.RequestAborted).ConfigureAwait(false); }
                             finally { attached.Start(); }
                             break;

@@ -15,7 +15,7 @@ Delivered pieces:
 - Bounded context projection, durable host observations, corrective facts, model hypotheses and exact retained evidence retrieval.
 - A labeled deterministic inventory sample plus .NET, SDK and real-browser qualification seams.
 
-The complete external contract is in [External browser hosts](external-host-browser.md). Its field names and bounds follow the C# DTOs; the source remains authoritative when changing an implementation and its examples together.
+The complete external contract is in [External browser hosts](external-host-browser.md). [Durable host operations](durable-host-operations.md) adds explicit admission, provider-free progress, ownership transfer and semantic wake across bounded execution windows. Its field names and bounds follow the C# DTOs; the source remains authoritative when changing an implementation and its examples together.
 
 ## Start locally
 
@@ -30,7 +30,7 @@ dotnet run --project Agentica.Lab.Web/Agentica.Lab.Web.csproj -c Release --no-bu
 
 Open `http://127.0.0.1:5078/`. The default binding is already loopback port 5078 when no URL configuration is supplied. The current kickoff enables cross-origin access for external local applications and does not add authentication. Local transport security and deployment hardening are outside this slice.
 
-The default store is `.agentica/lab-web` under the application's content root, with separate `context` and `custody` subdirectories. Set an explicit isolated directory when running separate fixtures or instances:
+The default store is `.agentica/lab-web` under the application's content root, with separate `context`, `custody` and `operations` subdirectories. Set an explicit isolated directory when running separate fixtures or instances:
 
 ```powershell
 $env:Agentica__StorageDirectory = 'C:\temp\agentica-lab-proving-ground'
@@ -79,6 +79,8 @@ The default application context budget is 131,072 tokens. The current estimator 
 
 Under **Providers → OpenAI configuration**, select the model and reasoning effort, then **Save settings**. The Lab defaults to `gpt-6-luna` with **High** reasoning. `AGENTICA_OPENAI_MODEL` remains the startup model override. A typed API key replaces the environment credential for new OpenAI planners; an empty key keeps the current credential. **Use service environment key** discards the service-memory override. Model, effort and key overrides reset when the service restarts. Active planners retain the settings and credential captured when they were created.
 
+Durable operation handoffs retain the resolved model and reasoning setting for successor windows. A resolved null effort preserves the provider's own default; it does not turn into `none` or inherit a later Lab setting. The service records `thinkingEffortResolved: true` with that snapshot. Ordinary requests omit the marker and continue to inherit the current Lab defaults. Credentials are resolved separately for each new planner and are never retained in an operation snapshot.
+
 Saving settings makes no provider request. `configured` means a credential is available; account access, model availability and successful live execution remain unverified until a run is deliberately started. The browser clears the password after submission and does not persist it. The service returns no credential bytes and writes no settings or keys to its context/custody store.
 
 The sample remains on **Demo** by default. Select **OpenAI** to see the model and per-run reasoning controls. For an external host's first Luna test, use the existing start field:
@@ -104,7 +106,7 @@ The web service uses `GeminiInteractionsLlmClient` with streaming and `store:fal
 
 Interactions is itself a Gemini Developer API path. Set `geminiApi:"generatecontent"` (or its `"legacy"` alias) to select the separate Developer API `streamGenerateContent` SSE transport. The sample UI exposes this choice for Gemini. Both routes stream during the call and retain transport-specific native signatures privately; neither reuses the other route's continuation. See [GenerateContent streaming](gemini-generate-content-streaming.md) for supported controls and qualification. Vertex routing is not exposed by the web factory.
 
-Each run gets a fresh planner. A browser disconnect within the same process can reattach to a retained run. A service process restart preserves durable context/effect custody where recorded, while provider conversation and in-memory runtime continuation are lost.
+Each run gets a fresh planner. A browser disconnect within the same process can reattach to a retained run. A service process restart preserves durable context/effect custody and parked operation handoffs where recorded, while provider conversation and in-memory runtime continuation are lost. An explicit decision event may activate a fresh bounded window from a parked operation. A previously claimed wake lost with its process remains fenced as interrupted; it is never silently repeated.
 
 ## Effects, cancellation and restart operations
 
