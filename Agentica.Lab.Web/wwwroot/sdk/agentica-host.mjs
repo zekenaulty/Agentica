@@ -297,6 +297,24 @@ export class AgenticaHost {
     return { ...response.payload, runId: response.payload.runId ?? response.runId };
   }
 
+  /** Adopt an unclaimed original decision with explicit new host custody and a separate scoped observation. */
+  async adoptDecision(event, adoption) {
+    event = copy(event); adoption = copy(adoption); validateOperationEvent(event);
+    fields(adoption, ['adoptionId', 'nextSessionEpoch', 'observation'], 'decision adoption');
+    boundedText(adoption.adoptionId, 'adoptionId', 128, true);
+    boundedText(adoption.nextSessionEpoch, 'nextSessionEpoch', 128, true);
+    validateObservation(adoption.observation, adoption.observation?.revision);
+    if (event.kind !== 'decision' || adoption.nextSessionEpoch === event.sessionEpoch ||
+      adoption.observation.revision < event.observation.revision ||
+      (adoption.observation.observationId === event.observation.observationId &&
+        canonicalJson(adoption.observation) !== canonicalJson(event.observation))) throw new Error('Invalid decision adoption.');
+    const original = this.operations.get(operationKey(event))?.request;
+    const binding = { hostId: event.hostId, sessionId: event.sessionId, sessionEpoch: adoption.nextSessionEpoch,
+      ...(original ? { objectiveId: original.objectiveId, capabilities: copy(original.capabilities) } : {}) };
+    const response = await this.request('operation.adopt', { decision: event, adoption }, { binding });
+    return { ...response.payload, runId: response.payload.runId ?? response.runId };
+  }
+
   /**
    * Reconcile durable custody after a service restart. This never invokes onAction.
    * reconcile(action, retainedRecord, entry) may inspect authoritative host state to
@@ -355,7 +373,7 @@ export class AgenticaHost {
       this.pending.delete(message.requestId);
       if (message.type === 'error') pending.reject(Object.assign(new Error(message.payload.message ?? message.payload.error ?? 'Service rejected request.'), { code: message.payload.code }));
       else {
-        if (pending.type === 'operation.wake' && (message.type !== 'started'
+        if (['operation.wake', 'operation.adopt'].includes(pending.type) && (message.type !== 'started'
           || typeof (message.payload.runId ?? message.runId) !== 'string'
           || !message.payload.objectiveId || message.payload.hostId !== pending.binding.hostId
           || message.payload.sessionId !== pending.binding.sessionId || message.payload.sessionEpoch !== pending.binding.sessionEpoch

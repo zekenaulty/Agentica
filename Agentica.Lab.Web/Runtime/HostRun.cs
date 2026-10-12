@@ -301,6 +301,7 @@ public sealed class HostRun : IDisposable
                         parentRunId = _continuation.Action.RunId,
                         admission = _continuation.Admission,
                         wake = _continuation.LatestEvent,
+                        adoption = _continuation.WakeAdoption,
                         cumulativeUsage = _initialUsage
                     }),
                     ["guidance"] = "Use only scoped host observations. Verify the objective through host result evidence. " +

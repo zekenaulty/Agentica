@@ -168,12 +168,17 @@ public static class LabWebApplication
                             finally { attached.Start(); }
                             break;
                         case "operation.wake":
-                            var signal = message.Payload.Deserialize<HostOperationEvent>(HostProtocol.Json)
+                        case "operation.adopt":
+                            var adopted = message.Type == "operation.adopt"
+                                ? message.Payload.Deserialize<HostDecisionWake>(HostProtocol.Json) : null;
+                            if (message.Type == "operation.adopt" && (adopted?.Decision is null || adopted.Adoption is null))
+                                ProtocolValidation.Fail("operation.adoption", "An original decision and explicit adoption are required.");
+                            var signal = adopted?.Decision ?? message.Payload.Deserialize<HostOperationEvent>(HostProtocol.Json)
                                 ?? throw new HostProtocolException("operation.event", "A semantic decision event is required.");
                             if (attached is not null && (!attached.Terminal || attached.HasUnresolvedActions) &&
                                 !registry.IsWakeReplay(signal, attached.RunId))
                                 ProtocolValidation.Fail("connection.busy", "Finish or reconcile the retained execution window first.");
-                            var awakened = registry.Wake(signal);
+                            var awakened = registry.Wake(signal, adopted?.Adoption);
                             awakened.Attach(connection);
                             if (attached != awakened) attached?.Detach(connection);
                             attached = awakened;

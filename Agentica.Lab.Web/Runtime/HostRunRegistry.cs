@@ -61,7 +61,7 @@ public sealed class HostRunRegistry(HostContextStore contexts, ILabPlannerFactor
         }
     }
 
-    public HostRun Wake(HostOperationEvent item)
+    public HostRun Wake(HostOperationEvent item, HostDecisionAdoption? adoption = null)
     {
         if (item.Kind != "decision") throw new HostProtocolException("operation.wake_kind", "Only a decision event activates cognition.");
         lock (_gate)
@@ -72,7 +72,7 @@ public sealed class HostRunRegistry(HostContextStore contexts, ILabPlannerFactor
                 throw new HostProtocolException("operation.stopped", "This original decision was explicitly stopped and cannot activate cognition.");
             if (entry.LatestEvent?.EventId == item.EventId && entry.WakeRunId is not null)
             {
-                store.Apply(item, entry.WakeRunId); // Exact replay still validates the entire immutable signal.
+                store.Apply(item, entry.WakeRunId, adoption); // Exact replay includes any separately granted custody.
                 return _runs.TryGetValue(entry.WakeRunId, out var retained) ? retained :
                     throw new HostProtocolException("operation.wake_interrupted", "This wake was already claimed by a prior process. Reconcile its original custody; it is not automatically replayed.");
             }
@@ -92,8 +92,10 @@ public sealed class HostRunRegistry(HostContextStore contexts, ILabPlannerFactor
             }
             var runId = "labrun_" + Guid.NewGuid().ToString("N");
             ValidateOperationObservation(entry, item);
-            var claimed = store.Apply(item, runId); // Persist the activation identity before creating a planner.
-            var request = entry.Request with { SessionEpoch = claimed.ActiveEpoch, Observation = item.Observation };
+            if (adoption is not null) ValidateOperationObservation(entry,
+                item with { SessionEpoch = adoption.NextSessionEpoch, Observation = adoption.Observation });
+            var claimed = store.Apply(item, runId, adoption); // Persist both sources before creating a planner.
+            var request = entry.Request with { SessionEpoch = claimed.ActiveEpoch, Observation = adoption?.Observation ?? item.Observation };
             var usage = entry.Usage with { Continuations = checked(entry.Usage.Continuations + 1) };
             var run = new HostRun(request, contexts.Open(request), planners, custody, store, usage, runId, claimed);
             _runs.Add(run.RunId, run);
