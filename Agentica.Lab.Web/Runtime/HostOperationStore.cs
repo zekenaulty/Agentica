@@ -16,7 +16,8 @@ public sealed record HostOperationEntry(
     string State,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] HostRunUsage? SettledUsage = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] HostRunUsage? SettledUsage = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] HostOperationEvent? StopDecision = null);
 
 /// <summary>
 /// Durable objective handoffs and semantic event identities. This store never dispatches work,
@@ -196,6 +197,9 @@ public sealed class HostOperationStore
             var ledger = Read();
             var stored = Find(ledger, evt.HostId, evt.SessionId, evt.ActionId);
             var hash = ProtocolValidation.Digest(evt);
+            if (ledger.Entries.Any(item => item.Entry.Request.HostId == evt.HostId && item.Entry.Request.SessionId == evt.SessionId &&
+                item.Entry.StopDecision?.EventId == evt.EventId))
+                Fail("operation.stopped", "A stopped decision remains cancellation evidence and cannot be delivered as a wake.");
             var duplicate = ledger.Entries.SelectMany(item => item.Events.Select(delivery => (item, delivery)))
                 .FirstOrDefault(pair => pair.item.Entry.Request.HostId == evt.HostId && pair.item.Entry.Request.SessionId == evt.SessionId &&
                     pair.delivery.Event.EventId == evt.EventId);
@@ -217,6 +221,45 @@ public sealed class HostOperationStore
             });
             return Copy(updated);
         }
+    }
+
+    /// <summary>Retain an original decision as cancellation evidence without claiming a cognition activation.</summary>
+    public HostOperationEntry StopDecision(HostOperationEvent decision)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+        lock (_gate)
+        {
+            var ledger = Read();
+            var stored = Find(ledger, decision.HostId, decision.SessionId, decision.ActionId);
+            if (stored.Events.Any(item => item.Event.EventId == decision.EventId && item.EventHash != ProtocolValidation.Digest(decision)))
+                Fail("operation.event_changed", "An original semantic event cannot become a different stopped decision.");
+            // Event identities remain unique across both ordinary delivery and suppressed decisions.
+            foreach (var other in ledger.Entries.Where(item => item != stored))
+                if (other.Entry.Request.HostId == decision.HostId && other.Entry.Request.SessionId == decision.SessionId &&
+                    (other.Events.Any(item => item.Event.EventId == decision.EventId) || other.Entry.StopDecision?.EventId == decision.EventId))
+                    Fail("operation.event_changed", "The decision identity belongs to another operation.");
+            var entry = Stop(stored.Entry, decision);
+            if (stored.Entry.StopDecision is not null) return Copy(stored.Entry);
+            entry = entry with { UpdatedAt = DateTimeOffset.UtcNow };
+            Replace(ledger, stored, stored with { Entry = entry });
+            return Copy(entry);
+        }
+    }
+
+    private static HostOperationEntry Stop(HostOperationEntry entry, HostOperationEvent decision)
+    {
+        if (decision.Kind != "decision") Fail("operation.stop_kind", "Only an original decision can be suppressed without a wake.");
+        if (entry.StopDecision is not null)
+        {
+            if (ProtocolValidation.Digest(entry.StopDecision) != ProtocolValidation.Digest(decision))
+                Fail("operation.stop_changed", "The original stopped decision cannot be replaced.");
+            return entry;
+        }
+        if (entry.State == "parked") entry = Transition(entry, decision, null, suppressDecision: true);
+        else if (entry.State is not ("waking" or "blocked" or "cancelled") || entry.LatestEvent?.Kind != "decision" ||
+            entry.ActiveEpoch != decision.SessionEpoch || ProtocolValidation.Digest(entry.LatestEvent) != ProtocolValidation.Digest(decision))
+            Fail("operation.stop_binding", "Stop must bind the next decision or the exact latest unsettled decision; reconcile any admitted child first.");
+        return entry with { State = "cancelled", StopDecision = Copy(decision) };
     }
 
     public static void ValidateAdmission(HostRunRequest request, HostActionRequest action, HostActionResult result)
@@ -241,7 +284,7 @@ public sealed class HostOperationStore
         ValidateUsage(result.Operation.Usage);
     }
 
-    private static HostOperationEntry Transition(HostOperationEntry entry, HostOperationEvent evt, string? successorRunId)
+    private static HostOperationEntry Transition(HostOperationEntry entry, HostOperationEvent evt, string? successorRunId, bool suppressDecision = false)
     {
         if (entry.Admission?.Operation is null || (entry.State != "parked" && !(entry.State == "waking" && evt.Kind == "cancelled")))
             Fail("operation.not_parked", "Only a parked admitted operation accepts a new semantic event.");
@@ -280,7 +323,7 @@ public sealed class HostOperationStore
                 Fail("operation.completion", "Completion needs its own evidence identity, separate from admission.");
         }
         else if (evt.Completion is not null) Fail("operation.completion", "Only a completed event may carry objective completion.");
-        if (evt.Kind == "decision") ProtocolValidation.Identifier(successorRunId!);
+        if (evt.Kind == "decision" && !suppressDecision) ProtocolValidation.Identifier(successorRunId!);
         else if (successorRunId is not null) Fail("operation.successor", "Only a decision event may reserve a successor activation.");
         if (JsonSerializer.SerializeToUtf8Bytes(evt, HostProtocol.Json).Length > HostProtocol.MaxMessageBytes)
             Fail("operation.event_bounds", "Semantic event exceeds the wire bound.");
@@ -289,7 +332,7 @@ public sealed class HostOperationStore
             ActiveEpoch = evt.NextSessionEpoch ?? entry.ActiveEpoch,
             LatestEvent = Copy(evt),
             WakeRunId = successorRunId ?? entry.WakeRunId,
-            State = evt.Kind switch { "decision" => "waking", "completed" => "completed", "blocked" => "blocked", "cancelled" => "cancelled", _ => "parked" }
+            State = evt.Kind switch { "decision" => suppressDecision ? "cancelled" : "waking", "completed" => "completed", "blocked" => "blocked", "cancelled" => "cancelled", _ => "parked" }
         };
     }
 
@@ -373,7 +416,7 @@ public sealed class HostOperationStore
                     entry.CreatedAt == default || entry.UpdatedAt < entry.CreatedAt ||
                     !identities.Add((entry.Request.HostId, entry.Request.SessionId, entry.Action.ActionId)))
                     throw new InvalidDataException("Operation reservation identity or hashes are invalid.");
-                var replay = entry with { Admission = null, ActiveEpoch = entry.Request.SessionEpoch, LatestEvent = null, WakeRunId = null, State = "reserved", SettledUsage = null };
+                var replay = entry with { Admission = null, ActiveEpoch = entry.Request.SessionEpoch, LatestEvent = null, WakeRunId = null, State = "reserved", SettledUsage = null, StopDecision = null };
                 if (entry.Admission is not null)
                 {
                     ValidateAdmission(entry.Request, entry.Action, entry.Admission);
@@ -399,6 +442,15 @@ public sealed class HostOperationStore
                     replay = Finish(replay, stored.FinishState, stored.FinishUsage);
                 }
                 else if (stored.FinishUsage is not null) throw new InvalidDataException("Settled operation usage has no successor settlement.");
+                if (entry.StopDecision is { } stopped)
+                {
+                    if (stored.Events.Any(item => item.Event.EventId == stopped.EventId && item.EventHash != ProtocolValidation.Digest(stopped)))
+                        throw new InvalidDataException("Stopped decision differs from its original event.");
+                    if (!stored.Events.Any(item => item.Event.EventId == stopped.EventId) &&
+                        !events.Add((entry.Request.HostId, entry.Request.SessionId, stopped.EventId)))
+                        throw new InvalidDataException("Stopped decision identity belongs to another operation.");
+                    replay = Stop(replay, stopped);
+                }
                 if (ProtocolValidation.Digest(replay) != ProtocolValidation.Digest(entry))
                     throw new InvalidDataException("Operation state does not resolve to its retained admission and events.");
             }

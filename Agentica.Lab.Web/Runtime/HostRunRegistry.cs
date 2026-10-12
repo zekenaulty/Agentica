@@ -68,6 +68,8 @@ public sealed class HostRunRegistry(HostContextStore contexts, ILabPlannerFactor
         {
             var store = RequiredOperations();
             var entry = store.Get(item.HostId, item.SessionId, item.ActionId);
+            if (entry.StopDecision is not null)
+                throw new HostProtocolException("operation.stopped", "This original decision was explicitly stopped and cannot activate cognition.");
             if (entry.LatestEvent?.EventId == item.EventId && entry.WakeRunId is not null)
             {
                 store.Apply(item, entry.WakeRunId); // Exact replay still validates the entire immutable signal.
@@ -96,6 +98,21 @@ public sealed class HostRunRegistry(HostContextStore contexts, ILabPlannerFactor
             var run = new HostRun(request, contexts.Open(request), planners, custody, store, usage, runId, claimed);
             _runs.Add(run.RunId, run);
             return run;
+        }
+    }
+
+    public HostOperationEntry StopDecision(HostOperationEvent item)
+    {
+        lock (_gate)
+        {
+            var store = RequiredOperations();
+            var entry = store.Get(item.HostId, item.SessionId, item.ActionId);
+            CheckAdmission(entry);
+            if (entry.WakeRunId is { } runId && _runs.TryGetValue(runId, out var active) && (!active.Terminal || !active.Completion.IsCompleted))
+                throw new HostProtocolException("session.busy", "Stop and reconcile the claimed execution window before suppressing its decision.");
+            if (entry.StopDecision is null && item.Sequence > (entry.LatestEvent?.Sequence ?? 0))
+                ValidateOperationObservation(entry, item);
+            return store.StopDecision(item);
         }
     }
 

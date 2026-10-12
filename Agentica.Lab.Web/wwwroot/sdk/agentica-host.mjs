@@ -279,6 +279,13 @@ export class AgenticaHost {
     return this._operationHttp('/api/operations/events', fetchImpl, { body: event });
   }
 
+  /** Stop an original decision without activating cognition, including after service restart. */
+  async stopDecision(event, { fetchImpl = globalThis.fetch } = {}) {
+    event = copy(event); validateOperationEvent(event);
+    if (event.kind !== 'decision') throw new Error('Only an original decision can be stopped without a wake.');
+    return this._operationHttp('/api/operations/stop-decision', fetchImpl, { body: event });
+  }
+
   /** Request one new bounded cognition window. The host persists the event first; no automatic retry occurs. */
   async wakeOperation(event) {
     event = copy(event); validateOperationEvent(event);

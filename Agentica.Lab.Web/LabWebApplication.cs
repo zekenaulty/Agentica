@@ -69,6 +69,7 @@ public static class LabWebApplication
         app.MapGet("/api/runs", (HostRunRegistry registry) => registry.List());
         app.MapGet("/api/operations", (string hostId, string sessionId, HostRunRegistry registry) => registry.ListOperations(hostId, sessionId));
         app.MapPost("/api/operations/events", (HostOperationEvent item, HostRunRegistry registry) => registry.ApplyOperationEvent(item));
+        app.MapPost("/api/operations/stop-decision", (HostOperationEvent item, HostRunRegistry registry) => registry.StopDecision(item));
         app.MapGet("/api/recovery", (string hostId, string sessionId, ActionCustodyStore custody) =>
         {
             ProtocolValidation.Identifier(hostId);

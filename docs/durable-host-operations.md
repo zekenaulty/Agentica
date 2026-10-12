@@ -63,24 +63,27 @@ this partial execution outcome from objective completion and retain local work.
 
 ## Inventory and event transport
 
-The browser SDK exposes three explicit methods. They never start a background
+The browser SDK exposes explicit methods. They never start a background
 polling loop and never retry uncertain delivery automatically.
 
 ```js
 const entries = await host.listOperations({ hostId, sessionId });
 await host.signalOperation(progressEvent);
 const started = await host.wakeOperation(decisionEvent);
+// An explicit alternative to waking, not a synthetic cancellation event:
+await host.stopDecision(decisionEvent);
 ```
 
 Both HTTP methods accept an optional `fetchImpl` for a host transport or fixture:
 `listOperations({ hostId, sessionId, fetchImpl })` and
-`signalOperation(event, { fetchImpl })`. Their HTTP origin is derived from the
+`signalOperation(event, { fetchImpl })` and `stopDecision(event, { fetchImpl })`. Their HTTP origin is derived from the
 configured WebSocket URL. `wakeOperation` uses that WebSocket connection.
 
 | Boundary | Contract |
 | --- | --- |
 | `GET /api/operations?hostId=…&sessionId=…` | Explicit durable inventory. Each entry includes original `request`, original `action`, Agentica `usage` at admission, nullable final `settledUsage`, nullable `admission`, `activeEpoch`, `latestEvent`, `wakeRunId`, `state`, `createdAt`, and `updatedAt`. |
 | `POST /api/operations/events` | `progress`, `transfer`, `completed`, `blocked`, or `cancelled`. No cognition activation. |
+| `POST /api/operations/stop-decision` | Explicitly suppress an original `decision`, retaining it as `stopDecision` and `latestEvent` with state `cancelled`. No cognition activation or replacement event. |
 | WebSocket `operation.wake` | A `decision` event. Returns correlated `started` with the new bounded run identity. |
 | WebSocket `operation.parked` | Reliable admission handoff notification, before the original run outcome. |
 
@@ -89,6 +92,24 @@ Inventory states are `reserved`, `parked`, `waking`, `continued`, `completed`,
 admits another operation. A reservation without an admission is not proof that
 a host effect is absent; inspect original action custody before attempting
 anything else.
+
+### Stop a pending decision
+
+After host work has stopped, `stopDecision` accepts the original next decision or
+the exact latest claimed decision. It preserves original admission, event history,
+usage and any claimed `wakeRunId`. An undelivered decision is retained as the
+cancellation source without reserving a successor. The optional `stopDecision`
+field is omitted from older records; their hashes and reload behavior are unchanged.
+Duplicate Stop returns the same durable result, including after a lost reply or
+process restart. A stopped decision can never wake again.
+
+This is not arbitrary run cancellation. The service refuses live claimed windows,
+unresolved action custody, completed work and a continued parent whose child
+must be reconciled separately. Stop/reconcile a live window first. The host still
+owns local cancellation and must compare the returned original evidence before
+acknowledging its outbox. This endpoint neither renews host custody nor transfers
+an old decision to a new epoch. It is a Lab protocol extension, not a paid-provider
+qualification or a replacement for the host's own authority checks.
 
 ### Event shape
 
