@@ -72,6 +72,7 @@ public sealed class HostOperationStore
         lock (_gate)
         {
             var ledger = Read();
+            CheckStoppedParent(ledger, request, action);
             var existing = ledger.Entries.FirstOrDefault(item => SameAction(item.Entry, request.HostId, request.SessionId, action.ActionId));
             var requestHash = ProtocolValidation.Digest(request);
             var actionHash = ProtocolValidation.Digest(action);
@@ -98,6 +99,7 @@ public sealed class HostOperationStore
         {
             var ledger = Read();
             var stored = Find(ledger, hostId, sessionId, result.ActionId);
+            CheckStoppedParent(ledger, stored.Entry.Request, stored.Entry.Action);
             ValidateAdmission(stored.Entry.Request, stored.Entry.Action, result);
             var hash = ProtocolValidation.Digest(result);
             if (stored.Entry.Admission is not null)
@@ -139,10 +141,18 @@ public sealed class HostOperationStore
     }
 
     private static bool IsAdmittedChild(HostOperationEntry parent, HostOperationEntry child) =>
-        child.Admission is not null && parent.WakeRunId == child.Action.RunId &&
-        parent.Request.HostId == child.Request.HostId && parent.Request.SessionId == child.Request.SessionId &&
-        parent.Request.ObjectiveId == child.Request.ObjectiveId && parent.Request.ScopeId == child.Request.ScopeId &&
-        parent.Request.PerspectiveId == child.Request.PerspectiveId && parent.ActiveEpoch == child.Request.SessionEpoch;
+        child.Admission is not null && IsClaimedChild(parent, child.Request, child.Action);
+
+    private static bool IsClaimedChild(HostOperationEntry parent, HostRunRequest request, HostActionRequest action) =>
+        parent.WakeRunId == action.RunId && parent.Request.HostId == request.HostId && parent.Request.SessionId == request.SessionId &&
+        parent.Request.ObjectiveId == request.ObjectiveId && parent.Request.ScopeId == request.ScopeId &&
+        parent.Request.PerspectiveId == request.PerspectiveId && parent.ActiveEpoch == request.SessionEpoch;
+
+    private static void CheckStoppedParent(LedgerPayload ledger, HostRunRequest request, HostActionRequest action)
+    {
+        if (ledger.Entries.Any(item => item.Entry.StopDecision is not null && IsClaimedChild(item.Entry, request, action)))
+            Fail("operation.stopped", "A stopped decision cannot reserve or admit successor work.");
+    }
 
     public HostOperationEntry Get(string hostId, string sessionId, string actionId)
     {
@@ -231,6 +241,8 @@ public sealed class HostOperationStore
         {
             var ledger = Read();
             var stored = Find(ledger, decision.HostId, decision.SessionId, decision.ActionId);
+            if (ledger.Entries.Any(item => item != stored && IsAdmittedChild(stored.Entry, item.Entry)))
+                Fail("operation.stop_binding", "An admitted successor must be reconciled separately, even if its legacy parent is still waking.");
             if (stored.Events.Any(item => item.Event.EventId == decision.EventId && item.EventHash != ProtocolValidation.Digest(decision)))
                 Fail("operation.event_changed", "An original semantic event cannot become a different stopped decision.");
             // Event identities remain unique across both ordinary delivery and suppressed decisions.
@@ -444,6 +456,8 @@ public sealed class HostOperationStore
                 else if (stored.FinishUsage is not null) throw new InvalidDataException("Settled operation usage has no successor settlement.");
                 if (entry.StopDecision is { } stopped)
                 {
+                    if (file.Payload.Entries.Any(other => other != stored && IsAdmittedChild(entry, other.Entry)))
+                        throw new InvalidDataException("A stopped decision still has an admitted successor.");
                     if (stored.Events.Any(item => item.Event.EventId == stopped.EventId && item.EventHash != ProtocolValidation.Digest(stopped)))
                         throw new InvalidDataException("Stopped decision differs from its original event.");
                     if (!stored.Events.Any(item => item.Event.EventId == stopped.EventId) &&
