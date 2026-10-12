@@ -569,15 +569,15 @@ public sealed class HostDecisionStopTests
         using var admitted = JsonDocument.Parse(File.ReadAllText(harness.LedgerPath));
         var originalChild = admitted.RootElement.GetProperty("payload").GetProperty("entries")[1].GetRawText();
 
-        // Recreate the pre-atomic crash window without changing either original source record.
+        // Author an older-format fixture. JsonNode may escape '+', but source values must be identical.
         var legacy = JsonNode.Parse(File.ReadAllText(harness.LedgerPath))!;
         legacy["payload"]!["entries"]![0] = JsonNode.Parse(originalParent);
         WriteRehashed(harness.LedgerPath, legacy);
         using var restored = JsonDocument.Parse(File.ReadAllText(harness.LedgerPath));
         var entries = restored.RootElement.GetProperty("payload").GetProperty("entries");
         Assert.Equal(2, entries.GetArrayLength());
-        Assert.Equal(originalParent, entries[0].GetRawText());
-        Assert.Equal(originalChild, entries[1].GetRawText());
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(originalParent), JsonNode.Parse(entries[0].GetRawText())));
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(originalChild), JsonNode.Parse(entries[1].GetRawText())));
         return (parent, child, decision);
     }
 
