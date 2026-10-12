@@ -219,6 +219,53 @@ public sealed class HostDecisionStopTests
         Assert.Equal(saved, File.ReadAllBytes(harness.LedgerPath));
     }
 
+    [Fact]
+    public async Task Legacy_waking_parent_with_an_admitted_child_refuses_stop_without_rewriting_evidence()
+    {
+        await using var harness = new StopHarness();
+        var (parent, child, decision) = SeedLegacyWakingParentWithAdmittedChild(harness);
+        var saved = File.ReadAllBytes(harness.LedgerPath);
+        Assert.Equal("waking", harness.Get(parent).State);
+        Assert.Null(harness.Get(parent).SettledUsage);
+        Assert.Null(harness.Get(parent).StopDecision);
+        Assert.Equal(child.RunId, harness.Get(parent).WakeRunId);
+        Assert.Equal("parked", harness.Get(child).State);
+        Assert.NotNull(harness.Get(child).Admission);
+
+        Assert.Throws<HostProtocolException>(() => harness.Operations.StopDecision(decision));
+        Assert.Equal(saved, File.ReadAllBytes(harness.LedgerPath));
+
+        harness.Restart();
+        Assert.Throws<HostProtocolException>(() => harness.Operations.StopDecision(decision));
+        Assert.Equal(saved, File.ReadAllBytes(harness.LedgerPath));
+        Assert.Equal("waking", harness.Get(parent).State);
+        Assert.Equal("parked", harness.Get(child).State);
+    }
+
+    [Fact]
+    public async Task Reload_rejects_a_forged_stopped_legacy_parent_with_an_admitted_child()
+    {
+        await using var harness = new StopHarness();
+        var (parent, child, decision) = SeedLegacyWakingParentWithAdmittedChild(harness);
+        harness.Restart();
+        Assert.Equal("waking", harness.Get(parent).State);
+        Assert.Equal("parked", harness.Get(child).State);
+        var sources = RetainedSources(harness.LedgerPath);
+        var file = JsonNode.Parse(File.ReadAllText(harness.LedgerPath))!;
+        var parentEntry = file["payload"]!["entries"]![0]!["entry"]!;
+        Assert.Equal(parent.ActionId, parentEntry["action"]!["actionId"]!.GetValue<string>());
+        parentEntry["state"] = "cancelled";
+        parentEntry["stopDecision"] = JsonSerializer.SerializeToNode(decision, HostProtocol.Json);
+        WriteRehashed(harness.LedgerPath, file);
+        var forged = File.ReadAllBytes(harness.LedgerPath);
+        Assert.Equal(sources, RetainedSources(harness.LedgerPath));
+
+        Assert.Throws<InvalidDataException>(() => new HostOperationStore(harness.OperationRoot));
+        Assert.Equal(forged, File.ReadAllBytes(harness.LedgerPath));
+        Assert.Throws<InvalidDataException>(() => harness.Get(parent));
+        Assert.Equal(forged, File.ReadAllBytes(harness.LedgerPath));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -447,6 +494,34 @@ public sealed class HostDecisionStopTests
         yield return decision with { Usage = HostProtocol.Element(new { ticks = 999 }) };
         yield return decision with { Completion = new HostCompletion("stop-objective", "false-proof", "Not completion.") };
         yield return decision with { NextSessionEpoch = "replacement-epoch" };
+    }
+
+    private static (HostActionRequest Parent, HostActionRequest Child, HostOperationEvent Decision)
+        SeedLegacyWakingParentWithAdmittedChild(StopHarness harness)
+    {
+        var parent = harness.Seed();
+        var decision = Event(parent, "decision", 1, 2);
+        harness.Operations.Apply(decision, "legacy-successor");
+        using var claimed = JsonDocument.Parse(File.ReadAllText(harness.LedgerPath));
+        var originalParent = claimed.RootElement.GetProperty("payload").GetProperty("entries")[0].GetRawText();
+        var request = Request() with { Observation = decision.Observation };
+        var child = Action(request, "legacy-child-action", "legacy-successor");
+        harness.Operations.Reserve(request, child, new HostRunUsage(Steps: 2, Continuations: 1, ProviderCalls: 2));
+        harness.Operations.Admit(request.HostId, request.SessionId, Admission(child));
+        Assert.Equal("continued", harness.Get(parent).State);
+        using var admitted = JsonDocument.Parse(File.ReadAllText(harness.LedgerPath));
+        var originalChild = admitted.RootElement.GetProperty("payload").GetProperty("entries")[1].GetRawText();
+
+        // Recreate the pre-atomic crash window without changing either original source record.
+        var legacy = JsonNode.Parse(File.ReadAllText(harness.LedgerPath))!;
+        legacy["payload"]!["entries"]![0] = JsonNode.Parse(originalParent);
+        WriteRehashed(harness.LedgerPath, legacy);
+        using var restored = JsonDocument.Parse(File.ReadAllText(harness.LedgerPath));
+        var entries = restored.RootElement.GetProperty("payload").GetProperty("entries");
+        Assert.Equal(2, entries.GetArrayLength());
+        Assert.Equal(originalParent, entries[0].GetRawText());
+        Assert.Equal(originalChild, entries[1].GetRawText());
+        return (parent, child, decision);
     }
 
     // Compare the original serialized source records, not just the projected latest state.
