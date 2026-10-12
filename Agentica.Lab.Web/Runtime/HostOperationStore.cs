@@ -224,13 +224,15 @@ public sealed class HostOperationStore
                     Fail("operation.event_stale", "An older semantic event cannot become current again.");
                 return Copy(stored.Entry);
             }
-            ValidateEventHistory(stored.Entry, stored.Events, evt);
+            var ancestorEpochs = AncestorEpochs(ledger, stored.Entry);
+            ValidateEventHistory(stored.Entry, stored.Events, evt, ancestorEpochs);
             var updated = Transition(stored.Entry, evt, successorRunId) with { UpdatedAt = DateTimeOffset.UtcNow };
             if (adoption is not null)
             {
-                if (ledger.Entries.SelectMany(item => item.Events).Any(item => item.Adoption?.AdoptionId == adoption.AdoptionId))
+                if (ledger.Entries.Where(item => item.Entry.Request.HostId == evt.HostId && item.Entry.Request.SessionId == evt.SessionId)
+                    .SelectMany(item => item.Events).Any(item => item.Adoption?.AdoptionId == adoption.AdoptionId))
                     Fail("operation.adoption_reused", "An adoption identity cannot be used for another decision.");
-                updated = Adopt(updated, adoption, stored.Events);
+                updated = Adopt(updated, adoption, stored.Events, ancestorEpochs);
             }
             Replace(ledger, stored, stored with
             {
@@ -321,11 +323,12 @@ public sealed class HostOperationStore
         ProtocolValidation.Observation(evt.Observation);
         ProtocolValidation.Text(evt.Summary, 4000, "operation event summary");
         ValidateUsage(evt.Usage);
-        var previousObservation = entry.LatestEvent?.Observation ?? entry.Admission.Observation!;
-        if (evt.Observation.Revision < previousObservation.Revision ||
-            (evt.Observation.ObservationId == previousObservation.ObservationId &&
-             ProtocolValidation.Digest(evt.Observation) != ProtocolValidation.Digest(previousObservation)))
-            Fail("operation.observation", "A semantic event cannot rewind revision or replace an existing observation identity.");
+        // The immutable decision and the separately adopted checkpoint both fence later evidence.
+        foreach (var previousObservation in new[] { entry.LatestEvent?.Observation ?? entry.Admission.Observation!, entry.WakeAdoption?.Observation })
+            if (previousObservation is not null && (evt.Observation.Revision < previousObservation.Revision ||
+                (evt.Observation.ObservationId == previousObservation.ObservationId &&
+                 ProtocolValidation.Digest(evt.Observation) != ProtocolValidation.Digest(previousObservation))))
+                Fail("operation.observation", "A semantic event cannot rewind revision or replace an existing observation identity.");
         if (evt.Kind == "transfer")
         {
             ProtocolValidation.Identifier(evt.NextSessionEpoch!);
@@ -368,9 +371,39 @@ public sealed class HostOperationStore
         return entry with { State = state, SettledUsage = usage };
     }
 
-    private static void ValidateEventHistory(HostOperationEntry entry, IReadOnlyList<StoredEvent> history, HostOperationEvent evt)
+    private static HashSet<string> AncestorEpochs(LedgerPayload ledger, HostOperationEntry entry)
     {
-        if (evt.Kind == "transfer" && (evt.NextSessionEpoch == entry.Request.SessionEpoch ||
+        var epochs = new HashSet<string>(StringComparer.Ordinal);
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var path = new HashSet<string>(StringComparer.Ordinal);
+        var parents = ledger.Entries.Where(item => item.Entry.WakeRunId is not null)
+            .ToLookup(item => item.Entry.WakeRunId!, StringComparer.Ordinal);
+        Visit(entry);
+        return epochs;
+
+        void Visit(HostOperationEntry child)
+        {
+            if (!path.Add(child.Action.ActionId)) Fail("operation.lineage", "Retained operation lineage cannot contain a cycle.");
+            if (visited.Add(child.Action.ActionId))
+                foreach (var parent in parents[child.Action.RunId].Where(item => IsAdmittedChild(item.Entry, child)))
+                {
+                    epochs.Add(parent.Entry.Request.SessionEpoch);
+                    foreach (var delivery in parent.Events)
+                    {
+                        epochs.Add(delivery.Event.SessionEpoch);
+                        if (delivery.Event.NextSessionEpoch is { } transferred) epochs.Add(transferred);
+                        if (delivery.Adoption is { } adopted) epochs.Add(adopted.NextSessionEpoch);
+                    }
+                    Visit(parent.Entry);
+                }
+            path.Remove(child.Action.ActionId);
+        }
+    }
+
+    private static void ValidateEventHistory(HostOperationEntry entry, IReadOnlyList<StoredEvent> history, HostOperationEvent evt,
+        HashSet<string> ancestorEpochs)
+    {
+        if (evt.Kind == "transfer" && (ancestorEpochs.Contains(evt.NextSessionEpoch!) || evt.NextSessionEpoch == entry.Request.SessionEpoch ||
             history.Any(item => item.Event.SessionEpoch == evt.NextSessionEpoch || item.Event.NextSessionEpoch == evt.NextSessionEpoch ||
                 item.Adoption?.NextSessionEpoch == evt.NextSessionEpoch)))
             Fail("operation.epoch_reused", "A retired session epoch cannot become the operation owner again.");
@@ -379,13 +412,14 @@ public sealed class HostOperationStore
     private static bool SameAdoption(HostDecisionAdoption? left, HostDecisionAdoption? right) =>
         left is null ? right is null : right is not null && ProtocolValidation.Digest(left) == ProtocolValidation.Digest(right);
 
-    private static HostOperationEntry Adopt(HostOperationEntry entry, HostDecisionAdoption adoption, IReadOnlyList<StoredEvent> history)
+    private static HostOperationEntry Adopt(HostOperationEntry entry, HostDecisionAdoption adoption, IReadOnlyList<StoredEvent> history,
+        HashSet<string> ancestorEpochs)
     {
         if (entry.State != "waking" || entry.LatestEvent?.Kind != "decision" || entry.WakeRunId is null || entry.WakeAdoption is not null)
             Fail("operation.adoption", "Explicit adoption must atomically bind an original decision and its first successor claim.");
         ProtocolValidation.Identifier(adoption.AdoptionId);
         ProtocolValidation.Identifier(adoption.NextSessionEpoch);
-        if (adoption.NextSessionEpoch == entry.ActiveEpoch || adoption.NextSessionEpoch == entry.Request.SessionEpoch ||
+        if (ancestorEpochs.Contains(adoption.NextSessionEpoch) || adoption.NextSessionEpoch == entry.ActiveEpoch || adoption.NextSessionEpoch == entry.Request.SessionEpoch ||
             history.Any(item => item.Event.SessionEpoch == adoption.NextSessionEpoch || item.Event.NextSessionEpoch == adoption.NextSessionEpoch ||
                 item.Adoption?.NextSessionEpoch == adoption.NextSessionEpoch))
             Fail("operation.epoch_reused", "Adoption requires distinct, nonretired host custody.");
@@ -471,19 +505,21 @@ public sealed class HostOperationStore
                     replay = replay with { Admission = entry.Admission, State = "parked" };
                 }
                 else if (stored.AdmissionHash is not null) throw new InvalidDataException("Operation admission hash has no source.");
+                // Resolve against all retained entries, not only parents earlier in the file.
+                var ancestorEpochs = AncestorEpochs(file.Payload, entry);
                 var history = new List<StoredEvent>();
                 foreach (var delivery in stored.Events)
                 {
                     if (delivery.EventHash != ProtocolValidation.Digest(delivery.Event) ||
                         !events.Add((entry.Request.HostId, entry.Request.SessionId, delivery.Event.EventId)))
                         throw new InvalidDataException("Operation event identity or hash is invalid.");
-                    ValidateEventHistory(replay, history, delivery.Event);
+                    ValidateEventHistory(replay, history, delivery.Event, ancestorEpochs);
                     replay = Transition(replay, delivery.Event, delivery.SuccessorRunId);
                     if (delivery.Adoption is { } adopted)
                     {
                         if (!adoptions.Add((entry.Request.HostId, entry.Request.SessionId, adopted.AdoptionId)))
                             throw new InvalidDataException("Adoption identity is reused.");
-                        replay = Adopt(replay, adopted, history);
+                        replay = Adopt(replay, adopted, history, ancestorEpochs);
                     }
                     history.Add(delivery);
                 }

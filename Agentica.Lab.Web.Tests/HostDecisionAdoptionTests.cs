@@ -462,26 +462,111 @@ public sealed class HostDecisionAdoptionTests
         Assert.Equal(0, harness.Planners.Created);
     }
 
-    [Fact]
-    public async Task Adoption_identity_in_an_independent_session_does_not_block_this_sessions_decision()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Adoption_identity_in_an_independent_session_does_not_block_this_sessions_decision(bool differentHost)
     {
         await using var harness = new AdoptionHarness();
         var first = harness.Seed();
         var adoption = Adoption(3);
         harness.Operations.Apply(Event(first, "decision", 1, 2), "first-successor", adoption);
-        var request = Request() with { SessionId = "independent-session" };
+        var request = differentHost ? Request() with { HostId = "independent-host" } : Request() with { SessionId = "independent-session" };
         var second = Action(request, "second-action", "second-run");
         harness.Operations.Reserve(request, second, new HostRunUsage(Steps: 1, ProviderCalls: 1));
         harness.Operations.Admit(request.HostId, request.SessionId, Admission(second));
-        var decision = Event(second, "decision", 1, 2);
+        var decision = Event(second, "decision", 1, 2) with { HostId = request.HostId };
 
         var adopted = harness.Operations.Apply(decision, "second-successor", Clone(adoption));
 
         Assert.Equal("second-successor", adopted.WakeRunId);
         AssertSame(adoption, adopted.WakeAdoption);
         harness.Restart();
-        AssertSame(adopted, harness.Get(second));
+        AssertSame(adopted, harness.Operations.Get(request.HostId, request.SessionId, second.ActionId));
         Assert.Equal(0, harness.Planners.Created);
+    }
+
+    [Fact]
+    public async Task Adoption_identity_remains_unique_across_operations_in_the_same_host_session_on_apply_and_replay()
+    {
+        await using var harness = new AdoptionHarness();
+        var leaf = SeedGrandchild(harness);
+        var decision = Event(leaf, "decision", 1, 9);
+        var adoption = Adoption(10) with { AdoptionId = "lineage-adoption-1", NextSessionEpoch = "fresh-owner" };
+        var saved = File.ReadAllBytes(harness.LedgerPath);
+        RefusesWithoutWrite(harness, saved, () => harness.Operations.Apply(decision, "leaf-successor", adoption));
+        harness.Operations.Apply(decision, "leaf-successor", adoption with { AdoptionId = "leaf-adoption" });
+        var file = JsonNode.Parse(File.ReadAllText(harness.LedgerPath))!;
+        var stored = StoredAction(file, leaf.ActionId);
+        stored["events"]![0]!["adoption"]!["adoptionId"] = adoption.AdoptionId;
+        stored["entry"]!["wakeAdoption"]!["adoptionId"] = adoption.AdoptionId;
+        WriteRehashed(harness.LedgerPath, file);
+        var forged = File.ReadAllBytes(harness.LedgerPath);
+        Assert.Throws<InvalidDataException>(() => new HostOperationStore(harness.OperationRoot));
+        Assert.Equal(forged, File.ReadAllBytes(harness.LedgerPath));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Grandchild_cannot_revive_any_retained_ancestor_epoch_by_adoption_or_transfer(bool transfer)
+    {
+        await using var harness = new AdoptionHarness();
+        var leaf = SeedGrandchild(harness);
+        var file = JsonNode.Parse(File.ReadAllText(harness.LedgerPath))!;
+        ReverseEntries(file);
+        WriteRehashed(harness.LedgerPath, file);
+        harness.Restart();
+        var saved = File.ReadAllBytes(harness.LedgerPath);
+        var decision = Event(leaf, "decision", 1, 9);
+        foreach (var epoch in new[] { "adoption-epoch", "transferred-ancestor", "lineage-owner-1" })
+        {
+            if (transfer)
+                RefusesWithoutWrite(harness, saved, () => harness.Operations.Apply(decision with { Kind = "transfer", NextSessionEpoch = epoch }));
+            else
+                RefusesWithoutWrite(harness, saved, () => harness.Operations.Apply(decision, "leaf-successor",
+                    Adoption(10) with { NextSessionEpoch = epoch }));
+        }
+        var accepted = transfer
+            ? harness.Operations.Apply(decision with { Kind = "transfer", NextSessionEpoch = "fresh-owner" })
+            : harness.Operations.Apply(decision, "leaf-successor", Adoption(10) with { NextSessionEpoch = "fresh-owner" });
+        harness.Restart();
+        AssertSame(accepted, harness.Get(leaf));
+    }
+
+    [Theory]
+    [InlineData(false, "adoption-epoch")]
+    [InlineData(false, "transferred-ancestor")]
+    [InlineData(false, "lineage-owner-1")]
+    [InlineData(true, "adoption-epoch")]
+    [InlineData(true, "transferred-ancestor")]
+    [InlineData(true, "lineage-owner-1")]
+    public async Task Replay_refuses_ancestor_epoch_revival_even_with_rehashed_sources_and_reordered_entries(bool transfer, string retiredEpoch)
+    {
+        await using var harness = new AdoptionHarness();
+        var leaf = SeedGrandchild(harness);
+        var decision = Event(leaf, "decision", 1, 9);
+        if (transfer) harness.Operations.Apply(decision with { Kind = "transfer", NextSessionEpoch = "fresh-owner" });
+        else harness.Operations.Apply(decision, "leaf-successor", Adoption(10) with { NextSessionEpoch = "fresh-owner" });
+        var file = JsonNode.Parse(File.ReadAllText(harness.LedgerPath))!;
+        var stored = StoredAction(file, leaf.ActionId);
+        stored["entry"]!["activeEpoch"] = retiredEpoch;
+        if (transfer)
+        {
+            stored["events"]![0]!["event"]!["nextSessionEpoch"] = retiredEpoch;
+            stored["entry"]!["latestEvent"]!["nextSessionEpoch"] = retiredEpoch;
+            stored["events"]![0]!["eventHash"] = ProtocolValidation.Digest(JsonSerializer.SerializeToElement(stored["events"]![0]!["event"], HostProtocol.Json));
+        }
+        else
+        {
+            stored["events"]![0]!["adoption"]!["nextSessionEpoch"] = retiredEpoch;
+            stored["entry"]!["wakeAdoption"]!["nextSessionEpoch"] = retiredEpoch;
+        }
+        ReverseEntries(file);
+        WriteRehashed(harness.LedgerPath, file);
+        var forged = File.ReadAllBytes(harness.LedgerPath);
+        Assert.Throws<InvalidDataException>(() => new HostOperationStore(harness.OperationRoot));
+        Assert.Equal(forged, File.ReadAllBytes(harness.LedgerPath));
     }
 
     [Fact]
@@ -535,6 +620,58 @@ public sealed class HostDecisionAdoptionTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Later_events_preserve_both_decision_and_adoption_observation_identities(bool useAdoptionId)
+    {
+        await using var harness = new AdoptionHarness();
+        var action = harness.Seed();
+        var decision = Event(action, "decision", 1, 2);
+        var adoption = Adoption(10);
+        harness.Operations.Apply(decision, "lost-successor", adoption);
+        harness.Restart();
+        var observation = (useAdoptionId ? adoption.Observation : decision.Observation) with
+        {
+            Revision = 10, Data = HostProtocol.Element(new { changed = true })
+        };
+        var saved = File.ReadAllBytes(harness.LedgerPath);
+        var cancellation = Event(action, "cancelled", 2, 10) with { SessionEpoch = adoption.NextSessionEpoch, Observation = observation };
+        RefusesWithoutWrite(harness, saved, () => harness.Registry.ApplyOperationEvent(cancellation));
+        var accepted = harness.Registry.ApplyOperationEvent(cancellation with { Observation = Clone(adoption.Observation) });
+        harness.Restart();
+        AssertSame(accepted, harness.Get(action));
+        AssertSame(adoption, harness.Get(action).WakeAdoption);
+        Assert.Equal(0, harness.Planners.Created);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Replay_refuses_later_event_rewind_or_checkpoint_replacement_with_recomputed_event_hash(bool replaceIdentity)
+    {
+        await using var harness = new AdoptionHarness();
+        var action = harness.Seed();
+        var decision = Event(action, "decision", 1, 2);
+        var adoption = Adoption(10);
+        harness.Operations.Apply(decision, "lost-successor", adoption);
+        harness.Restart();
+        harness.Registry.ApplyOperationEvent(Event(action, "cancelled", 2, 11) with { SessionEpoch = adoption.NextSessionEpoch });
+        var badObservation = replaceIdentity
+            ? adoption.Observation with { Data = HostProtocol.Element(new { changed = true }) }
+            : Observation("rewound-cancellation", 3);
+        var file = JsonNode.Parse(File.ReadAllText(harness.LedgerPath))!;
+        var stored = StoredAction(file, action.ActionId);
+        var delivered = stored["events"]![1]!;
+        delivered["event"]!["observation"] = JsonSerializer.SerializeToNode(badObservation, HostProtocol.Json);
+        delivered["eventHash"] = ProtocolValidation.Digest(JsonSerializer.SerializeToElement(delivered["event"], HostProtocol.Json));
+        stored["entry"]!["latestEvent"]!["observation"] = JsonSerializer.SerializeToNode(badObservation, HostProtocol.Json);
+        WriteRehashed(harness.LedgerPath, file);
+        var forged = File.ReadAllBytes(harness.LedgerPath);
+        Assert.Throws<InvalidDataException>(() => new HostOperationStore(harness.OperationRoot));
+        Assert.Equal(forged, File.ReadAllBytes(harness.LedgerPath));
+    }
+
+    [Theory]
     [InlineData("owner")]
     [InlineData("missing-adoption")]
     [InlineData("observation")]
@@ -568,6 +705,39 @@ public sealed class HostDecisionAdoptionTests
     {
         Assert.Throws<HostProtocolException>(operation);
         Assert.Equal(saved, File.ReadAllBytes(harness.LedgerPath));
+    }
+
+    private static HostActionRequest SeedGrandchild(AdoptionHarness harness)
+    {
+        var action = harness.Seed();
+        harness.Operations.Apply(Event(action, "transfer", 1, 2) with { NextSessionEpoch = "transferred-ancestor" });
+        for (var generation = 1; generation <= 2; generation++)
+        {
+            var decision = Event(action, "decision", generation == 1 ? 2 : 1, generation * 3) with { SessionEpoch = harness.Get(action).ActiveEpoch };
+            var adoption = new HostDecisionAdoption("lineage-adoption-" + generation, "lineage-owner-" + generation,
+                Observation("lineage-observation-" + generation, generation * 3 + 1));
+            var parent = harness.Operations.Apply(decision, "lineage-run-" + generation, adoption);
+            var request = parent.Request with { SessionEpoch = adoption.NextSessionEpoch, Observation = adoption.Observation };
+            action = Action(request, "lineage-action-" + generation, parent.WakeRunId!);
+            harness.Operations.Reserve(request, action, new HostRunUsage(Steps: generation + 1, Continuations: generation, ProviderCalls: generation + 1));
+            harness.Operations.Admit(request.HostId, request.SessionId, Admission(action));
+        }
+        return action;
+    }
+
+    private static JsonNode StoredAction(JsonNode file, string actionId) => Assert.Single(file["payload"]!["entries"]!.AsArray(),
+        stored => stored!["entry"]!["action"]!["actionId"]!.GetValue<string>() == actionId)!;
+
+    private static void ReverseEntries(JsonNode file)
+    {
+        var reversed = file["payload"]!["entries"]!.AsArray().Reverse().Select(item => item!.DeepClone()).ToArray();
+        file["payload"]!["entries"] = new JsonArray(reversed);
+    }
+
+    private static void WriteRehashed(string path, JsonNode file)
+    {
+        file["contentHash"] = ProtocolValidation.Digest(JsonSerializer.SerializeToElement(file["payload"], HostProtocol.Json));
+        File.WriteAllText(path, file.ToJsonString(HostProtocol.Json));
     }
 
     private static void AssertSame<T>(T expected, T actual) => Assert.Equal(ProtocolValidation.Digest(expected!), ProtocolValidation.Digest(actual!));
