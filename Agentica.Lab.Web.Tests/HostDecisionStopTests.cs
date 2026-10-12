@@ -220,6 +220,63 @@ public sealed class HostDecisionStopTests
     }
 
     [Fact]
+    public async Task Stopped_claimed_parent_refuses_child_reservation_without_changing_ledger_bytes()
+    {
+        await using var harness = new StopHarness();
+        var parent = harness.Seed();
+        var decision = Event(parent, "decision", 1, 2);
+        harness.Operations.Apply(decision, "stopped-successor");
+        var stopped = harness.Operations.StopDecision(decision);
+        Assert.Equal("cancelled", stopped.State);
+        Assert.Equal("stopped-successor", stopped.WakeRunId);
+        var request = Request() with { Observation = decision.Observation };
+        var child = Action(request, "late-child-action", "stopped-successor");
+        var usage = new HostRunUsage(Steps: 2, Continuations: 1, ProviderCalls: 2);
+        var saved = File.ReadAllBytes(harness.LedgerPath);
+
+        Assert.Throws<HostProtocolException>(() => harness.Operations.Reserve(request, child, usage));
+        Assert.Equal(saved, File.ReadAllBytes(harness.LedgerPath));
+        Assert.Single(harness.Operations.List(request.HostId, request.SessionId));
+
+        harness.Restart();
+        Assert.Throws<HostProtocolException>(() => harness.Operations.Reserve(request, child, usage));
+        Assert.Equal(saved, File.ReadAllBytes(harness.LedgerPath));
+        Assert.Single(harness.Operations.List(request.HostId, request.SessionId));
+        Assert.Equal(ProtocolValidation.Digest(stopped), ProtocolValidation.Digest(harness.Get(parent)));
+    }
+
+    [Fact]
+    public async Task Stopped_claimed_parent_refuses_late_admission_of_reserved_child_without_changing_ledger_bytes()
+    {
+        await using var harness = new StopHarness();
+        var parent = harness.Seed();
+        var decision = Event(parent, "decision", 1, 2);
+        harness.Operations.Apply(decision, "stopped-successor");
+        var request = Request() with { Observation = decision.Observation };
+        var child = Action(request, "reserved-child-action", "stopped-successor");
+        harness.Operations.Reserve(request, child, new HostRunUsage(Steps: 2, Continuations: 1, ProviderCalls: 2));
+        var reserved = harness.Get(child);
+        Assert.Equal("reserved", reserved.State);
+        Assert.Null(reserved.Admission);
+        var stopped = harness.Operations.StopDecision(decision);
+        Assert.Equal("cancelled", stopped.State);
+        Assert.Equal(child.RunId, stopped.WakeRunId);
+        Assert.Equal(ProtocolValidation.Digest(reserved), ProtocolValidation.Digest(harness.Get(child)));
+        var admission = Admission(child);
+        var saved = File.ReadAllBytes(harness.LedgerPath);
+
+        Assert.Throws<HostProtocolException>(() => harness.Operations.Admit(request.HostId, request.SessionId, admission));
+        Assert.Equal(saved, File.ReadAllBytes(harness.LedgerPath));
+        Assert.Equal(ProtocolValidation.Digest(reserved), ProtocolValidation.Digest(harness.Get(child)));
+
+        harness.Restart();
+        Assert.Throws<HostProtocolException>(() => harness.Operations.Admit(request.HostId, request.SessionId, admission));
+        Assert.Equal(saved, File.ReadAllBytes(harness.LedgerPath));
+        Assert.Equal(ProtocolValidation.Digest(reserved), ProtocolValidation.Digest(harness.Get(child)));
+        Assert.Equal(ProtocolValidation.Digest(stopped), ProtocolValidation.Digest(harness.Get(parent)));
+    }
+
+    [Fact]
     public async Task Legacy_waking_parent_with_an_admitted_child_refuses_stop_without_rewriting_evidence()
     {
         await using var harness = new StopHarness();
