@@ -462,6 +462,78 @@ public sealed class HostDecisionAdoptionTests
         Assert.Equal(0, harness.Planners.Created);
     }
 
+    [Fact]
+    public async Task Adoption_identity_in_an_independent_session_does_not_block_this_sessions_decision()
+    {
+        await using var harness = new AdoptionHarness();
+        var first = harness.Seed();
+        var adoption = Adoption(3);
+        harness.Operations.Apply(Event(first, "decision", 1, 2), "first-successor", adoption);
+        var request = Request() with { SessionId = "independent-session" };
+        var second = Action(request, "second-action", "second-run");
+        harness.Operations.Reserve(request, second, new HostRunUsage(Steps: 1, ProviderCalls: 1));
+        harness.Operations.Admit(request.HostId, request.SessionId, Admission(second));
+        var decision = Event(second, "decision", 1, 2);
+
+        var adopted = harness.Operations.Apply(decision, "second-successor", Clone(adoption));
+
+        Assert.Equal("second-successor", adopted.WakeRunId);
+        AssertSame(adoption, adopted.WakeAdoption);
+        harness.Restart();
+        AssertSame(adopted, harness.Get(second));
+        Assert.Equal(0, harness.Planners.Created);
+    }
+
+    [Fact]
+    public async Task An_admitted_child_cannot_adopt_an_epoch_retired_by_its_parent()
+    {
+        await using var harness = new AdoptionHarness();
+        var first = harness.Seed();
+        var adoption = Adoption(3);
+        harness.Operations.Apply(Event(first, "decision", 1, 2), "first-successor", adoption);
+        var request = Request() with { SessionEpoch = adoption.NextSessionEpoch, Observation = adoption.Observation };
+        var child = Action(request, "child-action", "first-successor");
+        var context = harness.Contexts.Open(request);
+        context.RecordActionDispatch(child);
+        harness.Operations.Reserve(request, child, new HostRunUsage(Steps: 2, Continuations: 1, ProviderCalls: 2));
+        harness.Custody.Reserve(request.HostId, request.SessionId, request.SessionEpoch, child.RunId,
+            child, request.Capabilities[0], request.ObjectiveId);
+        var admission = Admission(child);
+        harness.Operations.Admit(request.HostId, request.SessionId, admission);
+        context.RecordActionResult(child, admission);
+        harness.Custody.Resolve(request.HostId, request.SessionId, child.ActionId, admission);
+        harness.Restart();
+        Assert.Equal("continued", harness.Get(first).State);
+        var decision = Event(child, "decision", 1, 5);
+        var revival = Adoption(6) with { AdoptionId = "child-adoption", NextSessionEpoch = first.SessionEpoch };
+        var saved = File.ReadAllBytes(harness.LedgerPath);
+
+        RefusesWithoutWrite(harness, saved, () => harness.Track(harness.Registry.Wake(decision, revival)));
+
+        Assert.Null(harness.Get(child).WakeRunId);
+        Assert.Equal(adoption.NextSessionEpoch, harness.Get(child).ActiveEpoch);
+        Assert.Equal(0, harness.Planners.Created);
+    }
+
+    [Fact]
+    public async Task Cancellation_after_a_lost_adoption_claim_cannot_rewind_the_adopted_checkpoint()
+    {
+        await using var harness = new AdoptionHarness();
+        var action = harness.Seed();
+        var adoption = Adoption(10);
+        harness.Operations.Apply(Event(action, "decision", 1, 2), "lost-successor", adoption);
+        // The crash occurs after the atomic claim but before the new context is opened.
+        harness.Restart();
+        var cancellation = Event(action, "cancelled", 2, 3) with { SessionEpoch = adoption.NextSessionEpoch };
+        var saved = File.ReadAllBytes(harness.LedgerPath);
+
+        RefusesWithoutWrite(harness, saved, () => harness.Registry.ApplyOperationEvent(cancellation));
+
+        Assert.Equal("waking", harness.Get(action).State);
+        AssertSame(adoption, harness.Get(action).WakeAdoption);
+        Assert.Equal(0, harness.Planners.Created);
+    }
+
     [Theory]
     [InlineData("owner")]
     [InlineData("missing-adoption")]
