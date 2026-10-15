@@ -95,9 +95,18 @@ const digest = (value, name) => {
   if (typeof value !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(value)) throw new Error(`Invalid ${name}.`);
 };
 const timestamp = (value, name) => {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
-    || !Number.isFinite(Date.parse(value))) throw new Error(`Invalid ${name}.`);
+  const match = typeof value === 'string' && /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,7}))?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  const seconds = match ? Date.parse(`${match[1]}${match[3]}`) : NaN;
+  if (!Number.isFinite(seconds)) throw new Error(`Invalid ${name}.`);
+  const ticks = BigInt(seconds) * 10000n + BigInt((match[2] ?? '').padEnd(7, '0'));
+  if (ticks === -621355968000000000n) throw new Error(`Invalid ${name}.`);
+  return ticks;
 };
+const startProviderDefaults = Object.freeze({ provider: 'gemini', model: null, thinkingEffort: null,
+  maxOutputTokens: 4096, contextWindowTokens: 131072, includeThoughtSummaries: false,
+  geminiApi: null, thinkingEffortResolved: false });
+const startLimitDefaults = Object.freeze({ maxSteps: 32, maxRefinements: 32, maxPlanContinuations: 16,
+  timeoutSeconds: 300, actionTimeoutSeconds: 45, maxRecentObservations: 6, maxRecentReceipts: 6 });
 
 function validateStartKey(key, reference = false) {
   fields(key, reference ? startReferenceFields : startKeyFields, 'start reference');
@@ -132,8 +141,19 @@ function validateStartRequest(request) {
       || (Object.hasOwn(capability.inputSchema, 'allowAdditionalProperties') && typeof capability.inputSchema.allowAdditionalProperties !== 'boolean')
       || capability.inputSchema.fields.some(field => !object(field))) throw new Error('Invalid start capability schema.');
   }
-  for (const field of ['provider', 'limits'])
-    if (request[field] != null && !object(request[field])) throw new Error(`Invalid start ${field}.`);
+  if (request.provider != null) {
+    fields(request.provider, Object.keys(startProviderDefaults), 'start provider');
+    for (const field of ['provider', 'model', 'thinkingEffort', 'geminiApi'])
+      if (request.provider[field] != null && typeof request.provider[field] !== 'string') throw new Error(`Invalid start provider ${field}.`);
+    for (const field of ['maxOutputTokens', 'contextWindowTokens'])
+      if (Object.hasOwn(request.provider, field) && !Number.isSafeInteger(request.provider[field])) throw new Error(`Invalid start provider ${field}.`);
+    for (const field of ['includeThoughtSummaries', 'thinkingEffortResolved'])
+      if (Object.hasOwn(request.provider, field) && typeof request.provider[field] !== 'boolean') throw new Error(`Invalid start provider ${field}.`);
+  }
+  if (request.limits != null) {
+    fields(request.limits, Object.keys(startLimitDefaults), 'start limits');
+    if (Object.values(request.limits).some(value => !Number.isSafeInteger(value))) throw new Error('Invalid start limits.');
+  }
   if (jsonBytes(request) > 65536) throw new Error('Start request exceeds the 64 KiB size bound.');
 }
 
@@ -155,18 +175,33 @@ function typedStartRequest(request) {
           description: null, allowedValues: null, example: null, minimum: null, maximum: null, ...field })),
       },
     })),
-    provider: request.provider == null ? null : { provider: 'gemini', model: null, thinkingEffort: null,
-      maxOutputTokens: 4096, contextWindowTokens: 131072, includeThoughtSummaries: false,
-      geminiApi: null, thinkingEffortResolved: false, ...request.provider },
-    limits: request.limits == null ? null : { maxSteps: 32, maxRefinements: 32, maxPlanContinuations: 16,
-      timeoutSeconds: 300, actionTimeoutSeconds: 45, maxRecentObservations: 6, maxRecentReceipts: 6, ...request.limits },
+    provider: request.provider == null ? null : { ...startProviderDefaults, ...request.provider },
+    limits: request.limits == null ? null : { ...startLimitDefaults, ...request.limits },
   };
 }
 
-const startAuthority = request => {
-  const { provider, limits, ...authority } = typedStartRequest(request);
-  return authority;
-};
+function validateStartAcceptance(originalRequest, acceptedRequest) {
+  const { provider: originalProvider, limits: originalLimits, ...original } = typedStartRequest(originalRequest);
+  const { provider: acceptedProvider, limits: acceptedLimits, ...accepted } = typedStartRequest(acceptedRequest);
+  if (canonicalJson(original) !== canonicalJson(accepted))
+    throw new Error('Accepted start request changed authority outside provider/limits normalization.');
+  if (canonicalJson(originalLimits) !== canonicalJson(acceptedLimits)
+    && !(originalLimits === null && canonicalJson(acceptedLimits) === canonicalJson(startLimitDefaults)))
+    throw new Error('Accepted start limits differ from the requested typed limits.');
+  if (canonicalJson(originalProvider) === canonicalJson(acceptedProvider)) return;
+  const requested = originalProvider ?? startProviderDefaults;
+  const name = requested.provider?.trim().toLowerCase() ?? 'gemini';
+  const provider = name === 'google' ? 'gemini' : name === 'claude' ? 'anthropic' : name === 'xai' ? 'grok' : name;
+  // Match HostStartStore.ValidateProvider: only unspecified model/thinking may be
+  // frozen, and an explicitly resolved null thinking effort remains authoritative.
+  if (acceptedProvider === null || acceptedProvider.provider !== provider
+    || (requested.model !== null && acceptedProvider.model !== requested.model)
+    || ((requested.thinkingEffort !== null || requested.thinkingEffortResolved) && acceptedProvider.thinkingEffort !== requested.thinkingEffort)
+    || (requested.thinkingEffortResolved && !acceptedProvider.thinkingEffortResolved)
+    || ['maxOutputTokens', 'contextWindowTokens', 'includeThoughtSummaries', 'geminiApi']
+      .some(field => acceptedProvider[field] !== requested[field]))
+    throw new Error('Accepted start provider differs beyond permitted normalization and unspecified defaults.');
+}
 const startIdentity = ({ stopRequested, terminal, ...entry }) => ({ ...entry,
   originalRequest: typedStartRequest(entry.originalRequest), acceptedRequest: typedStartRequest(entry.acceptedRequest) });
 
@@ -178,7 +213,7 @@ function validateStartEntry(entry, key) {
   boundedText(entry.attemptId, 'attemptId', 128, true); boundedText(entry.runId, 'runId', 128, true);
   validateStartRequest(entry.originalRequest); validateStartRequest(entry.acceptedRequest);
   for (const field of ['originalRequestHash', 'acceptedRequestHash', 'manifestHash']) digest(entry[field], field);
-  timestamp(entry.admittedAt, 'admittedAt');
+  const admittedAt = timestamp(entry.admittedAt, 'admittedAt');
   if (entry.attemptId !== key.attemptId || entry.originalRequest.hostId !== key.hostId
     || entry.originalRequest.sessionId !== key.sessionId
     || (key.runId !== undefined && entry.runId !== key.runId)
@@ -186,17 +221,18 @@ function validateStartEntry(entry, key) {
     throw new Error('Start entry binding differs from the requested identity.');
   // The service owns .NET digest computation. Compare the complete authority payload,
   // not a purported client recomputation of either request digest.
-  if (canonicalJson(startAuthority(entry.originalRequest)) !== canonicalJson(startAuthority(entry.acceptedRequest)))
-    throw new Error('Accepted start request changed authority outside provider/limits normalization.');
+  validateStartAcceptance(entry.originalRequest, entry.acceptedRequest);
   if (entry.terminal !== null) {
     fields(entry.terminal, ['reason', 'usage', 'usageUnknown', 'settledAt'], 'start terminal');
     const terminal = entry.terminal;
     if (!['stopped', 'interrupted'].includes(terminal.reason) || typeof terminal.usageUnknown !== 'boolean')
       throw new Error('Invalid start terminal state.');
-    timestamp(terminal.settledAt, 'settledAt');
-    if (terminal.usage === null) {
-      if (!terminal.usageUnknown) throw new Error('Missing start usage must remain unknown.');
-    } else {
+    if (!entry.stopRequested || timestamp(terminal.settledAt, 'settledAt') < admittedAt)
+      throw new Error('Start settlement requires a stop request and cannot precede admission.');
+    if (terminal.reason === 'interrupted' ? terminal.usage !== null || !terminal.usageUnknown
+      : terminal.usage === null || terminal.usageUnknown)
+      throw new Error('Stopped starts require known usage; interrupted starts require unknown/null usage.');
+    if (terminal.usage !== null) {
       const counters = ['steps', 'refinements', 'continuations', 'providerCalls'];
       fields(terminal.usage, counters, 'start usage');
       if (counters.some(field => !Number.isSafeInteger(terminal.usage[field]) || terminal.usage[field] < 0))

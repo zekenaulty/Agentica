@@ -213,6 +213,7 @@ const invalidEntries = [
 ];
 for (const [name, change] of invalidEntries) test(`getStart rejects invalid ${name} without registration or a socket`, async () => {
   const client = host(), connections = Socket.instances.length, admitted = entry(); change(admitted);
+  if (admitted.terminal != null) admitted.stopRequested = true;
   let requests = 0;
   await assert.rejects(client.getStart(key(), { fetchImpl: async () => { requests++; return response(admitted); } }));
   assert.equal(requests, 1); assert.equal(client.runs.size, 0); assert.equal(Socket.instances.length, connections);
@@ -220,7 +221,7 @@ for (const [name, change] of invalidEntries) test(`getStart rejects invalid ${na
 
 for (const state of ['pending stop', 'stopped', 'interrupted']) test(`${state} started response fences actions already queued before acceptance`, async t => {
   const client = host(); t.after(() => client.close()); const socket = await connect(client);
-  const admitted = entry(); admitted.stopRequested = state !== 'interrupted';
+  const admitted = entry(); admitted.stopRequested = true;
   if (state !== 'pending stop') admitted.terminal = terminal(state);
   const pending = client.startDurable(submission()); await turn();
   deliver(socket); socket.receive(started(socket.sent[0], admitted));
@@ -369,6 +370,113 @@ test('durable run retention refuses overflow without evicting existing admission
   const pending = client.startDurable(source), rejected = assert.rejects(pending, /retention limit/);
   await turn(); socket.receive(started(socket.sent.at(-1), admitted)); await rejected;
   assert.deepEqual([...client.runs.keys()], ['initial-run']);
+});
+
+const invalidAcceptance = [
+  ...['maxSteps', 'maxRefinements', 'maxPlanContinuations', 'timeoutSeconds', 'actionTimeoutSeconds', 'maxRecentObservations', 'maxRecentReceipts']
+    .map(field => [`changed limit ${field}`, item => { item.acceptedRequest.limits[field]++; }]),
+  ['dropped explicit limits', item => { item.acceptedRequest.limits = null; }],
+  ['nondefault limits for null request', item => { item.originalRequest.limits = null; }],
+  ['changed explicit model', item => { item.acceptedRequest.provider.model = 'different-model'; }],
+  ['dropped explicit model', item => { delete item.acceptedRequest.provider.model; }],
+  ['changed provider', item => { item.acceptedRequest.provider.provider = 'other'; }],
+  ['dropped provider', item => { item.acceptedRequest.provider = null; }],
+  ['changed explicit thinking', item => {
+    item.originalRequest.provider.thinkingEffort = 'low'; item.acceptedRequest.provider.thinkingEffort = 'high';
+  }],
+  ['dropped explicit thinking', item => { item.originalRequest.provider.thinkingEffort = 'low'; }],
+  ['changed resolved null thinking', item => {
+    item.originalRequest.provider.thinkingEffortResolved = true; item.acceptedRequest.provider.thinkingEffort = 'high';
+  }],
+  ['cleared resolved thinking', item => {
+    item.originalRequest.provider.thinkingEffortResolved = true; item.acceptedRequest.provider.thinkingEffortResolved = false;
+  }],
+  ['changed output allowance', item => { item.acceptedRequest.provider.maxOutputTokens = 8192; }],
+  ['changed context allowance', item => { item.acceptedRequest.provider.contextWindowTokens = 262144; }],
+  ['changed thought disclosure', item => { item.acceptedRequest.provider.includeThoughtSummaries = true; }],
+  ['changed provider API', item => { item.acceptedRequest.provider.geminiApi = 'interactions'; }],
+  ['nondefault allowance for null provider', item => {
+    item.originalRequest.provider = null; item.acceptedRequest.provider = { provider: 'gemini', maxOutputTokens: 8192 };
+  }],
+  ['extra provider field', item => { item.acceptedRequest.provider.newAuthority = true; }],
+  ['extra limit field', item => { item.acceptedRequest.limits.maxProviderCalls = 999; }],
+  ['nontyped provider flag', item => { item.acceptedRequest.provider.thinkingEffortResolved = 'true'; }],
+  ['nontyped limit', item => { item.acceptedRequest.limits.maxSteps = '4'; }],
+];
+const invalidTerminals = [
+  ['missing stop tombstone', item => { item.stopRequested = false; }],
+  ['stopped with unknown null usage', item => { item.terminal.usage = null; item.terminal.usageUnknown = true; }],
+  ['stopped with unknown counters', item => { item.terminal.usageUnknown = true; }],
+  ['interrupted with known counters', item => { item.terminal.reason = 'interrupted'; }],
+  ['interrupted with unknown counters', item => { item.terminal.reason = 'interrupted'; item.terminal.usageUnknown = true; }],
+  ['interrupted with known null usage', item => {
+    item.terminal.reason = 'interrupted'; item.terminal.usage = null; item.terminal.usageUnknown = false;
+  }],
+  ['settlement before admission', item => { item.terminal.settledAt = '2026-10-15T11:59:59Z'; }],
+  ['settlement one tick before admission', item => {
+    item.admittedAt = '2026-10-15T12:00:00.1234567Z'; item.terminal.settledAt = '2026-10-15T12:00:00.1234566+00:00';
+  }],
+  ['settlement earlier across offsets', item => { item.terminal.settledAt = '2026-10-15T13:00:00.0000000+02:00'; }],
+  ['default admission time', item => { item.admittedAt = '0001-01-01T00:00:00+00:00'; }],
+  ['default settlement time', item => { item.terminal.settledAt = '0001-01-01T00:00:00+00:00'; }],
+];
+for (const transport of ['startDurable', 'getStart', 'stopStart']) {
+  for (const [name, change] of [...invalidAcceptance, ...invalidTerminals]) test(`${transport} rejects ${name} before binding effects`, async t => {
+    const client = host(); t.after(() => client.close());
+    const admitted = { ...entry(), stopRequested: true, terminal: terminal() }; change(admitted);
+    if (transport === 'startDurable') {
+      const socket = await connect(client);
+      const pending = client.startDurable({ attemptId: admitted.attemptId, request: admitted.originalRequest });
+      const rejected = assert.rejects(pending);
+      await turn(); socket.receive(started(socket.sent[0], admitted)); deliver(socket);
+      await rejected; await client.actionQueue; assert.equal(socket.sent.length, 1);
+    } else {
+      let requests = 0; const connections = Socket.instances.length;
+      await assert.rejects(client[transport](transport === 'getStart' ? key() : reference(), {
+        fetchImpl: async () => { requests++; return response(admitted); },
+      }));
+      assert.equal(requests, 1); assert.equal(Socket.instances.length, connections);
+    }
+    assert.equal(client.runs.size, 0); assert.equal(client.actions.size, 0);
+  });
+}
+
+const validNormalizations = [
+  ['unchanged null controls', null, null, null, null],
+  ['materialized controls', null, { provider: 'gemini', model: 'configured', thinkingEffort: 'high', thinkingEffortResolved: true }, null, {}],
+  ['provider defaults', {}, { provider: 'gemini', model: 'configured', thinkingEffortResolved: true }, {}, {}],
+  ['Google alias', { provider: ' Google ' }, { provider: 'gemini', model: 'configured', thinkingEffort: 'high', thinkingEffortResolved: true }],
+  ['Claude alias', { provider: 'CLAUDE' }, { provider: 'anthropic', model: 'configured' }],
+  ['xAI alias', { provider: 'xAi' }, { provider: 'grok', thinkingEffort: 'high' }],
+  ['ordinary name', { provider: ' Fixture ' }, { provider: 'fixture', model: 'configured' }],
+  ['null name', { provider: null }, { provider: 'gemini', model: 'configured' }],
+  ['explicit controls', { provider: 'fixture', model: 'chosen', thinkingEffort: 'low', maxOutputTokens: 2048,
+    contextWindowTokens: 16384, includeThoughtSummaries: true, geminiApi: 'generateContent' },
+  { provider: 'fixture', model: 'chosen', thinkingEffort: 'low', thinkingEffortResolved: true, maxOutputTokens: 2048,
+    contextWindowTokens: 16384, includeThoughtSummaries: true, geminiApi: 'generateContent' }],
+  ['resolved null thinking', { provider: 'fixture', thinkingEffort: null, thinkingEffortResolved: true },
+    { provider: 'fixture', model: 'configured', thinkingEffort: null, thinkingEffortResolved: true }],
+  ['identical unnormalized provider', { provider: ' Google ', model: 'chosen' }, { provider: ' Google ', model: 'chosen' }],
+];
+for (const [name, originalProvider, acceptedProvider, originalLimits = { maxSteps: 4 }, acceptedLimits = { maxSteps: 4 }] of validNormalizations)
+  test(`accepted ${name} preserves the store normalization contract`, async t => {
+    const client = host(); t.after(() => client.close()); const socket = await connect(client);
+    const admitted = entry(); admitted.originalRequest.provider = originalProvider; admitted.acceptedRequest.provider = acceptedProvider;
+    admitted.originalRequest.limits = originalLimits; admitted.acceptedRequest.limits = acceptedLimits;
+    assert.deepEqual((await admit(client, socket, admitted)).startAdmission, admitted);
+    assert.deepEqual(await client.getStart(key(), { fetchImpl: async () => response(admitted) }), admitted);
+  });
+
+for (const reason of ['stopped', 'interrupted']) for (const settledAt of [
+  '2026-10-15T12:00:00.1234567Z', '2026-10-15T12:00:00.1234568+00:00', '2026-10-15T07:00:00.1234567-05:00',
+]) test(`${reason} settlement accepts equal or later ticks at ${settledAt}`, async t => {
+  const client = host(); t.after(() => client.close()); const socket = await connect(client);
+  const admitted = { ...entry(), stopRequested: true, admittedAt: '2026-10-15T12:00:00.1234567Z',
+    terminal: { ...terminal(reason), settledAt } };
+  assert.deepEqual((await admit(client, socket, admitted)).startAdmission, admitted);
+  assert.deepEqual(await client.getStart(key(), { fetchImpl: async () => response(admitted) }), admitted);
+  assert.deepEqual(await client.stopStart(reference(), { fetchImpl: async () => response(admitted) }), admitted);
+  assert.ok(client.stoppedRuns.has('initial-run'));
 });
 
 // Opt-in serializer conformance uses the actual linked contract sources, not a

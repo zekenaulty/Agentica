@@ -42,7 +42,7 @@ export interface HostCapability {
   durableHandoff?: boolean;
 }
 export interface HostProviderSettings {
-  provider?: string;
+  provider?: string | null;
   model?: string | null;
   thinkingEffort?: string | null;
   maxOutputTokens?: number;
@@ -84,12 +84,18 @@ export interface HostRunUsage {
 export interface HostStartSubmission { attemptId: string; request: HostRunRequest; }
 export interface HostStartKey { hostId: string; sessionId: string; attemptId: string; }
 export interface HostStartReference extends HostStartKey { runId: string; acceptedRequestHash: HostRequestDigest; }
-export interface HostStartTerminal {
-  reason: 'stopped' | 'interrupted';
-  usage: HostRunUsage | null;
-  usageUnknown: boolean;
+/** Requires stopRequested:true and settledAt at or after admittedAt. */
+export type HostStartTerminal = {
+  reason: 'stopped';
+  usage: HostRunUsage;
+  usageUnknown: false;
   settledAt: string;
-}
+} | {
+  reason: 'interrupted';
+  usage: null;
+  usageUnknown: true;
+  settledAt: string;
+};
 export interface HostStartEntry {
   schema: 1;
   attemptId: string;
