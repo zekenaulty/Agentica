@@ -137,8 +137,38 @@ function validateStartRequest(request) {
   if (jsonBytes(request) > 65536) throw new Error('Start request exceeds the 64 KiB size bound.');
 }
 
-const startAuthority = ({ provider, limits, ...request }) => request;
-const startIdentity = ({ stopRequested, terminal, ...entry }) => entry;
+// Match only the typed defaults in HostProtocol, ProviderSettings and ToolInputField.
+// Keep every supplied key and opaque JSON value; explicit null is not a non-null default.
+function typedStartRequest(request) {
+  const observation = { facts: null, ...request.observation };
+  // DateTimeOffset writes Z as +00:00 and trims fractional zeroes. Do not round
+  // through Date: its millisecond precision would erase differing .NET ticks.
+  observation.observedAt = observation.observedAt.replace(/(?:Z|[+-]00:00)$/, '+00:00')
+    .replace(/\.(\d*?[1-9])?0+(?=[+-]\d{2}:\d{2}$)/, (_, fraction) => fraction ? `.${fraction}` : '');
+  if (observation.facts !== null) observation.facts = observation.facts.map(fact => ({
+    state: 'observed', evidenceObservationIds: null, supersedes: null, ...fact,
+  }));
+  return { ...request, observation,
+    capabilities: request.capabilities.map(capability => ({ durableHandoff: false, ...capability,
+      inputSchema: { allowAdditionalProperties: false, ...capability.inputSchema,
+        fields: capability.inputSchema.fields.map(field => ({ type: 'string', required: false,
+          description: null, allowedValues: null, example: null, minimum: null, maximum: null, ...field })),
+      },
+    })),
+    provider: request.provider == null ? null : { provider: 'gemini', model: null, thinkingEffort: null,
+      maxOutputTokens: 4096, contextWindowTokens: 131072, includeThoughtSummaries: false,
+      geminiApi: null, thinkingEffortResolved: false, ...request.provider },
+    limits: request.limits == null ? null : { maxSteps: 32, maxRefinements: 32, maxPlanContinuations: 16,
+      timeoutSeconds: 300, actionTimeoutSeconds: 45, maxRecentObservations: 6, maxRecentReceipts: 6, ...request.limits },
+  };
+}
+
+const startAuthority = request => {
+  const { provider, limits, ...authority } = typedStartRequest(request);
+  return authority;
+};
+const startIdentity = ({ stopRequested, terminal, ...entry }) => ({ ...entry,
+  originalRequest: typedStartRequest(entry.originalRequest), acceptedRequest: typedStartRequest(entry.acceptedRequest) });
 
 function validateStartEntry(entry, key) {
   validateDepth(entry);
@@ -324,7 +354,7 @@ export class AgenticaHost {
   _installStart(message, submission) {
     if (message.type !== 'started') throw new Error('Durable start requires a started response.');
     const entry = validateStartEntry(message.payload.startAdmission, { ...submission.request, attemptId: submission.attemptId });
-    if (canonicalJson(entry.originalRequest) !== canonicalJson(submission.request))
+    if (canonicalJson(typedStartRequest(entry.originalRequest)) !== canonicalJson(typedStartRequest(submission.request)))
       throw new Error('Durable start original request differs from the submitted request.');
     const accepted = entry.acceptedRequest;
     if (message.payload.runId !== entry.runId || (message.runId != null && message.runId !== entry.runId)

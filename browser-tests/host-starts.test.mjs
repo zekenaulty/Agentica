@@ -1,5 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { AgenticaHost } from '../Agentica.Lab.Web/wwwroot/sdk/agentica-host.mjs';
 
 class Socket {
@@ -364,4 +369,133 @@ test('durable run retention refuses overflow without evicting existing admission
   const pending = client.startDurable(source), rejected = assert.rejects(pending, /retention limit/);
   await turn(); socket.receive(started(socket.sent.at(-1), admitted)); await rejected;
   assert.deepEqual([...client.runs.keys()], ['initial-run']);
+});
+
+// Opt-in serializer conformance uses the actual linked contract sources, not a
+// second C# model or a JavaScript approximation. No service or provider is loaded.
+test('actual .NET HostProtocol serialization preserves exact typed-default start bindings', {
+  skip: process.env.AGENTICA_TEST_START_SERIALIZATION !== '1', timeout: 120000,
+}, async t => {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const directory = await mkdtemp(join(tmpdir(), 'agentica-start-serializer-'));
+  assert.equal(dirname(resolve(directory)), resolve(tmpdir()));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const sources = ['Agentica.Lab.Web/Contracts/HostProtocol.cs', 'Agentica.Lab.Web/Contracts/HostOperations.cs',
+    'Agentica.Lab.Web/Providers/ProviderSettings.cs', 'Agentica/Tools/ToolKind.cs', 'Agentica/Tools/ToolEffect.cs',
+    'Agentica/Tools/ToolInputSchema.cs', 'Agentica/Tools/ToolInputField.cs', 'Agentica/Tools/ToolInputValueType.cs'];
+  const xml = value => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
+  await writeFile(join(directory, 'Serializer.csproj'), `<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework>
+      <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><NuGetAudit>false</NuGetAudit></PropertyGroup>
+    <ItemGroup>${sources.map(source => `<Compile Include="${xml(join(root, source))}" Link="${source}" />`).join('')}</ItemGroup>
+  </Project>`);
+  await writeFile(join(directory, 'NuGet.Config'), '<configuration><packageSources><clear /></packageSources></configuration>');
+  await writeFile(join(directory, 'Program.cs'), `using System.Text.Json;
+using Agentica.Lab.Web.Contracts;
+var requests = JsonSerializer.Deserialize<HostRunRequest[]>(Console.In.ReadToEnd(), HostProtocol.Json)!;
+Console.Write(JsonSerializer.Serialize(requests, HostProtocol.Json));
+`);
+  const dotnet = process.env.AGENTICA_TEST_DOTNET ?? 'dotnet';
+  const options = { cwd: directory, encoding: 'utf8', timeout: 90000, windowsHide: true,
+    env: { ...process.env, DOTNET_CLI_TELEMETRY_OPTOUT: '1', DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1',
+      DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 'true' } };
+  const build = spawnSync(dotnet, ['build', 'Serializer.csproj', '--nologo', '--verbosity', 'quiet',
+    '--configfile', join(directory, 'NuGet.Config')], options);
+  assert.equal(build.status, 0, `${build.error ?? ''}\n${build.stdout}\n${build.stderr}`);
+
+  const minimal = submission().request;
+  delete minimal.provider; delete minimal.limits; delete minimal.observation.facts;
+  delete minimal.capabilities[0].durableHandoff; delete minimal.capabilities[0].inputSchema.allowAdditionalProperties;
+  minimal.capabilities[0].inputSchema.fields = [{ name: 'itemId' }];
+  minimal.observation.observedAt = '2026-10-15T12:00:00.0000000Z';
+  const partial = submission().request;
+  partial.capabilities[0].durableHandoff = false;
+  partial.provider.thinkingEffortResolved = false;
+  partial.observation.facts = [{ key: 'fact', summary: 'Observed.', value: { nullable: null } }];
+  partial.observation.observedAt = '2026-10-15T12:00:00.1234000Z';
+  const empty = structuredClone(minimal); empty.provider = {}; empty.limits = {};
+  empty.observation.observedAt = '2026-10-15T12:00:00.1234567-05:00';
+  const explicitNulls = structuredClone(minimal);
+  explicitNulls.provider = null; explicitNulls.limits = null; explicitNulls.observation.facts = null;
+  explicitNulls.capabilities[0].inputSchema.fields[0] = { name: 'itemId', type: 'string', required: false,
+    description: null, allowedValues: null, example: null, minimum: null, maximum: null };
+  const opaque = structuredClone(partial);
+  opaque.observation.data = { nested: { provider: null, facts: null, required: true, observedAt: 'opaque' } };
+  opaque.observation.facts[0].value = { required: true, minimum: 1, nullable: null };
+  opaque.capabilities[0].inputSchema.fields[0].example = { required: true, facts: null, limits: {} };
+  const submitted = [minimal, partial, empty, explicitNulls, opaque];
+  const serialized = spawnSync(dotnet, [join(directory, 'bin/Debug/net10.0/Serializer.dll')], {
+    ...options, input: JSON.stringify(submitted),
+  });
+  assert.equal(serialized.status, 0, `${serialized.error ?? ''}\n${serialized.stderr}`);
+  const typed = JSON.parse(serialized.stdout);
+  assert.equal(typed[0].provider, null); assert.equal(typed[0].limits, null); assert.equal(typed[0].observation.facts, null);
+  assert.equal(typed[0].observation.observedAt, '2026-10-15T12:00:00+00:00');
+  assert.equal(typed[1].observation.observedAt, '2026-10-15T12:00:00.1234+00:00');
+  assert.equal(typed[2].observation.observedAt, empty.observation.observedAt);
+  assert.deepEqual(typed[0].capabilities[0].inputSchema.fields[0], explicitNulls.capabilities[0].inputSchema.fields[0]);
+  assert.equal(typed[1].capabilities[0].durableHandoff, undefined);
+  assert.equal(typed[1].provider.thinkingEffortResolved, undefined);
+  assert.equal(typed[1].limits.maxRefinements, 32); assert.equal(typed[2].limits.maxSteps, 32);
+  assert.equal(typed[2].provider.provider, 'gemini'); assert.equal(typed[2].provider.maxOutputTokens, 4096);
+  assert.deepEqual(typed[1].observation.facts[0], { ...partial.observation.facts[0],
+    state: 'observed', evidenceObservationIds: null, supersedes: null });
+
+  for (let index = 0; index < submitted.length; index++) await t.test(`typed fixture ${index} binds before effects`, async t => {
+    let effects = 0;
+    const client = host({ onAction: next => { effects++; const applied = result(next); delete applied.operation; return applied; } });
+    t.after(() => client.close()); const socket = await connect(client);
+    const source = { attemptId: 'initial-attempt', request: submitted[index] };
+    const admitted = entry(source); admitted.originalRequest = typed[index]; admitted.acceptedRequest = typed[index];
+    const pending = client.startDurable(source); await turn();
+    socket.receive(started(socket.sent[0], admitted));
+    assert.ok(client.runs.has('initial-run')); deliver(socket);
+    assert.deepEqual((await pending).startAdmission.originalRequest, typed[index]); await client.actionQueue;
+    assert.equal(effects, 1);
+    assert.deepEqual(socket.sent[0].payload, source);
+    assert.deepEqual(await client.getStart(key(), { fetchImpl: async () => response(admitted) }), admitted);
+  });
+
+  const changes = [
+    ['drop explicit input type', request => { delete request.capabilities[0].inputSchema.fields[0].type; }],
+    ['drop explicit required flag', request => { delete request.capabilities[0].inputSchema.fields[0].required; }],
+    ['drop explicit description', request => { delete request.capabilities[0].inputSchema.fields[0].description; }],
+    ['drop explicit allowed values', request => { delete request.capabilities[0].inputSchema.fields[0].allowedValues; }],
+    ['drop explicit minimum', request => { delete request.capabilities[0].inputSchema.fields[0].minimum; }],
+    ['drop explicit maximum', request => { delete request.capabilities[0].inputSchema.fields[0].maximum; }],
+    ['drop schema authority', request => { delete request.capabilities[0].inputSchema.allowAdditionalProperties; }],
+    ['drop durable handoff', request => { delete request.capabilities[0].durableHandoff; }],
+    ['drop provider model', request => { delete request.provider.model; }],
+    ['drop nondefault limit', request => { delete request.limits.maxSteps; }],
+    ['drop fact state', request => { delete request.observation.facts[0].state; }],
+    ['drop fact evidence', request => { delete request.observation.facts[0].evidenceObservationIds; }],
+    ['drop supersedes', request => { delete request.observation.facts[0].supersedes; }],
+    ['drop opaque data null', request => { delete request.observation.data.nested.facts; }],
+    ['drop opaque value null', request => { delete request.observation.facts[0].value.nullable; }],
+    ['drop opaque example null', request => { delete request.capabilities[0].inputSchema.fields[0].example.facts; }],
+    ['change a submillisecond tick', request => { request.observation.observedAt = '2026-10-15T12:00:00.1234568+00:00'; }],
+    ['explicit null is not false', request => { request.capabilities[0].inputSchema.fields[0].required = null; }],
+  ];
+  const guarded = structuredClone(opaque);
+  Object.assign(guarded.capabilities[0].inputSchema.fields[0], {
+    type: 'object', required: true, description: 'Bound field.', allowedValues: ['one'], minimum: 1, maximum: 3,
+  });
+  guarded.capabilities[0].durableHandoff = true; guarded.capabilities[0].inputSchema.allowAdditionalProperties = true;
+  Object.assign(guarded.observation.facts[0], { state: 'supported', evidenceObservationIds: ['proof'], supersedes: 'previous' });
+  guarded.observation.observedAt = '2026-10-15T12:00:00.1234567Z';
+  const output = spawnSync(dotnet, [join(directory, 'bin/Debug/net10.0/Serializer.dll')], {
+    ...options, input: JSON.stringify([guarded]),
+  });
+  assert.equal(output.status, 0, output.stderr);
+  const guardedTyped = JSON.parse(output.stdout)[0];
+  for (const [name, change] of changes) await t.test(`typed echo cannot ${name}`, async t => {
+    const client = host(); t.after(() => client.close()); const socket = await connect(client);
+    const source = { attemptId: 'initial-attempt', request: guarded };
+    const admitted = entry(source); admitted.originalRequest = structuredClone(guardedTyped);
+    change(admitted.originalRequest); admitted.acceptedRequest = structuredClone(admitted.originalRequest);
+    const pending = client.startDurable(source), rejected = assert.rejects(pending);
+    await turn(); socket.receive(started(socket.sent[0], admitted)); deliver(socket);
+    await rejected; await client.actionQueue;
+    assert.equal(client.runs.size, 0); assert.equal(client.actions.size, 0);
+  });
 });

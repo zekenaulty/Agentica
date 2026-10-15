@@ -80,6 +80,7 @@ export interface HostRunUsage {
   continuations: number;
   providerCalls: number;
 }
+/** Request binding permits only the contract's typed defaults/nulls and lossless timestamp formatting. */
 export interface HostStartSubmission { attemptId: string; request: HostRunRequest; }
 export interface HostStartKey { hostId: string; sessionId: string; attemptId: string; }
 export interface HostStartReference extends HostStartKey { runId: string; acceptedRequestHash: HostRequestDigest; }
@@ -237,7 +238,7 @@ export class AgenticaHost {
   close(): void;
   request(type: string, payload: unknown, options?: { runId?: string; timeoutMs?: number; binding?: HostRunBinding }): Promise<HostServiceMessage>;
   start(request: Omit<HostRunRequest, 'protocolVersion'> & { protocolVersion?: 1 }): Promise<Record<string, unknown> & { runId: string }>;
-  /** One frozen attempt; uncertain delivery never retries automatically. */
+  /** One frozen attempt; validates the .NET typed echo without claiming hash recomputation. Never retries automatically. */
   startDurable(submission: HostStartSubmission): Promise<HostStartSnapshot>;
   /** Exact read only. Not found rejects and remains UNKNOWN; no run is registered. */
   getStart(key: HostStartKey, options?: HostHttpOptions): Promise<HostStartEntry>;
