@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Agentica.Lab.Web.Contracts;
 using Agentica.Lab.Web.Providers;
 
@@ -28,6 +29,10 @@ public sealed partial class HostStartStore
     {
         ProtocolValidation.Identifier(attemptId);
         ProtocolValidation.Identifier(runId);
+        // Bound both typed requests independently, including serializer defaults and escaping.
+        if (JsonSerializer.SerializeToUtf8Bytes(original, HostProtocol.Json).Length > MaximumRequestBytes ||
+            JsonSerializer.SerializeToUtf8Bytes(accepted, HostProtocol.Json).Length > MaximumRequestBytes)
+            Fail("start.request_size", "Each original and accepted durable-start request must fit within 65536 serialized UTF-8 bytes.");
         ProtocolValidation.Validate(original);
         ProtocolValidation.Validate(accepted);
         if (ProtocolValidation.Digest(original with { Provider = null, Limits = null }) !=

@@ -36,8 +36,7 @@ public sealed partial class HostStartStoreTests
     public void Exceeding64MiBRejectsAdmissionWithoutEvictionOrPartialWrite()
     {
         var store = new HostStartStore(_root);
-        var request = Request();
-        request = request with { Provider = request.Provider! with { Model = new string('m', 120000) } };
+        var request = RequestSized(Request() with { SessionId = "session-0000" }, HostStartStore.MaximumRequestBytes);
         var template = store.Admit("attempt", request, request, "run");
         var entryBytes = JsonSerializer.SerializeToUtf8Bytes(EntryFor(template, 0), HostProtocol.Json).Length;
         var emptyBytes = LedgerBytes([]).Length;
@@ -49,8 +48,8 @@ public sealed partial class HostStartStoreTests
         File.WriteAllBytes(LedgerPath, bytes);
         store = new HostStartStore(_root);
         var before = FileHash();
-        var oversizedAddition = request with { SessionId = "fresh", Provider = request.Provider! with { Model = new string('m', 200000) } };
-        Error("start.storage_limit", () => store.Admit("fresh-attempt", oversizedAddition, oversizedAddition, "fresh-run"));
+        var addition = request with { SessionId = "session-9999" };
+        Error("start.storage_limit", () => store.Admit("attempt-9999", addition, addition, "run-9999"));
         Assert.Equal(before, FileHash());
         Assert.Empty(Directory.GetFiles(_root, "*.tmp"));
         var found = store.Find(new HostStartKey("host", "session-0000", "attempt-0000"));

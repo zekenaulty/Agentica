@@ -14,6 +14,7 @@ public sealed partial class HostStartStore
     public const string LedgerFileName = "host-starts-v1.json";
     public const int MaximumEntries = 512;
     public const int MaximumFileBytes = 64 * 1024 * 1024;
+    public const int MaximumRequestBytes = 65_536;
     private const string MarkerFileName = "host-starts-v1.initialized";
     private readonly object _gate = new();
     private readonly string _path;
