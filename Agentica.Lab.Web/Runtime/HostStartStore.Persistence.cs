@@ -5,6 +5,9 @@ namespace Agentica.Lab.Web.Runtime;
 
 public sealed partial class HostStartStore
 {
+    // Logical headroom for the bounded terminal record, not a physical disk-space guarantee.
+    private const int UnsettledEntryAllowanceBytes = 512;
+
     public HostStartStore(string rootDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootDirectory);
@@ -57,6 +60,8 @@ public sealed partial class HostStartStore
                     (entry.Terminal is null && !openSessions.Add((request.HostId, request.SessionId))))
                     throw new InvalidDataException("Start attempt, run, objective or open-session identities collide.");
             }
+            if (JsonSerializer.SerializeToUtf8Bytes(file, HostProtocol.Json).LongLength + SettlementAllowance(file.Payload) > MaximumFileBytes)
+                throw new InvalidDataException("Start ledger exceeds its logical size bound including reserved Stop settlement space.");
             return file.Payload;
         }
         catch (Exception exception) when (exception is JsonException or HostProtocolException or ArgumentException or NullReferenceException or InvalidOperationException)
@@ -74,8 +79,8 @@ public sealed partial class HostStartStore
     private void Write(LedgerPayload payload)
     {
         var bytes = JsonSerializer.SerializeToUtf8Bytes(new LedgerFile(1, payload, ProtocolValidation.Digest(payload)), HostProtocol.Json);
-        if (bytes.Length > MaximumFileBytes)
-            Fail("start.storage_limit", "Start retention exceeds 64 MiB; original attempts and Stop tombstones cannot be pruned.");
+        if (bytes.LongLength + SettlementAllowance(payload) > MaximumFileBytes)
+            Fail("start.storage_limit", "Start retention including reserved Stop settlement space exceeds 64 MiB; original attempts and Stop tombstones cannot be pruned.");
         var temporary = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
@@ -88,6 +93,9 @@ public sealed partial class HostStartStore
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
+
+    private static long SettlementAllowance(LedgerPayload payload) =>
+        (long)UnsettledEntryAllowanceBytes * payload.Entries.Count(entry => entry.Terminal is null);
 
     private sealed record LedgerPayload(string StoreId, IReadOnlyList<HostStartEntry> Entries);
     private sealed record LedgerFile(int Version, LedgerPayload Payload, string ContentHash);

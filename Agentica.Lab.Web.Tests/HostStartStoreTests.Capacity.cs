@@ -33,18 +33,21 @@ public sealed partial class HostStartStoreTests
     }
 
     [Fact]
-    public void Exceeding64MiBRejectsAdmissionWithoutEvictionOrPartialWrite()
+    public void ExceedingLogical64MiBRejectsAdmissionEvenWhenPhysicalBytesFit()
     {
         var store = new HostStartStore(_root);
         var request = RequestSized(Request() with { SessionId = "session-0000" }, HostStartStore.MaximumRequestBytes);
         var template = store.Admit("attempt", request, request, "run");
         var entryBytes = JsonSerializer.SerializeToUtf8Bytes(EntryFor(template, 0), HostProtocol.Json).Length;
         var emptyBytes = LedgerBytes([]).Length;
-        var count = (HostStartStore.MaximumFileBytes - emptyBytes + 1) / (entryBytes + 1);
+        var count = (HostStartStore.MaximumFileBytes - emptyBytes + 1) / (entryBytes + 1 + StopAllowanceBytes);
         Assert.InRange(count, 1, HostStartStore.MaximumEntries - 1);
         var entries = Enumerable.Range(0, count).Select(i => EntryFor(template, i)).ToArray();
         var bytes = LedgerBytes(entries);
-        Assert.InRange(bytes.Length, HostStartStore.MaximumFileBytes - entryBytes, HostStartStore.MaximumFileBytes);
+        var logicalBytes = bytes.LongLength + (long)count * StopAllowanceBytes;
+        Assert.InRange(logicalBytes, HostStartStore.MaximumFileBytes - entryBytes - StopAllowanceBytes, HostStartStore.MaximumFileBytes);
+        Assert.True(bytes.LongLength + entryBytes + 1 <= HostStartStore.MaximumFileBytes);
+        Assert.True(logicalBytes + entryBytes + 1 + StopAllowanceBytes > HostStartStore.MaximumFileBytes);
         File.WriteAllBytes(LedgerPath, bytes);
         store = new HostStartStore(_root);
         var before = FileHash();
