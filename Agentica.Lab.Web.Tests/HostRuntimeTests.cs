@@ -19,7 +19,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Agentica.Lab.Web.Tests;
 
-public sealed class HostRuntimeTests
+public sealed partial class HostRuntimeTests
 {
     [Fact]
     public async Task Real_socket_runs_full_streamed_demo_loop_and_completes_with_host_receipts()
@@ -47,7 +47,7 @@ public sealed class HostRuntimeTests
                     await SendAsync(socket, "action.result", Applied(action, revision,
                         complete: action.CapabilityId == "demo.accept"), action.RunId);
                     break;
-                case "outcome": outcome = message.GetProperty("payload").Deserialize<OutcomeEnvelope>(HostProtocol.Json); break;
+                case "outcome": outcome = await ReadFullOutcomeAsync(service, message); break;
                 case "error": Assert.Fail(message.GetRawText()); break;
             }
         }
@@ -117,7 +117,7 @@ public sealed class HostRuntimeTests
         Assert.Equal(ProtocolValidation.Digest(original), ProtocolValidation.Digest(replayed));
         Assert.Contains(replayed.ActionId, appliedActionIds);
         await SendAsync(resumed, "action.result", retained, runId);
-        var outcome = (await ReceiveUntilAsync(resumed, "outcome")).GetProperty("payload").Deserialize<OutcomeEnvelope>(HostProtocol.Json)!;
+        var outcome = await ReadFullOutcomeAsync(service, await ReceiveUntilAsync(resumed, "outcome"));
         Assert.Equal(RunOutcomeStatus.Succeeded, outcome.Outcome.Status);
         Assert.Single(outcome.Receipts.Items);
         Assert.Single(appliedActionIds);

@@ -531,7 +531,7 @@ public sealed class HostRun : IDisposable
 
     private object DisplayOutcome(OutcomeEnvelope outcome)
     {
-        if (JsonSerializer.SerializeToUtf8Bytes(outcome, HostProtocol.Json).Length <= HostProtocol.MaxMessageBytes / 2) return outcome;
+        // Socket/replay projections stay compact; the HTTP snapshot retains the full outcome.
         return new
         {
             outcome = new { outcome.Outcome.RunId, outcome.Outcome.Status, outcome.Outcome.StopReason },
