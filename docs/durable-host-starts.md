@@ -87,6 +87,13 @@ implicit reset is provided. These are logical limits, not physical disk guarante
 Hosts must explicitly manage lifecycle/capacity; a full ledger fails admission
 before a new planner can run. HTTP reads are exact-key, no-store responses.
 
+Action custody now excludes operation-admission receipts from all three pruning
+paths: per-session, global-count and byte-budget. The operation ledger still
+requires those receipts for progress, cancellation and wake validation. Ordinary
+completed receipts retain their existing pruning policy; protected capacity fails
+closed instead of deleting required admission evidence. This prevents future
+loss, not recovery of evidence pruned by an older build.
+
 ## Qualification Boundary
 
 The focused store/registry/socket/SDK tests cover immutable replay, restart,
@@ -100,6 +107,15 @@ Local verification uses installed .NET SDK 10.0.401 from outside the repository;
 the unchanged repository pin is 10.0.302. The project-aware format attempt could
 not resolve that pinned SDK; targeted folder-mode whitespace formatting passed.
 Node is 22.13.0. Hosted CI and the pinned-SDK build are not claimed.
+
+Final checked candidate `9af8801`: **342/342 Lab Web Release tests** and
+**328/328 SDK tests** with `AGENTICA_TEST_START_SERIALIZATION=1`. The default SDK
+run passes 304 with one optional serializer test skipped; enabling it runs the
+additional typed-serialization subcases. The Release suite includes the actual
+Node SDK/loopback service proof and independent HTTP/WebSocket/restart cases.
+Independent review found and repaired response ordering, rejected-start eviction,
+unfunded terminal capacity, settings-normalization mismatches and custody pruning.
+No external provider was invoked and no existing host data was reset.
 
 Maze must still adopt this protocol through its canonical launch records and
 GameSession, reconcile exact original request identity, settle the funded host
