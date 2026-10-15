@@ -4,8 +4,8 @@ using Agentica.Lab.Web.Providers;
 
 namespace Agentica.Lab.Web.Runtime;
 
-public sealed class HostRunRegistry(HostContextStore contexts, ILabPlannerFactory planners, ActionCustodyStore custody,
-    HostOperationStore? operations = null) : IDisposable
+public sealed partial class HostRunRegistry(HostContextStore contexts, ILabPlannerFactory planners, ActionCustodyStore custody,
+    HostOperationStore? operations = null, HostStartStore? starts = null) : IDisposable
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, HostRun> _runs = new(StringComparer.Ordinal);
@@ -15,23 +15,8 @@ public sealed class HostRunRegistry(HostContextStore contexts, ILabPlannerFactor
         ProtocolValidation.Validate(request);
         lock (_gate)
         {
-            if (operations?.HasOpen(request.HostId, request.SessionId) == true)
-                throw new HostProtocolException("session.parked", "Continue or cancel the retained host operation before starting a new objective.");
-            if (operations?.List(request.HostId, request.SessionId).Any(entry => entry.Admission is not null &&
-                entry.Request.ObjectiveId == request.ObjectiveId) == true)
-                throw new HostProtocolException("objective.retained", "This objective already has durable lineage. Use its operation handoff or a new objective identity.");
-            if (custody.HasUnresolved(request.HostId, request.SessionId))
-                throw new HostProtocolException("session.unresolved", "Reconcile the original dispatched actions before starting another run for this session.");
-            if (_runs.Values.Any(run => run.Request.HostId == request.HostId && run.Request.SessionId == request.SessionId &&
-                (!run.Terminal || run.HasUnresolvedActions)))
-                throw new HostProtocolException("session.busy", "Finish or reconcile the existing run for this host session first.");
-            if (_runs.Count >= 64)
-            {
-                var removable = _runs.Values.Where(r => r.Terminal && !r.HasUnresolvedActions).OrderBy(r => r.CreatedAt).FirstOrDefault();
-                if (removable is null) throw new HostProtocolException("runs.limit", "Run capacity reached; reconcile outstanding runs.");
-                _runs.Remove(removable.RunId);
-                removable.Dispose();
-            }
+            CheckNewObjective(request);
+            MakeRunCapacity();
             request = FreezeProvider(request);
             var run = new HostRun(request, contexts.Open(request), planners, custody, operations);
             _runs.Add(run.RunId, run);
@@ -68,6 +53,8 @@ public sealed class HostRunRegistry(HostContextStore contexts, ILabPlannerFactor
         {
             var store = RequiredOperations();
             var entry = store.Get(item.HostId, item.SessionId, item.ActionId);
+            if (starts?.IsStopRequested(item.HostId, item.SessionId, entry.Request.ObjectiveId) == true)
+                throw new HostProtocolException("start.stopped", "This objective's initial admission was explicitly stopped. Reconcile its retained evidence without waking cognition.");
             if (entry.StopDecision is not null)
                 throw new HostProtocolException("operation.stopped", "This original decision was explicitly stopped and cannot activate cognition.");
             if (entry.LatestEvent?.EventId == item.EventId && entry.WakeRunId is not null)
@@ -83,13 +70,7 @@ public sealed class HostRunRegistry(HostContextStore contexts, ILabPlannerFactor
             if (entry.Usage.Steps >= limits.MaxSteps || entry.Usage.Refinements > limits.MaxRefinements ||
                 entry.Usage.Continuations >= limits.MaxPlanContinuations)
                 throw new HostProtocolException("operation.budget", "The objective's cumulative execution allowance is exhausted. Progress and terminal evidence remain admissible.");
-            if (_runs.Count >= 64)
-            {
-                var removable = _runs.Values.Where(run => run.Terminal && !run.HasUnresolvedActions).OrderBy(run => run.CreatedAt).FirstOrDefault();
-                if (removable is null) throw new HostProtocolException("runs.limit", "Run capacity reached; reconcile outstanding runs.");
-                _runs.Remove(removable.RunId);
-                removable.Dispose();
-            }
+            MakeRunCapacity();
             var runId = "labrun_" + Guid.NewGuid().ToString("N");
             ValidateOperationObservation(entry, item);
             if (adoption is not null) ValidateOperationObservation(entry,

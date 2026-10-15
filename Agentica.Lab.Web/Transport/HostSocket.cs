@@ -30,12 +30,21 @@ public sealed class HostSocket : IHostConnection, IAsyncDisposable
     public void TrySendProgress(ServiceMessage message) => _progress.Writer.TryWrite(message);
 
     public async Task SendAsync(ServiceMessage message, CancellationToken cancellationToken = default)
+        => await SendAttachedAsync(message, null, cancellationToken).ConfigureAwait(false);
+
+    // Acquire the send gate before exposing the connection to a running planner.
+    // No authoritative action can overtake its initial binding response.
+    public async Task SendAttachedAsync(ServiceMessage message, Action? attach, CancellationToken cancellationToken = default)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
         timeout.CancelAfter(TimeSpan.FromSeconds(5));
         var bytes = JsonSerializer.SerializeToUtf8Bytes(message, HostProtocol.Json);
         await _send.WaitAsync(timeout.Token).ConfigureAwait(false);
-        try { await _socket.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, true, timeout.Token).ConfigureAwait(false); }
+        try
+        {
+            attach?.Invoke();
+            await _socket.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, true, timeout.Token).ConfigureAwait(false);
+        }
         finally { _send.Release(); }
     }
 

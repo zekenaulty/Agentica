@@ -67,6 +67,7 @@ public sealed class HostRun : IDisposable
     public RunEventFeed Events { get; } = new();
     public Task Completion { get { lock (_gate) return _task ?? Task.CompletedTask; } }
     public bool Terminal { get { lock (_gate) return _task?.IsCompleted == true; } }
+    public HostRunUsage Usage { get { lock (_gate) return _usage; } }
     public bool HasUnresolvedActions { get { lock (_gate) return _actions.Values.Any(a => a.Unresolved || (a.DeliveryAttempted && a.Result is null)); } }
 
     public object Snapshot(bool includeContext = true)
@@ -135,12 +136,25 @@ public sealed class HostRun : IDisposable
 
     public void Start()
     {
-        lock (_gate) _task ??= Task.Run(ExecuteAsync);
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            _task ??= _lifetime.IsCancellationRequested ? Task.CompletedTask : Task.Run(ExecuteAsync);
+        }
     }
 
     public void Cancel()
     {
         _lifetime.Cancel();
+        lock (_gate)
+        {
+            if (_task is null)
+            {
+                _task = Task.CompletedTask;
+                _status = "cancelled";
+                _updatedAt = DateTimeOffset.UtcNow;
+            }
+        }
         Publish("cancel.requested", new { stopFutureDispatch = true, reconcileDispatchedActions = true });
     }
 
@@ -261,6 +275,7 @@ public sealed class HostRun : IDisposable
         var pumping = PumpTelemetryAsync(feed);
         try
         {
+            _lifetime.Token.ThrowIfCancellationRequested();
             SetStatus("running");
             var settings = Request.Provider ?? new ProviderSettings();
             void Report(LlmStreamEvent item)

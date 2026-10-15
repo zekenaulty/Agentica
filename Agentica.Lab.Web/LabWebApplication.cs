@@ -8,7 +8,7 @@ using Agentica.Lab.Web.Transport;
 
 namespace Agentica.Lab.Web;
 
-public static class LabWebApplication
+public static partial class LabWebApplication
 {
     public static WebApplication Create(string[] args, ILabPlannerFactory? plannerFactory = null, string? storageDirectory = null,
         OpenAiProviderConfiguration? openAiConfiguration = null)
@@ -36,6 +36,7 @@ public static class LabWebApplication
         builder.Services.AddSingleton(new HostContextStore(Path.Combine(storageRoot, "context")));
         builder.Services.AddSingleton(new ActionCustodyStore(Path.Combine(storageRoot, "custody")));
         builder.Services.AddSingleton(new HostOperationStore(Path.Combine(storageRoot, "operations")));
+        builder.Services.AddSingleton(new HostStartStore(Path.Combine(storageRoot, "starts")));
         builder.Services.AddSingleton<HostRunRegistry>();
         builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
         var app = builder.Build();
@@ -44,7 +45,7 @@ public static class LabWebApplication
             try { await next(context).ConfigureAwait(false); }
             catch (HostProtocolException exception) when (!context.Response.HasStarted)
             {
-                context.Response.StatusCode = exception.Code == "run.not_found" ? 404 : 409;
+                context.Response.StatusCode = exception.Code is "run.not_found" or "start.not_found" ? 404 : 409;
                 await context.Response.WriteAsJsonAsync(new { code = exception.Code, message = exception.Message }).ConfigureAwait(false);
             }
             catch (Exception exception) when (!context.Response.HasStarted && exception is InvalidDataException or IOException)
@@ -67,6 +68,7 @@ public static class LabWebApplication
         });
         app.MapPut("/api/providers/openai/settings", UpdateOpenAiSettingsAsync);
         app.MapGet("/api/runs", (HostRunRegistry registry) => registry.List());
+        MapStartRoutes(app);
         app.MapGet("/api/operations", (string hostId, string sessionId, HostRunRegistry registry) => registry.ListOperations(hostId, sessionId));
         app.MapPost("/api/operations/events", (HostOperationEvent item, HostRunRegistry registry) => registry.ApplyOperationEvent(item));
         app.MapPost("/api/operations/stop-decision", (HostOperationEvent item, HostRunRegistry registry) => registry.StopDecision(item));
@@ -156,6 +158,24 @@ public static class LabWebApplication
                     if (message.ProtocolVersion != HostProtocol.Version) ProtocolValidation.Fail("protocol.version", "Unsupported protocol version.");
                     switch (message.Type)
                     {
+                        case "start.durable":
+                            var submission = message.Payload.Deserialize<HostStartSubmission>(HostProtocol.Json)
+                                ?? throw new HostProtocolException("start.invalid", "A durable start submission is required.");
+                            if (attached is not null && (!attached.Terminal || attached.HasUnresolvedActions) &&
+                                !registry.IsStartReplay(submission, attached.RunId))
+                                ProtocolValidation.Fail("connection.busy", "Finish or reconcile this connection's run first.");
+                            var admitted = registry.CreateDurable(submission);
+                            try
+                            {
+                                await connection.SendAttachedAsync(new ServiceMessage("started", StartPayload(admitted.Run, admitted.Admission), admitted.Run.RunId, message.RequestId), () =>
+                                {
+                                    admitted.Run.Attach(connection);
+                                    if (attached != admitted.Run) attached?.Detach(connection);
+                                    attached = admitted.Run;
+                                }, context.RequestAborted).ConfigureAwait(false);
+                            }
+                            finally { if (attached == admitted.Run) attached.Start(); }
+                            break;
                         case "start":
                             if (attached is not null && (!attached.Terminal || attached.HasUnresolvedActions))
                                 ProtocolValidation.Fail("connection.busy", "Finish or reconcile this connection's run first.");
