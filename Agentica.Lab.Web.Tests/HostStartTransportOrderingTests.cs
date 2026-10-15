@@ -25,6 +25,23 @@ public sealed class HostStartTransportOrderingTests
     }
 
     [Fact]
+    public async Task Binding_snapshot_is_created_after_attachment_while_actions_remain_gated()
+    {
+        var socket = new RecordingSocket();
+        await using var connection = new HostSocket(socket);
+        Task? action = null;
+        await connection.SendAttachedSnapshotAsync(() =>
+        {
+            Assert.NotNull(action);
+            Assert.False(action.IsCompleted);
+            Assert.Empty(socket.Messages);
+            return new("started", new { connected = true });
+        }, () => action = connection.SendAsync(new("action.request", new { actionId = "original" })));
+        await action!.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(["started", "action.request"], socket.Messages);
+    }
+
+    [Fact]
     public async Task Failed_attachment_does_not_send_a_binding_or_poison_the_send_gate()
     {
         var socket = new RecordingSocket();

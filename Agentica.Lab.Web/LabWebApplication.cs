@@ -199,11 +199,18 @@ public static partial class LabWebApplication
                                 !registry.IsWakeReplay(signal, attached.RunId))
                                 ProtocolValidation.Fail("connection.busy", "Finish or reconcile the retained execution window first.");
                             var awakened = registry.Wake(signal, adopted?.Adoption);
-                            awakened.Attach(connection);
-                            if (attached != awakened) attached?.Detach(connection);
-                            attached = awakened;
-                            try { await connection.SendAsync(new ServiceMessage("started", attached.Snapshot(false), attached.RunId, message.RequestId), context.RequestAborted).ConfigureAwait(false); }
-                            finally { attached.Start(); }
+                            try
+                            {
+                                await connection.SendAttachedSnapshotAsync(() => new ServiceMessage("started", awakened.Snapshot(false), awakened.RunId, message.RequestId), () =>
+                                {
+                                    awakened.Attach(connection);
+                                    if (attached != awakened) attached?.Detach(connection);
+                                    attached = awakened;
+                                }, context.RequestAborted).ConfigureAwait(false);
+                                // A retry can attach a running or terminal successor after its reply was lost.
+                                await awakened.ReplayPendingAsync(context.RequestAborted).ConfigureAwait(false);
+                            }
+                            finally { if (attached == awakened) awakened.Start(); }
                             break;
                         case "resume":
                             var resume = message.Payload.Deserialize<ResumeRequest>(HostProtocol.Json)
