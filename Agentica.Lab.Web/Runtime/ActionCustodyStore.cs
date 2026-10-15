@@ -289,7 +289,7 @@ public sealed class ActionCustodyStore
     private void Commit(LedgerPayload previous, List<ActionCustodyEntry> entries)
     {
         var pruned = previous.PrunedCompletedCount;
-        foreach (var group in entries.Where(entry => !entry.IsUnresolved).GroupBy(entry => (entry.HostId, entry.SessionId)).ToArray())
+        foreach (var group in entries.Where(CanPrune).GroupBy(entry => (entry.HostId, entry.SessionId)).ToArray())
             foreach (var old in group.Take(Math.Max(0, group.Count() - MaximumCompletedPerSession)).ToArray())
             {
                 entries.Remove(old);
@@ -297,8 +297,8 @@ public sealed class ActionCustodyStore
             }
         while (entries.Count > MaximumEntries)
         {
-            var completed = entries.FirstOrDefault(entry => !entry.IsUnresolved)
-                ?? throw new InvalidDataException("Pending action custody cannot be pruned.");
+            var completed = entries.FirstOrDefault(CanPrune)
+                ?? throw new HostProtocolException("custody.storage_limit", "Unresolved custody and durable operation admissions cannot be pruned to admit another action.");
             entries.Remove(completed);
             pruned++;
         }
@@ -306,14 +306,18 @@ public sealed class ActionCustodyStore
         var bytes = JsonSerializer.SerializeToUtf8Bytes(payload, HostProtocol.Json).Length + 256;
         while (bytes > MaximumFileBytes)
         {
-            var completed = entries.FirstOrDefault(entry => !entry.IsUnresolved);
-            if (completed is null) Fail("custody.storage_limit", "Unresolved custody reached its storage bound; reconcile original actions before dispatch.");
+            var completed = entries.FirstOrDefault(CanPrune);
+            if (completed is null) Fail("custody.storage_limit", "Unresolved custody and durable operation admissions reached the storage bound; no retained evidence may be pruned.");
             bytes -= JsonSerializer.SerializeToUtf8Bytes(completed, HostProtocol.Json).Length + 1;
             entries.Remove(completed!);
             pruned++;
         }
         Write(previous with { Entries = entries.ToArray(), PrunedCompletedCount = pruned });
     }
+
+    // Admission receipts remain required by the non-evicting operation ledger, even after custody resolves.
+    // The per-session completed limit applies only to ordinary results; global count/byte limits still apply to all rows.
+    private static bool CanPrune(ActionCustodyEntry entry) => !entry.IsUnresolved && entry.Result?.Operation is null;
 
     private void Write(LedgerPayload payload)
     {
