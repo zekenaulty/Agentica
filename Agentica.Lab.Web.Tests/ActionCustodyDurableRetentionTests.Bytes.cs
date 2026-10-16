@@ -70,7 +70,13 @@ public sealed partial class ActionCustodyDurableRetentionTests
         _ = new ActionCustodyStore(_root);
         const int padding = 250_000;
         var extras = new List<ActionCustodyEntry>();
-        if (includeOrdinary) extras.Add(Entry(9000, operation: false, padding: 16_384));
+        if (includeOrdinary)
+        {
+            // Its eviction also funds the newly required recovery allowance before dispatch.
+            var ordinary = Entry(9000, operation: false, padding: 230_000);
+            var result = Result(ordinary, operation: false, padding: 50_000);
+            extras.Add(ordinary with { Result = result, ResultHash = ProtocolValidation.Digest(result) });
+        }
         extras.Add(Entry(9998, pending: true));
         var targetBytes = ActionCustodyStore.MaximumFileBytes - 1024;
         var largeEntryBytes = JsonSerializer.SerializeToUtf8Bytes(Entry(0, padding: padding), HostProtocol.Json).Length;

@@ -18,7 +18,8 @@ public sealed record ActionCustodyEntry(
     DateTimeOffset ReservedAt,
     DateTimeOffset UpdatedAt,
     HostActionResult? Result = null,
-    string? ResultHash = null)
+    string? ResultHash = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RecoveryRetention = null)
 {
     [JsonIgnore]
     public bool IsUnresolved => Result is null || Result.Disposition == "unresolved";
@@ -35,6 +36,7 @@ public sealed class ActionCustodyStore
     public const int MaximumCompletedPerSession = 256;
     public const int MaximumEntries = 1_024;
     public const int MaximumFileBytes = 64 * 1024 * 1024;
+    private const int RecoveryMetadataBytes = 512;
     public const string LedgerFileName = "action-custody-v1.json";
     private const string MarkerFileName = "action-custody-v1.initialized";
     private readonly object _gate = new();
@@ -97,14 +99,21 @@ public sealed class ActionCustodyStore
                 Fail("custody.pending_limit", "Pending action custody reached its bound; reconcile original actions before new dispatch.");
             var now = DateTimeOffset.UtcNow;
             var reservation = new ActionCustodyEntry(hostId, sessionId, sessionEpoch, runId, objectiveId,
-                Copy(request), Copy(capability), requestHash, capabilityHash, now, now);
+                Copy(request), Copy(capability), requestHash, capabilityHash, now, now, RecoveryRetention: "reserved");
             Commit(ledger, [.. ledger.Entries, reservation]);
             return Copy(reservation);
         }
     }
 
     /// <summary>Returns false for exact replay. An unresolved result is retained but never clears the session fence.</summary>
-    public bool Resolve(string hostId, string sessionId, string actionId, HostActionResult result)
+    public bool Resolve(string hostId, string sessionId, string actionId, HostActionResult result) =>
+        Resolve(hostId, sessionId, actionId, result, recovered: false);
+
+    /// <summary>HTTP reconciliation pins a terminal receipt, including an exact previously unpinned result.</summary>
+    public bool ResolveRecovered(string hostId, string sessionId, string actionId, HostActionResult result) =>
+        Resolve(hostId, sessionId, actionId, result, recovered: true);
+
+    private bool Resolve(string hostId, string sessionId, string actionId, HostActionResult result, bool recovered)
     {
         ArgumentNullException.ThrowIfNull(result);
         lock (_gate)
@@ -112,11 +121,15 @@ public sealed class ActionCustodyStore
             var ledger = Read();
             var entry = ValidateAgainstLedger(ledger, hostId, sessionId, actionId, result);
             var hash = ProtocolValidation.Digest(result);
-            if (entry.ResultHash == hash) return false;
-            var updated = entry with { Result = Copy(result), ResultHash = hash, UpdatedAt = DateTimeOffset.UtcNow };
+            var retention = result.Disposition == "unresolved" ? entry.RecoveryRetention
+                : recovered || entry.RecoveryRetention == "http" ? "http" : null;
+            var changed = entry.ResultHash != hash;
+            if (!changed && entry.RecoveryRetention == retention) return false;
+            var updated = entry with { Result = Copy(result), ResultHash = hash, UpdatedAt = DateTimeOffset.UtcNow,
+                RecoveryRetention = retention };
             var entries = ledger.Entries.Where(other => other != entry).Append(updated).ToList();
             Commit(ledger, entries);
-            return true;
+            return changed;
         }
     }
 
@@ -270,7 +283,13 @@ public sealed class ActionCustodyStore
                     (entry.Result is null ? entry.ResultHash is not null : entry.ResultHash != ProtocolValidation.Digest(entry.Result)))
                     throw new InvalidDataException("An original action or result hash is invalid.");
                 if (entry.Result is not null) ValidateResolution(entry, entry.Result);
+                if (entry.RecoveryRetention is not (null or "reserved" or "http") ||
+                    (entry.RecoveryRetention == "reserved" && !entry.IsUnresolved) ||
+                    (entry.RecoveryRetention == "http" && entry.IsUnresolved))
+                    throw new InvalidDataException("Action recovery retention metadata is invalid.");
             }
+            if (JsonSerializer.SerializeToUtf8Bytes(file, HostProtocol.Json).LongLength + RecoveryAllowance(file.Payload.Entries) > MaximumFileBytes)
+                throw new InvalidDataException("Action custody recovery reservations exceed the storage bound.");
         }
         catch (Exception exception) when (exception is JsonException or HostProtocolException or ArgumentException or NullReferenceException)
         {
@@ -298,16 +317,16 @@ public sealed class ActionCustodyStore
         while (entries.Count > MaximumEntries)
         {
             var completed = entries.FirstOrDefault(CanPrune)
-                ?? throw new HostProtocolException("custody.storage_limit", "Unresolved custody and durable operation admissions cannot be pruned to admit another action.");
+                ?? throw new HostProtocolException("custody.storage_limit", "Unresolved custody and retained receipts cannot be pruned to admit another action.");
             entries.Remove(completed);
             pruned++;
         }
         var payload = previous with { Entries = entries.ToArray(), PrunedCompletedCount = pruned };
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(payload, HostProtocol.Json).Length + 256;
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(payload, HostProtocol.Json).LongLength + 256 + RecoveryAllowance(entries);
         while (bytes > MaximumFileBytes)
         {
             var completed = entries.FirstOrDefault(CanPrune);
-            if (completed is null) Fail("custody.storage_limit", "Unresolved custody and durable operation admissions reached the storage bound; no retained evidence may be pruned.");
+            if (completed is null) Fail("custody.storage_limit", "Unresolved custody and retained receipts reached the storage bound; no retained evidence may be pruned.");
             bytes -= JsonSerializer.SerializeToUtf8Bytes(completed, HostProtocol.Json).Length + 1;
             entries.Remove(completed!);
             pruned++;
@@ -315,14 +334,23 @@ public sealed class ActionCustodyStore
         Write(previous with { Entries = entries.ToArray(), PrunedCompletedCount = pruned });
     }
 
-    // Admission receipts remain required by the non-evicting operation ledger, even after custody resolves.
-    // The per-session completed limit applies only to ordinary results; global count/byte limits still apply to all rows.
-    private static bool CanPrune(ActionCustodyEntry entry) => !entry.IsUnresolved && entry.Result?.Operation is null;
+    // Ordinary socket results keep their existing pruning policy. HTTP receipts retain exact restart replay.
+    private static bool CanPrune(ActionCustodyEntry entry) => !entry.IsUnresolved && entry.Result?.Operation is null && entry.RecoveryRetention != "http";
+
+    // Interim unresolved evidence already pays for its result, hash and updated timestamp.
+    private static long RecoveryAllowance(IEnumerable<ActionCustodyEntry> entries) => entries.Sum(entry =>
+        entry.RecoveryRetention == "reserved"
+            ? (long)HostProtocol.MaxMessageBytes + RecoveryMetadataBytes
+                - JsonSerializer.SerializeToUtf8Bytes(entry.Result, HostProtocol.Json).Length
+                - JsonSerializer.SerializeToUtf8Bytes(entry.ResultHash, HostProtocol.Json).Length
+                - JsonSerializer.SerializeToUtf8Bytes(entry.UpdatedAt, HostProtocol.Json).Length
+            : 0);
 
     private void Write(LedgerPayload payload)
     {
         var bytes = JsonSerializer.SerializeToUtf8Bytes(new LedgerFile(1, payload, ProtocolValidation.Digest(payload)), HostProtocol.Json);
-        if (bytes.Length > MaximumFileBytes) Fail("custody.storage_limit", "Action custody exceeded its storage bound.");
+        if (bytes.LongLength + RecoveryAllowance(payload.Entries) > MaximumFileBytes)
+            Fail("custody.storage_limit", "Action custody exceeded its storage or recovery reservation bound.");
         var temporary = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {

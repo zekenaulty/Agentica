@@ -198,7 +198,11 @@ public sealed class HostRun : IDisposable
             await connection.SendAsync(new ServiceMessage("run.terminated", termination, RunId), cancellationToken).ConfigureAwait(false);
     }
 
-    public bool AcceptResult(HostActionResult result)
+    public bool AcceptResult(HostActionResult result) => AcceptResult(result, recovered: false);
+
+    internal bool AcceptRecoveredResult(HostActionResult result) => AcceptResult(result, recovered: true);
+
+    private bool AcceptResult(HostActionResult result, bool recovered)
     {
         lock (_gate)
         {
@@ -210,6 +214,7 @@ public sealed class HostRun : IDisposable
             {
                 if (ProtocolValidation.Digest(previous) != ProtocolValidation.Digest(result))
                     ProtocolValidation.Fail("action.duplicate_changed", "A completed action cannot receive a different result.");
+                if (recovered) _custody?.ResolveRecovered(Request.HostId, Request.SessionId, result.ActionId, result);
                 return false;
             }
             ValidateResult(action, result);
@@ -223,7 +228,8 @@ public sealed class HostRun : IDisposable
                 _parked = _operations!.Admit(Request.HostId, Request.SessionId, result);
             }
             _context.RecordActionResult(action.Request, result);
-            _custody?.Resolve(Request.HostId, Request.SessionId, result.ActionId, result);
+            if (recovered) _custody?.ResolveRecovered(Request.HostId, Request.SessionId, result.ActionId, result);
+            else _custody?.Resolve(Request.HostId, Request.SessionId, result.ActionId, result);
             action.Result = result;
             action.Unresolved = result.Disposition == "unresolved";
             _updatedAt = DateTimeOffset.UtcNow;

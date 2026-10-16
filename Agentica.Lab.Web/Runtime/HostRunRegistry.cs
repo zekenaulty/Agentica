@@ -187,15 +187,19 @@ public sealed partial class HostRunRegistry(HostContextStore contexts, ILabPlann
         lock (_gate)
         {
             var entry = custody.Get(hostId, sessionId, result.ActionId);
-            if (_runs.ContainsKey(entry.RunId))
-                throw new HostProtocolException("recovery.live_run", "Resume the retained run and send action.result through its host connection.");
+            if (_runs.TryGetValue(entry.RunId, out var run))
+            {
+                if (!run.Terminal)
+                    throw new HostProtocolException("recovery.live_run", "Resume the active run and send action.result through its host connection.");
+                return run.AcceptRecoveredResult(result);
+            }
             if (result.Operation is not null)
             {
                 custody.PrevalidateResolution(hostId, sessionId, result.ActionId, result);
                 var retained = RequiredOperations().Admit(hostId, sessionId, result);
                 contexts.Open(retained.Request with { Observation = result.Observation! }).RecordActionResult(retained.Action, result);
             }
-            return custody.Resolve(hostId, sessionId, result.ActionId, result);
+            return custody.ResolveRecovered(hostId, sessionId, result.ActionId, result);
         }
     }
 
