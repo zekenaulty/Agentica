@@ -78,6 +78,7 @@ public static partial class LabWebApplication
             ProtocolValidation.Identifier(sessionId);
             return custody.ListUnresolved(hostId, sessionId);
         });
+        app.MapGet("/api/recovery/run", GetRunRecovery);
         app.MapGet("/api/recovery/action", (string hostId, string sessionId, string actionId, HttpContext context, ActionCustodyStore custody) =>
         {
             context.Response.Headers.CacheControl = "no-store";

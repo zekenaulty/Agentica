@@ -30,7 +30,7 @@ public sealed record ActionCustodyEntry(
 /// This store does not dispatch, retry, claim completion, or reconstruct a running provider call.
 /// Use one instance in one service process per storage directory.
 /// </summary>
-public sealed class ActionCustodyStore
+public sealed partial class ActionCustodyStore
 {
     public const int MaximumPendingActions = 128;
     public const int MaximumCompletedPerSession = 256;
