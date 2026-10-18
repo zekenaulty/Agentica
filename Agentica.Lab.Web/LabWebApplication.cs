@@ -78,6 +78,14 @@ public static partial class LabWebApplication
             ProtocolValidation.Identifier(sessionId);
             return custody.ListUnresolved(hostId, sessionId);
         });
+        app.MapGet("/api/recovery/action", (string hostId, string sessionId, string actionId, HttpContext context, ActionCustodyStore custody) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            ProtocolValidation.Identifier(hostId);
+            ProtocolValidation.Identifier(sessionId);
+            ProtocolValidation.Identifier(actionId);
+            return custody.Get(hostId, sessionId, actionId);
+        });
         app.MapPost("/api/recovery", (HostRecoveryRequest request, HostRunRegistry registry) =>
         {
             var changed = registry.Recover(request.HostId, request.SessionId, request.Result);
