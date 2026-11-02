@@ -27,7 +27,7 @@ public sealed class ExperimentToolsTests
         var selected = ExperimentTools.Capabilities.Select(capability => capability.Id).ToArray();
         var catalog = ExperimentTools.CreateCatalog(fixture.Context(selected));
         Assert.Equal(9, catalog.Descriptors.Count);
-        foreach (var capability in ExperimentTools.Capabilities)
+        foreach (var capability in ExperimentTools.Capabilities.Where(capability => capability.Id != ExperimentToolIds.WebSearch))
         {
             var registration = Assert.IsType<CompiledToolRegistration>(catalog.Resolve(capability.Id));
             Assert.NotNull(registration.Descriptor.InputSchema);
@@ -193,7 +193,8 @@ public sealed class ExperimentToolsTests
         Assert.Equal("saved αβγ", await File.ReadAllTextAsync(Path.Combine(fixture.Workspace, "notes", "result.txt"), TestContext.Current.CancellationToken));
         var other = context with
         {
-            WorkspaceDirectory = Path.Combine(fixture.Root, "other-conversation"), ConversationId = "other",
+            WorkspaceDirectory = Path.Combine(fixture.Root, "other-conversation"),
+            ConversationId = "other",
             Turn = context.Turn with { ConversationId = "other" }
         };
         var hidden = await ExecuteAsync(other, ExperimentToolIds.ScratchRead, ("path", "notes/result.txt"));
@@ -270,6 +271,151 @@ public sealed class ExperimentToolsTests
             Invocation(ExperimentToolIds.ScratchWrite, ("path", "never.txt"), ("content", "unused")), new CancellationToken(canceled: true)));
         Assert.False(Directory.Exists(fixture.Workspace));
     }
+
+    [Fact]
+    public void Explicit_web_search_is_known_but_requires_the_provider_registration_and_an_opt_in_binding()
+    {
+        using var fixture = new ScratchFixture();
+        var capability = Assert.Single(ExperimentTools.Capabilities, item => item.Id == ExperimentToolIds.WebSearch);
+        Assert.Equal(ToolEffect.ExternalSideEffect.ToString(), capability.Effect);
+        Assert.Null(ExperimentTools.CreateCatalog(fixture.Context(ExperimentToolIds.WebSearch)).Resolve(ExperimentToolIds.WebSearch));
+        Assert.Throws<ExperimentException>(() => ExperimentWebSearch.CreateRegistration(fixture.Context(),
+            (_, _) => Task.FromResult<object>(new { })));
+        var registration = ExperimentWebSearch.CreateRegistration(fixture.Context(ExperimentToolIds.WebSearch),
+            (_, _) => Task.FromResult(WebEvidence("query")));
+        var compiled = ToolCatalog.Create(registration).Resolve(ExperimentToolIds.WebSearch)!;
+        Assert.Equal(ToolKind.Action, compiled.Descriptor.Kind);
+        Assert.Equal(ToolEffect.ExternalSideEffect, compiled.Security.Effect);
+        Assert.Equal(ToolExternalOutputClassification.UntrustedStructuredData, compiled.Security.ExternalOutput);
+        Assert.Contains(ToolDataBoundary.ExternalUntrusted, compiled.Security.ExposesToPlanner);
+        Assert.Equal(ToolApprovalRequirement.None, compiled.Security.ApprovalRequirement);
+        Assert.Equal(ToolRetrySafety.Additive, compiled.Security.RetrySafety);
+    }
+
+    [Fact]
+    public async Task Explicit_web_search_receives_only_the_bounded_query_and_returns_answer_citations_and_sources()
+    {
+        using var fixture = new ScratchFixture();
+        var calls = new List<string>();
+        var registration = ExperimentWebSearch.CreateRegistration(fixture.Context(ExperimentToolIds.WebSearch), (query, _) =>
+        {
+            calls.Add(query);
+            return Task.FromResult(WebEvidence(query));
+        });
+        var result = await registration.Tool.ExecuteAsync(Invocation(ExperimentToolIds.WebSearch, ("query", "public research query")), TestContext.Current.CancellationToken);
+        Assert.Equal(ReceiptStatus.Succeeded, result.Receipt.Status);
+        Assert.Equal("public research query", Assert.Single(calls));
+        var payload = Payload(result);
+        Assert.Equal("Source-backed search answer", payload.GetProperty("answer").GetString());
+        Assert.Equal("https://example.com/source", payload.GetProperty("citations")[0].GetProperty("url").GetString());
+        Assert.Equal("https://example.com/source", payload.GetProperty("sources")[0].GetProperty("url").GetString());
+        Assert.Equal("external-untrusted", payload.GetProperty("trust").GetString());
+        Assert.Equal("openai", payload.GetProperty("provider").GetString());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("query\0hidden")]
+    public async Task Explicit_web_search_refuses_invalid_queries_without_dispatch(string query)
+    {
+        using var fixture = new ScratchFixture();
+        var calls = 0;
+        var registration = ExperimentWebSearch.CreateRegistration(fixture.Context(ExperimentToolIds.WebSearch), (_, _) =>
+        {
+            calls++;
+            return Task.FromResult(WebEvidence("unused"));
+        });
+        var result = await registration.Tool.ExecuteAsync(Invocation(ExperimentToolIds.WebSearch, ("query", query)), TestContext.Current.CancellationToken);
+        Assert.Equal(ReceiptStatus.Refused, result.Receipt.Status);
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
+    public async Task Explicit_web_search_rejects_oversized_queries_and_hidden_context_fields()
+    {
+        using var fixture = new ScratchFixture();
+        var calls = 0;
+        var registration = ExperimentWebSearch.CreateRegistration(fixture.Context(ExperimentToolIds.WebSearch), (_, _) =>
+        {
+            calls++;
+            return Task.FromResult(WebEvidence("unused"));
+        });
+        var oversized = await registration.Tool.ExecuteAsync(Invocation(ExperimentToolIds.WebSearch,
+            ("query", new string('q', ExperimentWebSearch.MaximumQueryCharacters + 1))), TestContext.Current.CancellationToken);
+        Assert.Equal(ReceiptStatus.Refused, oversized.Receipt.Status);
+        var hidden = await registration.Tool.ExecuteAsync(Invocation(ExperimentToolIds.WebSearch,
+            ("query", "search"), ("conversationId", "other-conversation")), TestContext.Current.CancellationToken);
+        Assert.Equal(ReceiptStatus.Refused, hidden.Receipt.Status);
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
+    public async Task Explicit_web_search_returns_safe_failures_and_never_retries_a_delegate()
+    {
+        using var fixture = new ScratchFixture();
+        var calls = 0;
+        var registration = ExperimentWebSearch.CreateRegistration(fixture.Context(ExperimentToolIds.WebSearch), (_, _) =>
+        {
+            calls++;
+            throw new ExperimentException("provider.search_limit", "fixture-private-credential and raw request");
+        });
+        var result = await registration.Tool.ExecuteAsync(Invocation(ExperimentToolIds.WebSearch, ("query", "search")), TestContext.Current.CancellationToken);
+        Assert.Equal(ReceiptStatus.Failed, result.Receipt.Status);
+        Assert.Equal("provider.search_limit", Payload(result).GetProperty("code").GetString());
+        Assert.DoesNotContain("fixture-private-credential", JsonSerializer.Serialize(result), StringComparison.Ordinal);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task Explicit_web_search_rejects_malformed_source_evidence_and_preserves_result_ceiling()
+    {
+        using var fixture = new ScratchFixture();
+        var context = fixture.Context(ExperimentToolIds.WebSearch);
+        var invalid = ExperimentWebSearch.CreateRegistration(context, (query, _) => Task.FromResult<object>(new
+        {
+            query,
+            answer = "answer",
+            provider = "openai",
+            citations = Array.Empty<object>(),
+            sources = new[] { new { url = "javascript:alert(1)" } }
+        }));
+        var refused = await invalid.Tool.ExecuteAsync(Invocation(ExperimentToolIds.WebSearch, ("query", "search")), TestContext.Current.CancellationToken);
+        Assert.Equal(ReceiptStatus.Failed, refused.Receipt.Status);
+        Assert.Equal("web.search.invalid_evidence", Payload(refused).GetProperty("code").GetString());
+        context = context with { Turn = context.Turn with { Settings = context.Turn.Settings with { MaxToolResultCharacters = 256 } } };
+        var large = ExperimentWebSearch.CreateRegistration(context, (query, _) => Task.FromResult(WebEvidence(query, new string('"', 10000))));
+        var bounded = await large.Tool.ExecuteAsync(Invocation(ExperimentToolIds.WebSearch, ("query", "search")), TestContext.Current.CancellationToken);
+        Assert.Equal(ReceiptStatus.Succeeded, bounded.Receipt.Status);
+        Assert.True(JsonSerializer.Serialize(bounded.Receipt.Data).Length <= 256);
+        Assert.True(JsonSerializer.SerializeToElement(bounded.Receipt.Data).GetProperty("truncated").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Explicit_web_search_propagates_cancellation_without_dispatch_or_replay()
+    {
+        using var fixture = new ScratchFixture();
+        var calls = 0;
+        var registration = ExperimentWebSearch.CreateRegistration(fixture.Context(ExperimentToolIds.WebSearch), (query, _) =>
+        {
+            calls++;
+            return Task.FromResult(WebEvidence(query));
+        });
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => registration.Tool.ExecuteAsync(
+            Invocation(ExperimentToolIds.WebSearch, ("query", "search")), new CancellationToken(canceled: true)));
+        Assert.Equal(0, calls);
+    }
+
+    private static object WebEvidence(string query, string answer = "Source-backed search answer") => new
+    {
+        query,
+        answer,
+        citations = new[] { new { url = "https://example.com/source", title = "Source", startIndex = 0, endIndex = 6 } },
+        sources = new[] { new { url = "https://example.com/source", title = "Source" } },
+        provider = "openai",
+        usage = new { inputTokens = 10, outputTokens = 20 },
+        trust = "external-untrusted"
+    };
 
     private static JsonElement Payload(ToolResult result) => JsonSerializer.SerializeToElement(result.Receipt.Data).GetProperty("result");
 

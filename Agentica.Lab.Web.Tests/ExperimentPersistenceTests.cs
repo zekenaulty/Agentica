@@ -23,7 +23,8 @@ public sealed class ExperimentPersistenceTests
             Assert.Empty(a.Settings.Instructions);
             Assert.Empty(b.Settings.EnabledTools);
             Assert.False(a.Settings.MemoryEnabled);
-            a = store.UpdateSettings(a.Id, new(1, a.Settings with { Instructions = instructions, ReasoningEffort = "low" }));
+            Assert.False(a.Settings.AmbientWebSearch);
+            a = store.UpdateSettings(a.Id, new(1, a.Settings with { Instructions = instructions, ReasoningEffort = "low", AmbientWebSearch = true, MaxWebSearchCalls = 2 }));
             var (turn, _) = store.Begin(a.Id, new("remember only this dialogue", "request-1"));
             store.Output(a.Id, turn.Id, "partial answer");
             store.Append(a.Id, turn.Id, new("provider.item", new { type = "reasoning", encrypted_content = "opaque-private", summary = new[] { new { text = "Public summary" } } }, "call-1", "item-1"));
@@ -37,6 +38,8 @@ public sealed class ExperimentPersistenceTests
         var actual = restored.Get(id);
         Assert.Equal("Renamed experiment", actual.Title);
         Assert.Equal(instructions, actual.Settings.Instructions);
+        Assert.True(actual.Settings.AmbientWebSearch);
+        Assert.Equal(2, actual.Settings.MaxWebSearchCalls);
         Assert.Equal(2, actual.SettingsRevision);
         Assert.Equal("partial answer", Assert.Single(actual.Turns).AssistantText);
         var trace = JsonSerializer.Serialize(restored.ReadEvents(id, turnId, 0, 100), HostProtocol.Json);
@@ -102,6 +105,9 @@ public sealed class ExperimentPersistenceTests
         Assert.Throws<ExperimentException>(() => ExperimentStore.ValidateSettings(new() { MemoryEnabled = true }));
         Assert.Throws<ExperimentException>(() => ExperimentStore.ValidateSettings(new() { MaxToolResultCharacters = 12001 }));
         Assert.Throws<ExperimentException>(() => ExperimentStore.ValidateSettings(new() { EnabledTools = [ExperimentTools.Capabilities[0].Id] }));
+        Assert.Throws<ExperimentException>(() => ExperimentStore.ValidateSettings(new() { Mode = "harness", AmbientWebSearch = true }));
+        Assert.Throws<ExperimentException>(() => ExperimentStore.ValidateSettings(new() { MaxWebSearchCalls = 0 }));
+        Assert.Throws<ExperimentException>(() => ExperimentStore.ValidateSettings(new() { MaxWebSearchCalls = 21 }));
         Assert.Equal("exact-manual-model", store.Get(conversation.Id).Settings.Model);
         Assert.Throws<IOException>(() => new ExperimentStore(fixture.Path));
     }
@@ -132,7 +138,7 @@ public sealed class ExperimentPersistenceTests
         using var fixture = new StoreFixture();
         using (var initial = new ExperimentStore(fixture.Path)) initial.Create(new(), null);
         using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
-            { DataSource = System.IO.Path.Combine(fixture.Path, "experiments.sqlite3"), Pooling = false }.ToString());
+        { DataSource = System.IO.Path.Combine(fixture.Path, "experiments.sqlite3"), Pooling = false }.ToString());
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version=2"; command.ExecuteNonQuery();
@@ -161,7 +167,7 @@ public sealed class ExperimentPersistenceTests
         using var store = new ExperimentStore(fixture.Path);
         var conversation = store.Create(new(), null);
         using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
-            { DataSource = System.IO.Path.Combine(fixture.Path, "experiments.sqlite3"), Pooling = false }.ToString());
+        { DataSource = System.IO.Path.Combine(fixture.Path, "experiments.sqlite3"), Pooling = false }.ToString());
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = "CREATE TRIGGER reject_update BEFORE UPDATE ON conversations BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;";
@@ -219,6 +225,14 @@ public sealed class ExperimentPersistenceTests
             Assert.Equal("Hello, experiment.", Assert.Single(restored!.Turns).AssistantText);
             var replay = await http.GetStringAsync($"/api/chats/{conversationId}/turns/{turnId}/events?after=2", deadline.Token);
             Assert.Contains("turn.completed", replay);
+            using var citations = JsonDocument.Parse(await http.GetStringAsync($"/api/chats/{conversationId}/turns/{turnId}/citations", deadline.Token));
+            var citation = Assert.Single(citations.RootElement.GetProperty("events").EnumerateArray());
+            Assert.Equal("provider.citations", citation.GetProperty("type").GetString());
+            Assert.Equal("https://example.com/source", citation.GetProperty("data").GetProperty("citations")[0].GetProperty("url").GetString());
+            Assert.False(citations.RootElement.GetProperty("hasMore").GetBoolean());
+            var other = await Post<ExperimentConversation>(http, "/api/chats", new { title = "Other experiment" }, deadline.Token);
+            using var foreignCitations = await http.GetAsync($"/api/chats/{other.Id}/turns/{turnId}/citations", deadline.Token);
+            Assert.Equal(HttpStatusCode.NotFound, foreignCitations.StatusCode);
             Assert.Equal(1, executor.Calls);
         }
         finally
@@ -245,6 +259,12 @@ public sealed class ExperimentPersistenceTests
             await context.Trace(new("provider.summary.delta", new { text = "Fixture summary", itemId = "reason-1" }));
             await context.Output("Hello, ");
             await context.Output("experiment.");
+            await context.Trace(new("provider.citations", new
+            {
+                target = "assistant",
+                citations = new[] { new { url = "https://example.com/source", title = "Fixture source", startIndex = 0, endIndex = 5 } },
+                sources = new[] { new { url = "https://example.com/source", title = "Fixture source" } }
+            }));
             return new("completed", Usage: new { inputTokens = 12, outputTokens = 8 });
         }
     }

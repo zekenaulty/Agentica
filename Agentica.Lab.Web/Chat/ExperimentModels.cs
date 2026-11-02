@@ -9,6 +9,8 @@ public sealed record ExperimentSettings
     public string? ReasoningEffort { get; init; } = "high";
     public string Instructions { get; init; } = "";
     public bool ReasoningSummary { get; init; }
+    public bool AmbientWebSearch { get; init; }
+    public int MaxWebSearchCalls { get; init; } = 3;
     public int MaxOutputTokens { get; init; } = 4096;
     public int ContextWindowTokens { get; init; } = 131072;
     public int MaxInputCharacters { get; init; } = 80000;

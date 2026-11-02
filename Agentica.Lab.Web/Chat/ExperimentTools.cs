@@ -19,6 +19,7 @@ public static class ExperimentToolIds
     public const string ScratchList = "scratch.list";
     public const string ScratchRead = "scratch.read";
     public const string ScratchWrite = "scratch.write";
+    public const string WebSearch = "web.search";
 }
 
 /// <summary>
@@ -69,11 +70,13 @@ public static class ExperimentTools
     ];
 
     public static IReadOnlyList<ExperimentCapability> Capabilities { get; } =
-        Array.AsReadOnly(Definitions.Select(definition => definition.Capability).ToArray());
+        Array.AsReadOnly(Definitions.Select(definition => definition.Capability).Append(ExperimentWebSearch.Capability).ToArray());
 
     public static ToolCatalog CreateCatalog(ExperimentExecutionContext context) =>
         ToolCatalog.Create(CreateRegistrations(context).ToArray());
 
+    // Provider-dependent registrations are advertised here but supplied by their
+    // owning adapter: web.search requires ExperimentWebSearch.CreateRegistration.
     public static IReadOnlyList<ToolRegistration> CreateRegistrations(ExperimentExecutionContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -156,13 +159,16 @@ public static class ExperimentTools
         }
     }
 
-    private static ToolResult Result(ToolInvocation invocation, string summary, object result, int maximumCharacters,
+    internal static ToolResult Result(ToolInvocation invocation, string summary, object result, int maximumCharacters,
         ReceiptStatus status = ReceiptStatus.Succeeded)
     {
         var data = new Dictionary<string, object?>
         {
-            ["schemaVersion"] = Version, ["toolId"] = invocation.ToolId,
-            ["status"] = status.ToString(), ["truncated"] = false, ["result"] = result
+            ["schemaVersion"] = Version,
+            ["toolId"] = invocation.ToolId,
+            ["status"] = status.ToString(),
+            ["truncated"] = false,
+            ["result"] = result
         };
         var serialized = JsonSerializer.Serialize(data);
         if (serialized.Length > maximumCharacters)
@@ -265,10 +271,15 @@ public static class ExperimentTools
         }
         return Task.FromResult<object>(new
         {
-            characters = text.Length, characterUnit = "utf16-code-units", utf8Bytes = Encoding.UTF8.GetByteCount(text),
+            characters = text.Length,
+            characterUnit = "utf16-code-units",
+            utf8Bytes = Encoding.UTF8.GetByteCount(text),
             lines = text.Length == 0 ? 0 : 1 + text.Count(character => character == '\n'),
-            matchOffsets = matches.Take(32).ToArray(), matchesTruncated = matches.Count > 32,
-            offset, content, nextOffset = offset + content.Length < text.Length ? offset + content.Length : (int?)null
+            matchOffsets = matches.Take(32).ToArray(),
+            matchesTruncated = matches.Count > 32,
+            offset,
+            content,
+            nextOffset = offset + content.Length < text.Length ? offset + content.Length : (int?)null
         });
     }
 
@@ -299,7 +310,12 @@ public static class ExperimentTools
         var content = Slice(raw, offset, PageSize(context, input));
         return Task.FromResult<object>(new
         {
-            valid = true, pointer, kind = selected.ValueKind.ToString(), characters = raw.Length, offset, content,
+            valid = true,
+            pointer,
+            kind = selected.ValueKind.ToString(),
+            characters = raw.Length,
+            offset,
+            content,
             nextOffset = offset + content.Length < raw.Length ? offset + content.Length : (int?)null
         });
     }
@@ -319,20 +335,31 @@ public static class ExperimentTools
             var content = Slice(message.Content, offset, PageSize(context, input));
             return Task.FromResult<object>(new
             {
-                source = "current-turn-context", id = message.Id, role = message.Role, createdAt = message.CreatedAt, characters = message.Content.Length,
-                characterOffset = offset, content, nextCharacterOffset = offset + content.Length < message.Content.Length ? offset + content.Length : (int?)null
+                source = "current-turn-context",
+                id = message.Id,
+                role = message.Role,
+                createdAt = message.CreatedAt,
+                characters = message.Content.Length,
+                characterOffset = offset,
+                content,
+                nextCharacterOffset = offset + content.Length < message.Content.Length ? offset + content.Length : (int?)null
             });
         }
         var first = Number(input, "offset", 0, 0, 10000);
         var limit = Number(input, "limit", 10, 1, 20);
         return Task.FromResult<object>(new
         {
-            source = "current-turn-context", totalMessages = messages.Length,
+            source = "current-turn-context",
+            totalMessages = messages.Length,
             nextOffset = first + limit < messages.Length ? first + limit : (int?)null,
             messages = messages.Skip(first).Take(limit).Select(message => new
             {
-                id = message.Id, role = message.Role, createdAt = message.CreatedAt, characters = message.Content.Length,
-                content = Slice(message.Content, 0, 160), contentTruncated = message.Content.Length > 160
+                id = message.Id,
+                role = message.Role,
+                createdAt = message.CreatedAt,
+                characters = message.Content.Length,
+                content = Slice(message.Content, 0, 160),
+                contentTruncated = message.Content.Length > 160
             }).ToArray()
         });
     }
@@ -347,11 +374,15 @@ public static class ExperimentTools
             .Where(match => match.position >= 0).ToArray();
         return Task.FromResult<object>(new
         {
-            source = "current-turn-context", totalMatches = matches.Length,
+            source = "current-turn-context",
+            totalMatches = matches.Length,
             nextOffset = offset + limit < matches.Length ? offset + limit : (int?)null,
             matches = matches.Skip(offset).Take(limit).Select(match => new
             {
-                id = match.message.Id, role = match.message.Role, createdAt = match.message.CreatedAt, match.position,
+                id = match.message.Id,
+                role = match.message.Role,
+                createdAt = match.message.CreatedAt,
+                match.position,
                 excerpt = Slice(match.message.Content, Math.Max(0, match.position - 80), 240)
             }).ToArray()
         });

@@ -1,6 +1,66 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyEvent, depthPresets, instructionValue, isTerminal, mergeTrace, summarizeTrace, validateSettings } from '../Agentica.Lab.Web/wwwroot/chat.mjs';
+import { catalogSelection, citationPresentation, classifyEvent, depthPresets, familyModelCatalog, instructionValue, isTerminal, knownFamilyModelIds, mergeTrace, safeHttpUrl, summarizeTrace, validateSettings } from '../Agentica.Lab.Web/wwwroot/chat.mjs';
+
+test('assistant citation ranges produce inline markers and source links without changing source text', () => {
+  const text = 'Read the source.';
+  const event = { sequence: 1, type: 'provider.citations', callId: 'call-1', data: { target: 'assistant', citations: [{ url: 'https://example.com/page', title: 'Source', startIndex: 9, endIndex: 15 }], sources: [{ url: 'https://example.com/page', title: 'Source' }] } };
+  const result = citationPresentation(text, [event, { ...event, sequence: 2 }]);
+  assert.equal(text, 'Read the source.'); assert.equal(result.inline.length, 1); assert.equal(result.inline[0].offset, 15);
+  assert.equal(result.sources.length, 1); assert.equal(result.sources[0].number, 1); assert.equal(result.sources[0].callId, 'call-1');
+});
+
+test('tool source ranges never become annotations on the final assistant answer', () => {
+  const result = citationPresentation('Final answer.', [{ sequence: 1, type: 'provider.citations', data: { target: 'tool', citations: [{ url: 'https://example.com/tool', title: 'Tool source', startIndex: 0, endIndex: 5 }], sources: [] } }]);
+  assert.deepEqual(result.inline, []); assert.equal(result.sources[0].target, 'tool');
+});
+
+test('citations accept only absolute HTTP(S), and unknown Unicode offsets remain source links', () => {
+  for (const url of ['javascript:alert(1)', 'data:text/html,test', 'file:///secret', '/relative', '', null]) assert.equal(safeHttpUrl(url), null);
+  // Build synthetic user-info at runtime so fixtures contain no credential URI.
+  const userInfo = new URL('https://example.com/');
+  userInfo.username = 'fixture-user'; assert.equal(safeHttpUrl(userInfo.href), null);
+  userInfo.password = 'fixture-password'; assert.equal(safeHttpUrl(userInfo.href), null);
+  assert.equal(safeHttpUrl('https://example.com/ok'), 'https://example.com/ok');
+  const result = citationPresentation('A non-ASCII 🌍 answer.', [{ sequence: 1, type: 'provider.citations', data: { target: 'assistant', citations: [
+    { url: 'javascript:alert(1)', title: 'unsafe', startIndex: 0, endIndex: 1 },
+    { url: 'https://example.com/safe', title: 'Safe', startIndex: 0, endIndex: 5 }
+  ], sources: [] } }]);
+  assert.deepEqual(result.inline, []); assert.equal(result.sources.length, 1); assert.equal(result.unplaced, 1);
+});
+
+test('out-of-range citations preserve safe source links rather than guessing a span', () => {
+  const result = citationPresentation('Short.', [{ sequence: 1, type: 'provider.citations', data: { target: 'assistant', citations: [{ url: 'https://example.com/', startIndex: -1, endIndex: 500 }], sources: [] } }]);
+  assert.deepEqual(result.inline, []); assert.equal(result.sources.length, 1); assert.equal(result.unplaced, 1);
+});
+
+test('model catalog exposes the eight verified family IDs without inventing version/family combinations', () => {
+  const catalog = familyModelCatalog(knownFamilyModelIds);
+  assert.deepEqual(catalog.map(group => group.version), ['6.1', '6', '5.6']);
+  assert.deepEqual(catalog.map(group => group.models.length), [2, 3, 3]);
+  assert.deepEqual(new Set(catalog.flatMap(group => group.models.map(model => model.id))), new Set([
+    'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna',
+    'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'
+  ]));
+  for (const invented of ['gpt-6-terra', 'gpt-6.1-luna', 'gpt-6.1-astra', 'gpt-5.6-astra']) assert.equal(catalogSelection(catalog, invented), '');
+});
+
+test('account models determine future catalog entries, numeric version order and exact dated IDs', () => {
+  const ids = ['gpt-6.2-luna', 'gpt-6.10-terra-2027-01-02', 'gpt-6.10-astra', 'gpt-6.10-terra', 'gpt-6.10-terra-2027-02-03', 'gpt-5.6-sol', 'gpt-6.2-luna', 'gpt-5.5-sol', 'gpt-4.1', 'unrelated-model', null];
+  const catalog = familyModelCatalog(ids);
+  assert.deepEqual(catalog.map(group => group.version), ['6.10', '6.2', '5.6']);
+  assert.deepEqual(catalog[0].models.map(model => model.id), ['gpt-6.10-astra', 'gpt-6.10-terra', 'gpt-6.10-terra-2027-02-03', 'gpt-6.10-terra-2027-01-02']);
+  assert.equal(catalogSelection(catalog, 'gpt-6.10-sol'), '', 'Catalog expansion cannot manufacture an absent family.');
+  assert.equal(catalog[1].models.length, 1, 'Duplicate exact IDs are removed.');
+});
+
+test('model catalog selection preserves a saved custom model for the exact-ID field', () => {
+  const saved = { model: 'private-custom-model', instructions: 'Exact\r\nsource', reasoningEffort: 'high' };
+  const catalog = familyModelCatalog(knownFamilyModelIds);
+  assert.equal(catalogSelection(catalog, saved.model), '');
+  assert.deepEqual(saved, { model: 'private-custom-model', instructions: 'Exact\r\nsource', reasoningEffort: 'high' });
+  assert.equal(catalogSelection(catalog, 'gpt-6.1-sol'), 'gpt-6.1-sol');
+});
 
 test('stream replay merges out-of-order pages without duplicating summary text or losing correlations', () => {
   const first = { sequence: 11, type: 'provider.summary.delta', data: { text: 'Inspect ' }, callId: 'call-a', itemId: 'reasoning-a' };
@@ -76,6 +136,9 @@ test('clean-room safety invariants cannot be changed by normal form settings', (
   assert.match(validateSettings({ ...settings, maxProviderCalls: Infinity }), /positive whole/);
   assert.match(validateSettings({ ...settings, maxContinuations: -1 }), /nonnegative/);
   assert.equal(validateSettings({ ...settings, mode: 'harness', enabledTools: ['tool'] }), null);
+  assert.match(validateSettings({ ...settings, mode: 'harness', ambientWebSearch: true }), /explicit web.search/);
+  assert.equal(validateSettings({ ...settings, ambientWebSearch: true, maxWebSearchCalls: 3 }), null);
+  assert.match(validateSettings({ ...settings, maxWebSearchCalls: 21 }), /1–20/);
 });
 
 test('depth presets are independent of reasoning effort and stay within the service history ceiling', () => {

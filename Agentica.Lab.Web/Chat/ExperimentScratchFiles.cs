@@ -31,7 +31,8 @@ internal sealed class ExperimentScratchFiles(string workspaceDirectory)
         CheckExistingComponents(path);
         return new
         {
-            path = relativePath, enumerationTruncated = entries.Length > 1000,
+            path = relativePath,
+            enumerationTruncated = entries.Length > 1000,
             entries = entries.Take(1000).Skip(offset).Take(limit).ToArray(),
             nextOffset = offset + limit < Math.Min(entries.Length, 1000) ? offset + limit : (int?)null
         };
@@ -74,8 +75,12 @@ internal sealed class ExperimentScratchFiles(string workspaceDirectory)
             throw new ExperimentToolException("utility.page_too_small", "The requested page must fit a complete Unicode character.");
         return new
         {
-            path = relativePath, encoding = "utf-8", characterUnit = "utf16-code-units",
-            offset = skipped, content = new string(text, 0, take), truncated = length > take,
+            path = relativePath,
+            encoding = "utf-8",
+            characterUnit = "utf16-code-units",
+            offset = skipped,
+            content = new string(text, 0, take),
+            truncated = length > take,
             nextOffset = length > take ? skipped + take : (int?)null
         };
     }

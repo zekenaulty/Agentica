@@ -35,9 +35,15 @@ public static class ExperimentEndpoints
                 try { models = await openAi.ListModelsAsync(deadline.Token).ConfigureAwait(false); }
                 catch (Exception exception) when (exception is ExperimentException or HttpRequestException or InvalidDataException or JsonException or OperationCanceledException)
                 { issue = "The account model list is unavailable. Enter an exact model ID; the provider validates compatibility."; }
-            return new { models = models.Append(current.Model).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal), current.Configured,
-                defaultModel = current.Model, reasoningEfforts = new[] { "none", "minimal", "low", "medium", "high", "xhigh", "max" },
-                capabilitySource = "account model IDs when available; effort support is model-specific and provider-validated", issue };
+            return new
+            {
+                models = models.Append(current.Model).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal),
+                current.Configured,
+                defaultModel = current.Model,
+                reasoningEfforts = new[] { "none", "minimal", "low", "medium", "high", "xhigh", "max" },
+                capabilitySource = "account model IDs when available; effort support is model-specific and provider-validated",
+                issue
+            };
         });
         group.MapGet("/{id}", (string id, ExperimentStore store) => store.Get(id));
         group.MapPatch("/{id}", (string id, ExperimentRenameRequest request, ExperimentStore store) => store.Rename(id, request.Title));
@@ -53,6 +59,12 @@ public static class ExperimentEndpoints
             return new { events, next, hasMore = store.GetTurn(id, turnId).TraceCount > next };
         });
         group.MapGet("/{id}/turns/{turnId}/events/{sequence:long}/payload", (string id, string turnId, long sequence, ExperimentStore store) => store.ReadPayload(id, turnId, sequence));
+        group.MapGet("/{id}/turns/{turnId}/citations", (string id, string turnId, long? after, int? limit, ExperimentStore store) =>
+        {
+            var events = store.ReadCitationEvents(id, turnId, after ?? 0, limit ?? 100);
+            var next = events.Count > 0 ? events[^1].Sequence : after ?? 0;
+            return new { events, next, hasMore = store.ReadCitationEvents(id, turnId, next, 1).Count > 0 };
+        });
         group.MapGet("/{id}/turns/{turnId}/events", StreamAsync);
     }
 

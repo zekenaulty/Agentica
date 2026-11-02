@@ -22,8 +22,10 @@ git diff --check
 ```
 
 - Restore passes. SQLite dependencies match the existing CLI donor versions, including the newer native bundle override. Web, test and fixture lockfiles are updated.
-- Full Lab Web Release suite: **186 passed, 1 skipped, 0 failed**, total 187, about 16 seconds. Build has no warnings. The skip is the symlink-creation case when Windows cannot create a symbolic link; traversal/device/stream/root-scope tests still execute. This is the full relevant Web suite, not the entire repository test estate. The final repeat retains `verification/test-results/lab-chat-release.trx` outside Git.
-- Focused JavaScript: **9 passed**, zero failures.
+- Full Lab Web Release suite after search integration: **200 passed, 1 skipped, 0 failed**, total 201, about 15 seconds. Build has no warnings. The skip is the symlink-creation case when Windows cannot create a symbolic link; traversal/device/stream/root-scope tests still execute. Final result: `verification/test-results/lab-chat-search-final.trx` outside Git. The earlier initial-feature result was 186 passed and 1 skipped.
+- Core Release suite after the test-package correction: **752 passed, 7 live-provider tests skipped**, zero failures (`core-after-xunit.trx`). Focused provider suite: **119 passed**, zero failures (`clients-after-xunit.trx`).
+- Focused chat JavaScript: **16 passed**, zero failures. The unchanged host SDK's four JavaScript suites separately pass 83 cases; both CI jobs now include the chat suite.
+- Full solution Release build: zero warnings/errors. Full solution formatting verification passes on SDK 10.0.401; formatting required a temporary local pin for MSBuild discovery, restored byte-for-byte afterward. No SDK pin change is committed.
 - `git diff --check`: passes.
 
 ## What the tests establish
@@ -63,6 +65,22 @@ Independent UI worker executed the real REST/browser flow and visually inspected
 
 Artifacts remain outside Git under `C:/Users/Zythis/.codex/worktrees/lab-clean-room-chat/verification/browser/`: desktop/mobile/trace/provider-source PNGs and `provider-source-qualification.json`. Root additionally inspected the trace screenshot. Fixture conversations are isolated from the normal preview store.
 
+The model-picker browser check uses account-visible IDs with intercepted synthetic chat state: all eight current GPT 5.6+ family IDs are present, selection preserves instructions/effort, and no real conversation or inference is touched. Evidence: `model-catalog-qualification.json` and `experiment-chat-model-catalog.png`.
+
+The search browser check uses the actual credential-free 5090 service and SQLite/SSE: off/default-3, saved ambient enable/budget/reload, clickable assistant citation with unchanged raw text, restored citations without expanding trace, explicit Harness binding, tool-source separation, visible native-source trace, and clean defaults in a new chat. Two synthetic turns, zero real-provider calls, zero page errors. Evidence: `web-search-qualification.json` and `experiment-chat-web-search.png`; root inspected the screenshot. Unicode/invalid annotation offsets retain safe source links without guessing inline positions.
+
+## OpenAI search qualification
+
+Official [web-search guide](https://developers.openai.com/api/docs/guides/tools-web-search) and [Responses create reference](https://developers.openai.com/api/reference/resources/responses/methods/create) were consulted. Actual outgoing-request fixtures establish:
+
+- No search surface by default; explicit ambient opt-in adds native `web_search`, `tool_choice:auto`, sources inclusion and `max_tool_calls` without an instruction overlay.
+- The actual Harness performs plan → query-only dedicated search → untrusted result → refinement → response artifact. Neither conversation history nor custom instructions enter the search subrequest, and the research answer is not appended to the assistant transcript.
+- Search subrequests share the parent provider-call guard; native-search allowance decreases across multiple searches, with unresolved reservations retained on an incomplete attempt.
+- Required-but-absent search, unsupported unbound native output, citation URL handling and metadata are tested. Citation-only retrieval remains conversation-scoped and survives a real service restart.
+- Utility binding/input/output quotas, invalid evidence, cancellation, safe error codes and no automatic retry are tested.
+
+The first integrated search run had three `PlanInvalid` failures: an external-effect tool was described as `ToolKind.Query`. Existing core validation requires `Action` for any non-read-only effect. Descriptor and fixtures now use `Action`, retaining external-effect accounting and existing validation. Focused executor tests then passed 21/21, followed by the full 200-pass Web result above. Independent read-only review found no further actionable defect in supported search paths. No paid web retrieval was performed for qualification.
+
 ## Corrections made during qualification
 
 Initial focused run: 47 passed, 2 failed, 1 skipped. Found/fixed:
@@ -74,10 +92,26 @@ Independent review also found and corrected optional DI planner injection bypass
 
 Final read-only review additionally checked early workspace-initialization lease cleanup and idempotent cancellation racing terminal disposal. Both were corrected. The advertised tool-result ceiling was aligned to the actual 12000-character utility/page ceiling in server validation and UI; an oversized-setting regression is exercised.
 
+## Initial GitHub CI and dependency correction
+
+[CI run 41536490870](https://github.com/zekenaulty/Agentica/actions/runs/41536490870) checked PR #11 head `3e3b9a45e7a0d6cbf53cd264344d679812b101cc` through merge ref `f4121b1133f504897e3a48ed7e2cc7245cfffd64`, against base `977d0cab5421fd4e09fd33f1224f241b7e425abe`.
+
+- Windows job `125589522151`, “Windows locked build and filesystem proof”: **success**, using pinned SDK 10.0.302. This is evidence for that original PR head.
+- Linux job `125589522722`, “Locked build, proof tests, and package validation”: **failed before tests** in “Reject vulnerable or deprecated dependencies.” The vulnerability audit reported **clean**. The subsequent deprecation audit reported two transitive findings, in `Agentica.Lab.Web.Tests` and `Agentica.Tests`.
+- Exact package: `Microsoft.Testing.Platform.MSBuild` **1.9.1**, marked **Legacy** by NuGet. The dependency path is `xunit.v3` 3.2.2 → `xunit.v3.mtp-v1` → `xunit.v3.core.mtp-v1` → that MSBuild package. The focused `Agentica.Clients.Tests` project uses the same selection and requires the same correction before its separate audit.
+
+The source correction selects **`xunit.v3.mtp-off` 3.2.2** in the three test projects. xUnit remains at the same version; this selects its supported VSTest-only packaging for the runner already used by CI. `Microsoft.NET.Test.Sdk`, `xunit.runner.visualstudio`, the coverage collector, test populations and all workflow/audit gates remain configured. The project files explain the selection. Lockfiles must be generated by restore.
+
+Primary references: [NuGet deprecation metadata for MSBuild 1.9.1](https://www.nuget.org/packages/Microsoft.Testing.Platform.MSBuild/1.9.1), [xUnit documentation on platform selection and separate VSTest support](https://xunit.net/docs/getting-started/v3/microsoft-testing-platform), and [the same-version supported package](https://www.nuget.org/packages/xunit.v3.mtp-off/3.2.2).
+
+Local correction evidence: regenerated solution/focused restores pass; both vulnerability and deprecation audits are clean for the solution and focused provider project. The changed package graph passes the core, provider and Web test populations listed above. The original Windows success qualifies only the original PR head; a new GitHub CI head remains separate evidence.
+
+Follow-up [run 41542375896](https://github.com/zekenaulty/Agentica/actions/runs/41542375896), head `909dbfccd87650a641d6abe59e0193dc8ba04095`: Windows **success** on the pinned SDK. Linux passed locked restores, dependency audits, formatting, builds, security analyzers, provider/Web/host tests, core coverage, package validation and container build/smoke. Its final secret scan flagged one **unverified URI** in `chat-ui.test.mjs:19`: the synthetic user-info URL used to test citation rejection. The test now constructs the same invalid URL at runtime and still asserts rejection for username-only and username/password cases. No detector/path exclusion or gate suppression was added. The unmerged feature commit was amended to remove that fixture literal from the PR history; a fresh CI run qualifies the replacement head separately.
+
 ## Explicit limits
 
 - No paid/live inference, real-provider answer quality, account-specific model/effort compatibility, production deployment or Nyx migration is claimed.
 - Native opaque reasoning is not persisted between turns or process restarts; replay is visibly transcript-only. No private chain of thought is displayed.
-- No cross-conversation memory, Google/media/project/Cloud faculties, HTTP fetch/search tool, generic shell, MCP server, fork/comparison UI or automatic compaction is introduced.
+- No cross-conversation memory, Google/media/project/Cloud faculties, arbitrary HTTP fetch, generic shell, MCP server, fork/comparison UI or automatic compaction is introduced. OpenAI search is an explicit opt-in as qualified above.
 - Scratch is an application-scoped namespace with path/link checks; it is not OS process isolation against a malicious same-user native process.
-- SDK 10.0.302 and full repository/remote CI remain separately qualified surfaces. The existing host regression suite passed locally on 10.0.401.
+- Pinned SDK 10.0.302 passed the original PR head's Windows CI job; the revised package graph and complete remote CI remain pending as described above. The existing host regression suite passed locally on 10.0.401.

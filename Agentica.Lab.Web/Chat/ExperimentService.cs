@@ -43,10 +43,16 @@ public sealed class ExperimentService(ExperimentStore store, IExperimentExecutor
             store.Append(conversationId, turn.Id, new("context.manifest", context.Manifest));
             store.Append(conversationId, turn.Id, new("context.isolation", new
             {
-                conversationId, memory = "disabled", crossConversationRetrieval = false,
+                conversationId,
+                memory = "disabled",
+                crossConversationRetrieval = false,
                 instructions = turn.Settings.Instructions.Length == 0 ? "omitted" : "exact user-authored text",
-                nativeContinuation = "not retained; visible transcript replay only", compaction = "disabled; no summarization call",
-                mode = turn.Settings.Mode, enabledTools = turn.Settings.EnabledTools
+                nativeContinuation = "not retained; visible transcript replay only",
+                compaction = "disabled; no summarization call",
+                mode = turn.Settings.Mode,
+                enabledTools = turn.Settings.EnabledTools,
+                ambientWebSearch = turn.Settings.AmbientWebSearch,
+                maxWebSearchCalls = turn.Settings.MaxWebSearchCalls
             }));
             var workspace = Path.Combine(store.WorkspaceRoot, conversationId);
             Directory.CreateDirectory(workspace);

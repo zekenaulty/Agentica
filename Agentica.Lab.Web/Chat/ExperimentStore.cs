@@ -21,18 +21,20 @@ public sealed class ExperimentStore : IDisposable
         _lease = new FileStream(Path.Combine(directory, "service.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         try
         {
-        WorkspaceRoot = Path.Combine(Path.GetFullPath(directory), "workspaces");
-        Directory.CreateDirectory(WorkspaceRoot);
-        _connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = Path.Combine(directory, "experiments.sqlite3"), ForeignKeys = true, Pooling = false
-        }.ToString();
-        using var connection = Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = "PRAGMA user_version;";
-        if (Convert.ToInt32(command.ExecuteScalar()) > 1)
-            throw new InvalidDataException("This chat database requires a newer Lab version.");
-        command.CommandText = """
+            WorkspaceRoot = Path.Combine(Path.GetFullPath(directory), "workspaces");
+            Directory.CreateDirectory(WorkspaceRoot);
+            _connectionString = new SqliteConnectionStringBuilder
+            {
+                DataSource = Path.Combine(directory, "experiments.sqlite3"),
+                ForeignKeys = true,
+                Pooling = false
+            }.ToString();
+            using var connection = Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "PRAGMA user_version;";
+            if (Convert.ToInt32(command.ExecuteScalar()) > 1)
+                throw new InvalidDataException("This chat database requires a newer Lab version.");
+            command.CommandText = """
             PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS conversations (
                 id TEXT PRIMARY KEY, body_json TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -46,15 +48,15 @@ public sealed class ExperimentStore : IDisposable
                 PRIMARY KEY(turn_id, sequence));
             PRAGMA user_version=1;
             """;
-        command.ExecuteNonQuery();
-        // No replay after a process died around dispatch. Preserve partial output and unknown usage.
-        foreach (var conversation in List())
-            foreach (var turn in Get(conversation.Id).Turns.Where(t => t.Status == "running"))
-            {
-                Complete(conversation.Id, turn.Id, new("interrupted", ErrorCode: "service.restarted",
-                    ErrorMessage: "The service restarted during this turn. Partial evidence is retained; provider usage may be unknown. Send a new turn deliberately."));
-                Append(conversation.Id, turn.Id, new("turn.interrupted", GetTurn(conversation.Id, turn.Id)), true);
-            }
+            command.ExecuteNonQuery();
+            // No replay after a process died around dispatch. Preserve partial output and unknown usage.
+            foreach (var conversation in List())
+                foreach (var turn in Get(conversation.Id).Turns.Where(t => t.Status == "running"))
+                {
+                    Complete(conversation.Id, turn.Id, new("interrupted", ErrorCode: "service.restarted",
+                        ErrorMessage: "The service restarted during this turn. Partial evidence is retained; provider usage may be unknown. Send a new turn deliberately."));
+                    Append(conversation.Id, turn.Id, new("turn.interrupted", GetTurn(conversation.Id, turn.Id)), true);
+                }
         }
         catch
         {
@@ -257,8 +259,15 @@ public sealed class ExperimentStore : IDisposable
         {
             var turn = GetTurn(conversationId, turnId);
             if (turn.Status != "running") return turn;
-            turn = turn with { Status = result.Status, AssistantText = result.AssistantText ?? turn.AssistantText,
-                FinishedAt = DateTimeOffset.UtcNow, Usage = result.Usage, ErrorCode = result.ErrorCode, ErrorMessage = result.ErrorMessage };
+            turn = turn with
+            {
+                Status = result.Status,
+                AssistantText = result.AssistantText ?? turn.AssistantText,
+                FinishedAt = DateTimeOffset.UtcNow,
+                Usage = result.Usage,
+                ErrorCode = result.ErrorCode,
+                ErrorMessage = result.ErrorMessage
+            };
             SaveTurn(turn);
             return turn;
         }
@@ -287,9 +296,15 @@ public sealed class ExperimentStore : IDisposable
             else if (full.Length > 24000 || input.Type == "provider.record")
             {
                 large = full;
-                data = new { payloadRef = $"/api/chats/{conversationId}/turns/{turnId}/events/{sequence}/payload", originalCharacters = full.Length,
-                    preview = input.Type == "provider.record" ? null : full[..Math.Min(full.Length, 12000)], truncated = false,
-                    providerRecord = input.Type == "provider.record", providerType = input.Type == "provider.record" ? payload?["type"]?.GetValue<string>() : null };
+                data = new
+                {
+                    payloadRef = $"/api/chats/{conversationId}/turns/{turnId}/events/{sequence}/payload",
+                    originalCharacters = full.Length,
+                    preview = input.Type == "provider.record" ? null : full[..Math.Min(full.Length, 12000)],
+                    truncated = false,
+                    providerRecord = input.Type == "provider.record",
+                    providerType = input.Type == "provider.record" ? payload?["type"]?.GetValue<string>() : null
+                };
             }
             var item = new ExperimentEvent(sequence, input.Type, DateTimeOffset.UtcNow, data, input.CallId, input.ItemId);
             using var transaction = connection.BeginTransaction();
@@ -305,14 +320,20 @@ public sealed class ExperimentStore : IDisposable
         }
     }
 
-    public IReadOnlyList<ExperimentEvent> ReadEvents(string conversationId, string turnId, long after, int limit)
+    public IReadOnlyList<ExperimentEvent> ReadEvents(string conversationId, string turnId, long after, int limit) =>
+        ReadEventPage(conversationId, turnId, after, limit, citationsOnly: false);
+
+    public IReadOnlyList<ExperimentEvent> ReadCitationEvents(string conversationId, string turnId, long after, int limit) =>
+        ReadEventPage(conversationId, turnId, after, limit, citationsOnly: true);
+
+    private IReadOnlyList<ExperimentEvent> ReadEventPage(string conversationId, string turnId, long after, int limit, bool citationsOnly)
     {
         lock (_gate)
         {
             _ = GetTurn(conversationId, turnId);
             using var connection = Open();
-            using var command = Command(connection, "SELECT body_json FROM trace_events WHERE turn_id=$id AND sequence>$after ORDER BY sequence LIMIT $limit",
-                ("$id", turnId), ("$after", Math.Max(0, after)), ("$limit", Math.Clamp(limit, 1, 100)));
+            using var command = Command(connection, "SELECT body_json FROM trace_events WHERE turn_id=$id AND sequence>$after AND ($citations=0 OR json_extract(body_json,'$.type')='provider.citations') ORDER BY sequence LIMIT $limit",
+                ("$id", turnId), ("$after", Math.Max(0, after)), ("$limit", Math.Clamp(limit, 1, 100)), ("$citations", citationsOnly ? 1 : 0));
             using var reader = command.ExecuteReader();
             var result = new List<ExperimentEvent>();
             var characters = 0;
@@ -366,7 +387,9 @@ public sealed class ExperimentStore : IDisposable
         if (settings.Instructions is null || settings.Instructions.Length > 128000) Invalid("Instructions exceed the character limit.");
         if (settings.EnabledTools is null || settings.EnabledTools.Count > 32 || settings.EnabledTools.Distinct(StringComparer.Ordinal).Count() != settings.EnabledTools.Count ||
             settings.EnabledTools.Any(id => !ExperimentTools.Capabilities.Any(c => c.Id == id))) Invalid("Unknown or duplicate tool binding.");
-        if (settings.Mode == "clean-room" && settings.EnabledTools.Count != 0) Invalid("Select Harness mode to bind tools. Clean Room has no tool surface.");
+        if (settings.Mode == "clean-room" && settings.EnabledTools.Count != 0) Invalid("Select Harness mode to bind application tools.");
+        if (settings.Mode == "harness" && settings.AmbientWebSearch) Invalid("Ambient web search is available in Clean Room mode. Bind web.search for Harness mode.");
+        if (settings.MaxWebSearchCalls is < 1 or > 20) Invalid("Web search call budget must be 1–20 calls per turn.");
         if (settings.MemoryEnabled) Invalid("Memory is disabled for these isolated experiments.");
         if (settings.MaxOutputTokens is < 256 or > 65536 || settings.ContextWindowTokens is < 8192 or > 1048576 || settings.ContextWindowTokens <= settings.MaxOutputTokens + 4096)
             Invalid("Context must leave input headroom after the selected output budget and 4096-unit safety reserve.");

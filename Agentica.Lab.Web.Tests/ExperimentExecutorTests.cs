@@ -46,6 +46,49 @@ public sealed class ExperimentExecutorTests
         Assert.Equal("transcript-only", request.GetProperty("continuity").GetString());
     }
 
+    [Fact]
+    public async Task Ambient_search_is_an_explicit_discretionary_provider_tool_with_clickable_source_metadata()
+    {
+        using var handler = new Handler(_ => Stream(WebResponse("A sourced answer.")));
+        using var http = new HttpClient(handler);
+        using var executor = new OpenAiExperimentExecutor(Configuration(), http);
+        var probe = new Probe(new ExperimentSettings { AmbientWebSearch = true, MaxWebSearchCalls = 2 });
+        var result = await executor.ExecuteAsync(probe.Context, CancellationToken.None);
+        Assert.Equal("completed", result.Status);
+        Assert.Equal("A sourced answer.", result.AssistantText);
+        using var request = JsonDocument.Parse(Assert.Single(handler.Bodies));
+        var wire = request.RootElement;
+        Assert.Equal("web_search", Assert.Single(wire.GetProperty("tools").EnumerateArray()).GetProperty("type").GetString());
+        Assert.Equal("auto", wire.GetProperty("tool_choice").GetString());
+        Assert.Equal(2, wire.GetProperty("max_tool_calls").GetInt32());
+        Assert.Equal("web_search_call.action.sources", Assert.Single(wire.GetProperty("include").EnumerateArray()).GetString());
+        Assert.False(wire.GetProperty("store").GetBoolean());
+        Assert.False(wire.TryGetProperty("instructions", out _));
+        var citations = Payload(Assert.Single(probe.Events, item => item.Type == "provider.citations"));
+        Assert.Equal("assistant", citations.GetProperty("target").GetString());
+        var citation = Assert.Single(citations.GetProperty("citations").EnumerateArray());
+        Assert.Equal("https://example.org/evidence", citation.GetProperty("url").GetString());
+        Assert.Equal(0, citation.GetProperty("startIndex").GetInt32());
+        Assert.Equal(8, citation.GetProperty("endIndex").GetInt32());
+        Assert.NotEmpty(citations.GetProperty("sources").EnumerateArray());
+        Assert.Contains(probe.Events, item => item.Type == "provider.web-search" && item.ItemId == "web-1");
+        Assert.Contains(probe.Events, item => item.Type == "provider.record" &&
+            Payload(item).GetProperty("type").GetString() == "response.output_item.done");
+    }
+
+    [Fact]
+    public async Task Unbound_native_search_output_is_rejected_and_never_claimed_as_a_bound_capability()
+    {
+        using var handler = new Handler(_ => Stream(WebResponse("Unexpected search")));
+        using var http = new HttpClient(handler);
+        using var executor = new OpenAiExperimentExecutor(Configuration(), http);
+        var probe = new Probe(new ExperimentSettings());
+        var result = await executor.ExecuteAsync(probe.Context, CancellationToken.None);
+        Assert.Equal("failed", result.Status);
+        Assert.Equal("provider.unsupported_item", result.ErrorCode);
+        Assert.DoesNotContain(probe.Events, item => item.Type == "provider.citations");
+    }
+
     [Theory]
     [InlineData("  Exact instructions\n\nKeep spacing.  ")]
     [InlineData("   ")]
@@ -64,8 +107,12 @@ public sealed class ExperimentExecutorTests
     [Fact]
     public async Task Native_items_summary_and_usage_are_retained_without_private_reasoning_carriers()
     {
-        var events = Event(new { type = "response.output_item.added", output_index = 0,
-            item = new { id = "reasoning-1", type = "reasoning", status = "in_progress", encrypted_content = "opaque-secret", content = "private-thought" } }) +
+        var events = Event(new
+        {
+            type = "response.output_item.added",
+            output_index = 0,
+            item = new { id = "reasoning-1", type = "reasoning", status = "in_progress", encrypted_content = "opaque-secret", content = "private-thought" }
+        }) +
             Event(new { type = "response.reasoning_summary_text.delta", item_id = "reasoning-1", output_index = 0, summary_index = 1, delta = "Checking evidence" }) +
             Event(new { type = "response.reasoning_text.done", item_id = "reasoning-1", output_index = 0, text = "private-thought" }) + TextResponse("Answer");
         using var handler = new Handler(_ => Stream(events));
@@ -130,11 +177,14 @@ public sealed class ExperimentExecutorTests
         using var executor = new OpenAiExperimentExecutor(Configuration(), http);
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var probe = new Probe(new ExperimentSettings());
-        var context = probe.Context with { Output = async delta =>
+        var context = probe.Context with
+        {
+            Output = async delta =>
         {
             await probe.Context.Output(delta);
             cancellation.Cancel();
-        } };
+        }
+        };
         var result = await executor.ExecuteAsync(context, cancellation.Token);
         Assert.Equal("cancelled", result.Status);
         Assert.Equal("turn.cancelled", result.ErrorCode);
@@ -173,8 +223,13 @@ public sealed class ExperimentExecutorTests
     public async Task Real_harness_executes_query_refines_and_completes_from_response_artifact()
     {
         using var handler = new Handler(call => Stream(TextResponse(call == 1 ? Plan("query", "utility.clock", new { }) :
-            JsonSerializer.Serialize(new { fromPlanId = "plan-query", reason = "Clock observation received.", evidence = Array.Empty<object>(),
-                refinedPlan = JsonSerializer.Deserialize<JsonElement>(Plan("answer", OpenAiExperimentExecutor.ResponseToolId, new { content = "The observed clock is available." })) }))));
+            JsonSerializer.Serialize(new
+            {
+                fromPlanId = "plan-query",
+                reason = "Clock observation received.",
+                evidence = Array.Empty<object>(),
+                refinedPlan = JsonSerializer.Deserialize<JsonElement>(Plan("answer", OpenAiExperimentExecutor.ResponseToolId, new { content = "The observed clock is available." }))
+            }))));
         using var http = new HttpClient(handler);
         using var executor = new OpenAiExperimentExecutor(Configuration(), http);
         var probe = new Probe(new ExperimentSettings { Mode = "harness", EnabledTools = ["utility.clock"], MaxProviderCalls = 3 });
@@ -192,6 +247,100 @@ public sealed class ExperimentExecutorTests
         Assert.Contains(probe.Events, item => item.Type == "harness.event");
         Assert.Equal(2, probe.Events.Count(item => item.Type == "provider.request"));
         Assert.Contains("Workflow", handler.Bodies[0], StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Explicit_harness_search_sends_only_query_and_shares_actual_provider_call_admission()
+    {
+        using var handler = new Handler(call => Stream(call switch
+        {
+            1 => TextResponse(SearchPlan("search", "explicit bounded query")),
+            2 => WebResponse("Search result answer."),
+            _ => TextResponse(JsonSerializer.Serialize(new
+            {
+                fromPlanId = "plan-search",
+                reason = "observation",
+                evidence = Array.Empty<object>(),
+                refinedPlan = JsonSerializer.Deserialize<JsonElement>(Plan("answer", OpenAiExperimentExecutor.ResponseToolId, new { content = "Final answer from searched evidence." }))
+            }))
+        }));
+        using var http = new HttpClient(handler);
+        using var executor = new OpenAiExperimentExecutor(Configuration(), http);
+        var probe = new Probe(new ExperimentSettings
+        {
+            Mode = "harness",
+            EnabledTools = ["web.search"],
+            Instructions = "parent-only-instructions",
+            MaxProviderCalls = 3,
+            MaxWebSearchCalls = 2
+        }, [new("history-user", "user", "parent-only-history", DateTimeOffset.UtcNow),
+            new("history-assistant", "assistant", "parent-only-answer", DateTimeOffset.UtcNow)]);
+        var result = await executor.ExecuteAsync(probe.Context, CancellationToken.None);
+        Assert.Equal("completed", result.Status);
+        Assert.Equal(3, handler.Bodies.Count);
+        Assert.Equal("Final answer from searched evidence.", probe.Output.ToString());
+        Assert.DoesNotContain("Search result answer.", probe.Output.ToString(), StringComparison.Ordinal);
+        using var search = JsonDocument.Parse(handler.Bodies[1]);
+        Assert.Equal("explicit bounded query", Assert.Single(search.RootElement.GetProperty("input").EnumerateArray()).GetProperty("content").GetString());
+        Assert.Equal("required", search.RootElement.GetProperty("tool_choice").GetString());
+        Assert.Equal(2, search.RootElement.GetProperty("max_tool_calls").GetInt32());
+        Assert.False(search.RootElement.GetProperty("store").GetBoolean());
+        Assert.False(search.RootElement.TryGetProperty("instructions", out _));
+        foreach (var excluded in new[] { "parent-only-history", "parent-only-answer", "parent-only-instructions", "Current user" })
+            Assert.DoesNotContain(excluded, handler.Bodies[1], StringComparison.Ordinal);
+        Assert.Equal(3, probe.Events.Count(item => item.Type == "provider.request"));
+        Assert.Equal("tool", Payload(Assert.Single(probe.Events, item => item.Type == "provider.citations")).GetProperty("target").GetString());
+        Assert.Contains("external-untrusted", handler.Bodies[2], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Explicit_search_subrequest_cannot_bypass_the_parent_provider_call_limit()
+    {
+        using var handler = new Handler(_ => Stream(TextResponse(SearchPlan("search", "explicit query"))));
+        using var http = new HttpClient(handler);
+        using var executor = new OpenAiExperimentExecutor(Configuration(), http);
+        var probe = new Probe(new ExperimentSettings { Mode = "harness", EnabledTools = ["web.search"], MaxProviderCalls = 1 });
+        var result = await executor.ExecuteAsync(probe.Context, CancellationToken.None);
+        Assert.Equal("failed", result.Status);
+        Assert.Equal("provider.call_limit", result.ErrorCode);
+        Assert.Single(handler.Bodies);
+        Assert.Contains(probe.Events, item => item.Type == "provider.admission.denied");
+    }
+
+    [Fact]
+    public async Task Explicit_search_responses_share_a_cumulative_native_call_allowance()
+    {
+        using var handler = new Handler(call => Stream(call switch
+        {
+            1 => TextResponse(SearchPlan("search-1", "first query")),
+            2 or 4 => WebResponse("Search result answer."),
+            3 => TextResponse(JsonSerializer.Serialize(new
+            {
+                fromPlanId = "plan-search-1",
+                reason = "observation",
+                evidence = Array.Empty<object>(),
+                refinedPlan = JsonSerializer.Deserialize<JsonElement>(SearchPlan("search-2", "second query"))
+            })),
+            _ => TextResponse(JsonSerializer.Serialize(new
+            {
+                fromPlanId = "plan-search-2",
+                reason = "observation",
+                evidence = Array.Empty<object>(),
+                refinedPlan = JsonSerializer.Deserialize<JsonElement>(Plan("answer", OpenAiExperimentExecutor.ResponseToolId, new { content = "Compared two searched results." }))
+            }))
+        }));
+        using var http = new HttpClient(handler);
+        using var executor = new OpenAiExperimentExecutor(Configuration(), http);
+        var probe = new Probe(new ExperimentSettings { Mode = "harness", EnabledTools = ["web.search"], MaxProviderCalls = 5, MaxWebSearchCalls = 2 });
+        var result = await executor.ExecuteAsync(probe.Context, CancellationToken.None);
+        Assert.Equal("completed", result.Status);
+        Assert.Equal(5, handler.Bodies.Count);
+        using var first = JsonDocument.Parse(handler.Bodies[1]);
+        using var second = JsonDocument.Parse(handler.Bodies[3]);
+        Assert.Equal(2, first.RootElement.GetProperty("max_tool_calls").GetInt32());
+        Assert.Equal(1, second.RootElement.GetProperty("max_tool_calls").GetInt32());
+        Assert.Equal(2, JsonSerializer.SerializeToElement(result.Usage).GetProperty("webSearchCalls").GetInt32());
+        Assert.Equal("Compared two searched results.", probe.Output.ToString());
     }
 
     [Fact]
@@ -272,7 +421,7 @@ public sealed class ExperimentExecutorTests
         using var http = new HttpClient(handler);
         using var executor = new OpenAiExperimentExecutor(Configuration(), http);
         var probe = new Probe(new ExperimentSettings
-            { Mode = "harness", EnabledTools = ["utility.clock"], MaxToolEvidenceCharacters = 256 });
+        { Mode = "harness", EnabledTools = ["utility.clock"], MaxToolEvidenceCharacters = 256 });
         var result = await executor.ExecuteAsync(probe.Context, CancellationToken.None);
         Assert.Equal("failed", result.Status);
         Assert.Equal("context.evidence_limit", result.ErrorCode);
@@ -298,11 +447,18 @@ public sealed class ExperimentExecutorTests
     [Fact]
     public async Task Specific_model_effort_error_is_visible_with_credentials_removed()
     {
-        using var handler = new Handler(_ => new(HttpStatusCode.BadRequest) { Content = new StringContent(JsonSerializer.Serialize(new
+        using var handler = new Handler(_ => new(HttpStatusCode.BadRequest)
         {
-            error = new { code = "unsupported_value", type = "invalid_request_error",
-                message = "reasoning.effort 'high' is unsupported for selected model. fixture-secret sk-shouldneverberetained" }
-        })) });
+            Content = new StringContent(JsonSerializer.Serialize(new
+            {
+                error = new
+                {
+                    code = "unsupported_value",
+                    type = "invalid_request_error",
+                    message = "reasoning.effort 'high' is unsupported for selected model. fixture-secret sk-shouldneverberetained"
+                }
+            }))
+        });
         using var http = new HttpClient(handler);
         using var executor = new OpenAiExperimentExecutor(Configuration(), http);
         var probe = new Probe(new ExperimentSettings());
@@ -320,7 +476,7 @@ public sealed class ExperimentExecutorTests
     public async Task Accessible_model_ids_come_from_provider_and_are_sorted_without_aliases()
     {
         using var handler = new Handler(_ => new(HttpStatusCode.OK)
-            { Content = new StringContent("{\"data\":[{\"id\":\"z-model\"},{\"id\":\"a-model\"},{\"id\":\"z-model\"}]}") });
+        { Content = new StringContent("{\"data\":[{\"id\":\"z-model\"},{\"id\":\"a-model\"},{\"id\":\"z-model\"}]}") });
         using var http = new HttpClient(handler);
         using var executor = new OpenAiExperimentExecutor(Configuration(), http);
         Assert.Equal(["a-model", "z-model"], await executor.ListModelsAsync(CancellationToken.None));
@@ -331,19 +487,65 @@ public sealed class ExperimentExecutorTests
     private static JsonElement Payload(ExperimentTraceInput item) => JsonSerializer.SerializeToElement(item.Data);
     private static string Event(object data) => "data: " + JsonSerializer.Serialize(data) + "\n\n";
     private static string TextResponse(string text) => Event(new { type = "response.output_text.delta", item_id = "message-1", delta = text }) +
-        Event(new { type = "response.completed", response = new { id = "response-1", status = "completed",
-            output = new[] { new { id = "message-1", type = "message", role = "assistant", status = "completed",
+        Event(new
+        {
+            type = "response.completed",
+            response = new
+            {
+                id = "response-1",
+                status = "completed",
+                output = new[] { new { id = "message-1", type = "message", role = "assistant", status = "completed",
                 content = new[] { new { type = "output_text", text } } } },
-            usage = new { input_tokens = 12, output_tokens = 8, input_tokens_details = new { cached_tokens = 2 }, output_tokens_details = new { reasoning_tokens = 3 } } } });
+                usage = new { input_tokens = 12, output_tokens = 8, input_tokens_details = new { cached_tokens = 2 }, output_tokens_details = new { reasoning_tokens = 3 } }
+            }
+        });
+    private static string WebResponse(string text)
+    {
+        var web = new
+        {
+            id = "web-1",
+            type = "web_search_call",
+            status = "completed",
+            action = new { type = "search", query = "provider search query", sources = new[] { new { type = "url", url = "https://example.org/evidence", title = "Evidence page" } } }
+        };
+        return Event(new { type = "response.output_item.done", output_index = 0, item = web }) +
+            Event(new { type = "response.output_text.delta", item_id = "message-1", delta = text }) +
+            Event(new
+            {
+                type = "response.completed",
+                response = new
+                {
+                    id = "response-web",
+                    status = "completed",
+                    output = new object[] { web,
+                    new { id = "message-1", type = "message", role = "assistant", status = "completed",
+                        content = new[] { new { type = "output_text", text, annotations = new[] { new
+                        { type = "url_citation", start_index = 0, end_index = 8, url = "https://example.org/evidence", title = "Evidence page" } } } } } },
+                    usage = new { input_tokens = 20, output_tokens = 10, output_tokens_details = new { reasoning_tokens = 2 } }
+                }
+            });
+    }
     private static HttpResponseMessage Stream(string text) => new(HttpStatusCode.OK)
-        { Content = new StringContent(text, Encoding.UTF8, "text/event-stream") };
+    { Content = new StringContent(text, Encoding.UTF8, "text/event-stream") };
     private static string Plan(string id, string tool, object input) => JsonSerializer.Serialize(new
     {
-        planId = "plan-" + id, description = "Fixture experiment plan", steps = new[] { new
+        planId = "plan-" + id,
+        description = "Fixture experiment plan",
+        steps = new[] { new
         {
             stepId = "step-" + id, toolId = tool, kind = tool == "utility.clock" ? "query" : "action",
             effect = tool == "utility.clock" ? "readOnly" : "writesLocalState", input,
             reason = tool == "utility.clock" ? "Observe the current clock." : "Emit the answer supported by the clock observation."
+        } }
+    });
+    private static string SearchPlan(string id, string query) => JsonSerializer.Serialize(new
+    {
+        planId = "plan-" + id,
+        description = "Search the explicitly bound public web capability",
+        steps = new[] { new
+        {
+            stepId = "step-" + id, toolId = "web.search", kind = "action", effect = "externalSideEffect", input = new { query },
+            reason = "Retrieve current public evidence for the user's question."
         } }
     });
 

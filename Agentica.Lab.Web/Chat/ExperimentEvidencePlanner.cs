@@ -54,8 +54,10 @@ internal sealed class ExperimentEvidencePlanner(IWorkflowPlanner inner, Experime
         var includedReceipts = selectedReceipts.Select(item => item.ReceiptId).ToHashSet(StringComparer.Ordinal);
         await context.Trace(new("context.tool-evidence", new
         {
-            limitCharacters = limit, selectedCharacters = used,
-            selectedObservationIds = includedObservations.ToArray(), selectedReceiptIds = includedReceipts.ToArray(),
+            limitCharacters = limit,
+            selectedCharacters = used,
+            selectedObservationIds = includedObservations.ToArray(),
+            selectedReceiptIds = includedReceipts.ToArray(),
             omittedObservationIds = request.Observations.Where(item => !includedObservations.Contains(item.ObservationId)).Select(item => item.ObservationId).ToArray(),
             omittedReceiptIds = request.Receipts.Where(item => !includedReceipts.Contains(item.ReceiptId)).Select(item => item.ReceiptId).ToArray(),
             policy = "complete projections; current observation required; newest receipts then older observations",

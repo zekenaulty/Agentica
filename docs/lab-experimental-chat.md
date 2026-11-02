@@ -9,6 +9,21 @@ The Lab owns this experiment surface. Agentica core has no conversation database
 
 Open `/chat.html` from the Lab dashboard. Create, rename and revisit saved conversations. Model, reasoning effort, summary request, exact instructions, context controls and tool bindings are saved per conversation and snapshotted per turn. A new conversation always starts with clean defaults; another conversation's Harness configuration is not inherited.
 
+The model selector groups account-visible GPT models from 5.6 onward by version and Terra, Luna, Sol or Astra family. It includes the eight current catalog IDs, preserves exact dated/custom IDs, and marks a documentation fallback as access-unchecked when account listing fails. Listing models does not perform inference or establish every model/effort/tool combination.
+
+## Ambient and explicit web search
+
+Both paths use [OpenAI Responses web search](https://developers.openai.com/api/docs/guides/tools-web-search), the selected model and the existing server-side credential. Search is off in new conversations.
+
+- **Ambient web search**, enabled per Clean Room conversation: binds native `web_search` with `tool_choice:auto`. The model may search while answering; it may also decide no search is needed. This adds no instruction overlay and preserves the exact instruction editor. The ordinary selected conversation context remains in the response request.
+- **`web.search`**, explicitly bound in Harness: the actual Agentica planner chooses a public query, the tool makes a separate streaming request with `tool_choice:required`, and structured untrusted results return to the planner before refinement/completion. That request carries only the explicit query, with no conversation history or custom instructions. The result is not streamed into the assistant transcript as a second answer.
+
+Ambient search initially applies to direct Clean Room responses; Harness uses the explicit tool. A bound tool grants its declared use without a second approval prompt. Searches can incur provider tool charges. Model/account combinations remain provider-validated; there is no fallback model or hidden retry.
+
+`MaxWebSearchCalls` (default 3, range 1–20) bounds native built-in search calls across a turn, using request `max_tool_calls` and a cumulative Harness allowance. Search subrequests also pass the parent provider-call, input and deadline guards. An incomplete search retains its unresolved allowance rather than treating unknown usage as zero. Source and citation lists are bounded and flag truncation.
+
+The trace retains native search actions, call identities, citations, sources and reported usage. Assistant citations with unambiguous ASCII offsets are clickable inline; Unicode or invalid offsets retain source links without guessing placement. Explicit tool citations stay with their tool source evidence because their character offsets refer to the search answer. URLs are limited to HTTP(S). Referenced web content is untrusted external evidence, and a citation establishes attribution rather than truth. Search is provider-assisted retrieval, not a background browsing service.
+
 ## Ownership and reuse map
 
 | Owner | Responsibility |
@@ -60,10 +75,11 @@ All tools require Harness mode and an explicit conversation binding. The same co
 - `utility.text.inspect`, `utility.json.inspect` — explicit supplied values with paging and precise size reporting.
 - `conversation.read`, `conversation.search` — only the current turn's supplied transcript; omitted stored history is not secretly retrieved.
 - `scratch.list`, `scratch.read`, `scratch.write` — this conversation's isolated text scratch namespace. Writes create new files; no overwrite, shell, active checkout or other-conversation access.
+- `web.search` — query-only OpenAI web research through the observed provider path, with citations, sources and explicit external-call accounting.
 
 The terminal response tool is an internal Harness completion capability. Binding a utility grants its declared use within that scope; no repeated approval prompt is invented. Unsafe writes are not automatically retried. Filesystem checks constrain application paths and links; they are not an OS sandbox against a malicious same-user native process racing filesystem changes.
 
-Nyx has no generic portable shell/files/calculator/fetch collection to copy. Its participant search, Google grounding/sidecar, skill draft/library, media and background inquiry are distinct integrations. Those are not silently mounted here; HTTP/search, media and MCP hosting remain future opt-in adapters.
+Nyx has no generic portable shell/files/calculator/fetch collection to copy. Its participant search, Google grounding/sidecar, skill draft/library, media and background inquiry are distinct integrations. Those are not silently mounted here; arbitrary HTTP fetch, media and MCP hosting remain future opt-in adapters.
 
 ## API
 
@@ -71,6 +87,7 @@ Nyx has no generic portable shell/files/calculator/fetch collection to copy. Its
 - `PUT /api/chats/{id}/settings` with `expectedRevision`.
 - `POST /api/chats/{id}/turns` with content and optional stable `requestId`.
 - `GET .../turns/{turnId}`, `/events`, `/trace`, `/events/{sequence}/payload`; `POST .../cancel`.
+- `GET .../turns/{turnId}/citations` pages retained citation events for replay without loading native trace records; payload references remain conversation-scoped.
 - `GET /api/chats/capabilities`, `/api/chats/models`.
 
 Chat APIs reject browser requests from an unrelated Origin; the existing external-host CORS contract remains unchanged. This is a loopback operator Lab, not a multi-user authenticated service. The model list uses the account's available IDs when configured, with manual IDs still supported. Effort availability is provider/model-specific; unsupported combinations return a bounded, redacted provider error with no hidden downgrade.

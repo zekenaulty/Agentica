@@ -10,6 +10,8 @@ namespace Agentica.Lab.Web.Chat;
 /// <summary>Turn-owned HTTP admission and inspection, including the planner's repair calls.</summary>
 internal sealed class ExperimentProviderTransport : HttpMessageHandler
 {
+    internal static readonly HttpRequestOptionsKey<Func<string, JsonElement, Task>> NativeObserverOption = new("Agentica.Experiment.NativeObserver");
+    internal static readonly HttpRequestOptionsKey<string> PurposeOption = new("Agentica.Experiment.RequestPurpose");
     private readonly HttpClient _inner;
     private readonly ExperimentExecutionContext _context;
     private readonly Func<string, JsonElement, Task>? _nativeObserver;
@@ -47,13 +49,21 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
         var body = JsonSerializer.Deserialize<JsonElement>(bytes);
         var allowance = (long)settings.ContextWindowTokens - settings.MaxOutputTokens - 4096;
         var estimate = bytes.LongLength + 512;
+        var purpose = request.Options.TryGetValue(PurposeOption, out var requestPurpose) ? requestPurpose : settings.Mode;
         await _context.Trace(new("provider.request", new
         {
-            body = Sanitize(body, _credential), hash = Convert.ToHexStringLower(SHA256.HashData(bytes)),
-            continuity = settings.Mode == "clean-room" ? "transcript-only" : "harness-compiled-input; native state limited to this run",
-            dispatchState = "prepared", mode = settings.Mode, method = request.Method.Method,
-            url = request.RequestUri?.GetLeftPart(UriPartial.Path), estimatedInputUnits = estimate,
-            inputAllowance = allowance, estimator = "utf8-wire-byte-proxy-plus-512",
+            body = Sanitize(body, _credential),
+            hash = Convert.ToHexStringLower(SHA256.HashData(bytes)),
+            continuity = purpose == "web-search-query" ? "query-only; no conversation history or custom instructions"
+                : settings.Mode == "clean-room" ? "transcript-only" : "harness-compiled-input; native state limited to this run",
+            purpose,
+            dispatchState = "prepared",
+            mode = settings.Mode,
+            method = request.Method.Method,
+            url = request.RequestUri?.GetLeftPart(UriPartial.Path),
+            estimatedInputUnits = estimate,
+            inputAllowance = allowance,
+            estimator = "utf8-wire-byte-proxy-plus-512",
             instructionsOmitted = !body.TryGetProperty("instructions", out _)
         }, callId)).ConfigureAwait(false);
         if (Encoding.UTF8.GetCharCount(bytes) > settings.MaxInputCharacters || estimate > allowance)
@@ -66,7 +76,8 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
         // message through the shared client; do not mutate or resend that marked instance.
         using var forwarded = new HttpRequestMessage(request.Method, request.RequestUri)
         {
-            Version = request.Version, VersionPolicy = request.VersionPolicy,
+            Version = request.Version,
+            VersionPolicy = request.VersionPolicy,
             Content = new ByteArrayContent(bytes)
         };
         foreach (var header in request.Headers) forwarded.Headers.TryAddWithoutValidation(header.Key, header.Value);
@@ -78,7 +89,10 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
         if (!response.IsSuccessStatusCode)
             await ErrorAsync(response, callId, cancellationToken).ConfigureAwait(false);
         if (response.IsSuccessStatusCode && response.Content.Headers.ContentType?.MediaType == "text/event-stream")
-            response.Content = new InspectedContent(response.Content, item => ObserveAsync(callId, item));
+        {
+            var observer = request.Options.TryGetValue(NativeObserverOption, out var selectedObserver) ? selectedObserver : _nativeObserver;
+            response.Content = new InspectedContent(response.Content, item => ObserveAsync(callId, item, observer));
+        }
         return response;
     }
 
@@ -116,8 +130,12 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
             (message ?? "The configured request was rejected. Check model access and reasoning settings.") + " No fallback or retry was made.";
         await _context.Trace(new("provider.error", new
         {
-            httpStatus = (int)response.StatusCode, code = providerCode, type = providerType,
-            message, bodyTruncated = used > maximumBytes, retried = false
+            httpStatus = (int)response.StatusCode,
+            code = providerCode,
+            type = providerType,
+            message,
+            bodyTruncated = used > maximumBytes,
+            retried = false
         }, callId)).ConfigureAwait(false);
     }
 
@@ -131,7 +149,7 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
         return value.Length <= maximumCharacters ? value : value[..maximumCharacters] + " [truncated]";
     }
 
-    private async Task ObserveAsync(string callId, JsonElement item)
+    private async Task ObserveAsync(string callId, JsonElement item, Func<string, JsonElement, Task>? observer)
     {
         var type = String(item, "type") ?? "unknown";
         var itemId = String(item, "item_id") ?? (item.TryGetProperty("item", out var native) ? String(native, "id") : null);
@@ -153,14 +171,16 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
         }
         else
             await _context.Trace(new("provider.item", new { type, visibility = "private-reasoning-not-retained" }, callId, itemId)).ConfigureAwait(false);
-        if (_nativeObserver is not null) await _nativeObserver(callId, Sanitize(item, _credential)).ConfigureAwait(false);
+        if (observer is not null) await observer(callId, Sanitize(item, _credential)).ConfigureAwait(false);
     }
 
     private JsonElement PrivateReasoningMetadata(JsonElement item, string type)
     {
         var metadata = new Dictionary<string, object?>
         {
-            ["type"] = type, ["visibility"] = "private-reasoning-not-retained", ["contentRedacted"] = true
+            ["type"] = type,
+            ["visibility"] = "private-reasoning-not-retained",
+            ["contentRedacted"] = true
         };
         foreach (var name in new[] { "sequence_number", "item_id", "output_index", "content_index", "summary_index", "event_id", "id", "status" })
             if (item.TryGetProperty(name, out var value) && value.ValueKind is JsonValueKind.Number or JsonValueKind.String)
