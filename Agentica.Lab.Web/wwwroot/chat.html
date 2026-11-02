@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Experimental chat · Agentica Lab</title>
+  <link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/chat.css">
+</head>
+<body class="chat-page">
+  <div class="chat-shell">
+    <aside class="chat-sidebar" aria-label="Conversations">
+      <a class="brand" href="/"><span class="brand-mark">A</span><span>Agentica<span class="brand-sub">LAB / EXPERIMENTAL CHAT</span></span></a>
+      <nav class="chat-nav"><a href="/">Runs</a><a class="active" href="/chat.html" aria-current="page">Chat</a><a href="/#providers">Providers</a></nav>
+      <button id="new-chat" class="button primary" type="button">＋ New clean room</button>
+      <div class="conversation-heading"><span class="eyebrow">SAVED CONVERSATIONS</span><button id="refresh-chats" class="icon-button" type="button" aria-label="Refresh conversations">↻</button></div>
+      <div id="conversation-list" class="conversation-list"><p class="micro">Loading conversations…</p></div>
+      <div class="isolation-note"><span class="status-dot live"></span>Conversation isolation<p>No cross-chat retrieval. Memory is disabled.<br>History is saved in this Lab.</p><a href="/#providers">Manage service API key ↗</a></div>
+    </aside>
+    <main class="chat-main">
+      <header class="chat-header">
+        <div class="chat-title-block"><span class="eyebrow">OPENAI / STATELESS RESPONSES</span><div class="chat-title-line"><h1 id="conversation-title">Experimental chat</h1><button id="rename-chat" class="icon-button" aria-label="Rename conversation" type="button" disabled>✎</button></div><p id="conversation-subtitle">A fresh context. Your instructions. Observable evidence.</p></div>
+        <button id="toggle-settings" class="button secondary" type="button" aria-expanded="true" aria-controls="settings-panel">Configure <span aria-hidden="true">☷</span></button>
+      </header>
+      <div id="chat-notice" class="notice" role="alert" hidden></div>
+      <div id="credential-status" class="credential-status" role="status">Checking existing OpenAI configuration…</div>
+      <section id="transcript" class="transcript" aria-label="Conversation transcript" aria-busy="false"><div class="chat-empty"><span class="empty-symbol">◇</span><h2>A clear starting point</h2><p>Start a new conversation or reopen an experiment.</p><p class="micro">New chats have blank instructions, no tools and no memory. Every conversation remains saved.</p></div></section>
+      <div id="jump-container" class="jump-container" hidden><button id="jump-latest" class="button secondary" type="button">↓ Latest activity</button></div>
+      <form id="composer" class="composer">
+        <label class="sr-only" for="message">Message</label><textarea id="message" rows="2" placeholder="Ask something. Start an experiment." aria-describedby="composer-help" disabled></textarea>
+        <div class="composer-bottom"><span id="composer-help" class="micro">Enter to send · Shift+Enter for a new line</span><div><button id="cancel-turn" class="button danger" type="button" hidden>Stop</button><button id="send-message" class="button primary" type="submit" disabled>Send ↑</button></div></div>
+        <p id="composer-status" class="micro" role="status">Select or create a conversation.</p>
+      </form>
+    </main>
+    <aside id="settings-panel" class="settings-panel" aria-label="Experiment configuration">
+      <div class="settings-heading"><div><span class="eyebrow">EXPERIMENT VARIABLES</span><h2>Configuration</h2></div><button id="close-settings" type="button" class="icon-button" aria-label="Close configuration">×</button></div>
+      <form id="settings-form">
+        <fieldset id="settings-fields" disabled>
+          <label for="mode">Execution mode</label><select id="mode"><option value="clean-room">Clean Room · direct conversation</option><option value="harness">Harness · Agentica planning loop</option></select>
+          <p id="mode-description" class="field-help">Only this conversation's history and your exact instructions are sent. No application planner or tools.</p>
+          <div class="field-row"><div><label for="model">Model <span class="micro">exact ID</span></label><input id="model" list="model-options" maxlength="200" autocomplete="off" spellcheck="false" required><datalist id="model-options"></datalist></div><div><label for="reasoning-effort">Reasoning effort</label><select id="reasoning-effort"><option value="">Model default</option><option>none</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></div></div>
+          <p id="model-source" class="field-help">Manual model IDs are supported. Unsupported combinations return the provider's error.</p>
+          <label class="check"><input id="reasoning-summary" type="checkbox"> Request provider reasoning summary</label>
+          <p class="field-help">Opt in to summaries when supported. Private reasoning is not exposed.</p>
+          <label for="instructions">System instructions <span class="micro">blank by default</span></label><textarea id="instructions" rows="7" spellcheck="false" placeholder="No application instructions"></textarea><p id="instruction-state" class="field-help">Blank means the instructions field is omitted.</p>
+          <details class="settings-section" open><summary>Context & output</summary>
+            <label for="context-depth">Context depth preset</label><select id="context-depth"><option value="minimal">Minimal</option><option value="focused">Focused</option><option value="normal" selected>Normal</option><option value="deep">Deep</option><option value="exhaustive">Exhaustive</option></select><p class="field-help">Presets set the history and character ceilings below. Model effort is separate.</p>
+            <div class="field-row"><div><label for="max-output">Max output tokens</label><input id="max-output" type="number" min="256" max="65536" required></div><div><label for="context-window">Context window tokens</label><input id="context-window" type="number" min="8192" max="1048576" required></div></div>
+            <div class="field-row"><div><label for="max-input">Max input characters</label><input id="max-input" type="number" min="1024" max="262144" required></div><div><label for="max-history">History message limit</label><input id="max-history" type="number" min="0" max="500" required></div></div>
+            <label for="history-policy">When history exceeds a limit</label><select id="history-policy"><option value="stop">Stop with an explicit limit</option><option value="recent">Omit oldest complete turns</option></select><p class="field-help">No automatic summarization. Inspect the manifest for selected and omitted history. Token estimates are not measured usage.</p>
+          </details>
+          <details id="harness-settings" class="settings-section" hidden open><summary>Agentica loop & capabilities</summary><p class="field-help harness-warning">Harness mode adds Agentica's planning instructions, workflow schema and selected capabilities. Inspect each request to see the effective overlay.</p>
+            <div class="field-row"><div><label for="max-steps">Max steps</label><input id="max-steps" type="number" min="1" max="100" required></div><div><label for="max-continuations">Max continuations</label><input id="max-continuations" type="number" min="0" max="32" required></div></div>
+            <div class="field-row"><div><label for="max-provider-calls">Max provider calls</label><input id="max-provider-calls" type="number" min="1" max="100" required></div><div><label for="timeout-seconds">Timeout seconds</label><input id="timeout-seconds" type="number" min="10" max="1800" required></div></div>
+            <div class="field-row"><div><label for="max-tool-result">Tool result characters</label><input id="max-tool-result" type="number" min="256" max="12000" required></div><div><label for="max-tool-evidence">Tool evidence characters</label><input id="max-tool-evidence" type="number" min="256" max="262144" required></div></div>
+            <h3 class="tools-heading">Bound capabilities</h3><p class="field-help">Enable only what this experiment needs. Each tool's effect and source are shown.</p><div id="capability-list" class="capability-list"><p class="micro">Loading capability catalog…</p></div>
+          </details>
+          <div class="memory-disabled"><span aria-hidden="true">◌</span><div><strong>Memory disabled</strong><p>Saved conversation history stays within this chat. No memory retrieval or admission is enabled.</p></div></div>
+        </fieldset>
+        <div class="settings-save"><button id="save-settings" class="button primary" type="submit" disabled>Save configuration</button><button id="reload-settings" class="button secondary" type="button" disabled>Reload saved configuration</button><p id="save-status" class="micro" role="status">No conversation selected.</p></div>
+      </form>
+    </aside>
+  </div>
+  <dialog id="rename-dialog"><form id="rename-form"><h2>Rename conversation</h2><label for="rename-title">Title</label><input id="rename-title" maxlength="160" required><div class="dialog-buttons"><button id="rename-cancel" class="button secondary" type="button">Cancel</button><button class="button primary" type="submit">Save title</button></div></form></dialog>
+  <script type="module" src="/chat.mjs"></script>
+</body>
+</html>

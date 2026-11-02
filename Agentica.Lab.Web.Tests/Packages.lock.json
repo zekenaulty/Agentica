@@ -78,6 +78,24 @@
         "resolved": "18.8.1",
         "contentHash": "Eclse/ZZjr4lmWzZFNN9h/OluhKL+SK/QbUyKUewgX139aGeyMEO/DkMPwuFs2MixvanTnz6891rF8UHDg+W4Q=="
       },
+      "Microsoft.Data.Sqlite": {
+        "type": "Transitive",
+        "resolved": "10.0.10",
+        "contentHash": "58JwZ39lCvRXHfV5O6RQfbHEDu8ZsXI7weRoVRR4jrGRxxkS+qyeuGrN2xD+9VYEICApYr0iTSL6PuU+DdsvPg==",
+        "dependencies": {
+          "Microsoft.Data.Sqlite.Core": "10.0.10",
+          "SQLitePCLRaw.bundle_e_sqlite3": "2.1.11",
+          "SQLitePCLRaw.core": "2.1.11"
+        }
+      },
+      "Microsoft.Data.Sqlite.Core": {
+        "type": "Transitive",
+        "resolved": "10.0.10",
+        "contentHash": "TPCs0ldm7AWqcKmp6f/Xr+14sat7hx4rHfRlS4RgCURBH2thEWbAKEyX7cCWr63zVJVOJIJZTg2cBiUXa8ys6g==",
+        "dependencies": {
+          "SQLitePCLRaw.core": "2.1.11"
+        }
+      },
       "Microsoft.Extensions.AI.Abstractions": {
         "type": "Transitive",
         "resolved": "10.4.0",
@@ -140,6 +158,41 @@
         "type": "Transitive",
         "resolved": "13.0.3",
         "contentHash": "HrC5BXdl00IP9zeV+0Z848QWPAoCr9P3bDEZguI+gkLcBKAOxix/tLEAAHC+UvDNPv4a2d18lOReHMOagPa+zQ=="
+      },
+      "SourceGear.sqlite3": {
+        "type": "Transitive",
+        "resolved": "3.53.3",
+        "contentHash": "PaDT7JwQ00HmXZT1xSGSC0c24A5lVpJYHMrXBuJATdpB2t0nf4Kq9HyPaZhxVW0elPq4XI1s5BLh7qLuObmzFA=="
+      },
+      "SQLitePCLRaw.bundle_e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "3.0.4",
+        "contentHash": "gg8vENKV/o0pWLI0eJxnTA4X9e63rOvzkCDMAOePDGLieNSHPCGUiJ4CQDqDyNqIf6IPVzD4TOjqY5ACygZkkA==",
+        "dependencies": {
+          "SQLitePCLRaw.config.e_sqlite3": "3.0.4",
+          "SourceGear.sqlite3": "3.53.3"
+        }
+      },
+      "SQLitePCLRaw.config.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "3.0.4",
+        "contentHash": "W2HMmjAZ1v27fbyzZtONCdC8Ma/tTr5wLAIr4Iq7T4oKrYaI4occJ5TBhSdK4pltwBJLQBG5DcQMz+/w9X4bbg==",
+        "dependencies": {
+          "SQLitePCLRaw.provider.e_sqlite3": "3.0.4"
+        }
+      },
+      "SQLitePCLRaw.core": {
+        "type": "Transitive",
+        "resolved": "3.0.4",
+        "contentHash": "cOjxfdjE4zQDvDVDUBfucKGXEaYos4l4l+TVwePJEHp/nl9fkgBz/lIVgfMH5dOyKRmNi6RsptUGtZsvsD7iYQ=="
+      },
+      "SQLitePCLRaw.provider.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "3.0.4",
+        "contentHash": "L4uiEKeRSXxppkGE4iSpgBgC5lNvw2zEN/hAaxTecUS1+DhC6UEFhHaakSYYvnFq7x16B7DQcaXgXy0SkhSwnw==",
+        "dependencies": {
+          "SQLitePCLRaw.core": "3.0.4"
+        }
       },
       "System.CodeDom": {
         "type": "Transitive",
@@ -235,7 +288,9 @@
         "type": "Project",
         "dependencies": {
           "Agentica": "[0.1.0-research.1, )",
-          "Agentica.Clients": "[0.1.0-research.1, )"
+          "Agentica.Clients": "[0.1.0-research.1, )",
+          "Microsoft.Data.Sqlite": "[10.0.10, )",
+          "SQLitePCLRaw.bundle_e_sqlite3": "[3.0.4, )"
         }
       },
       "agentica.lab.web.fixturehost": {
