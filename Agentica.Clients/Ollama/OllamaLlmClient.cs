@@ -186,7 +186,7 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
                             ProviderName, model, output.ToString(),
                             request.StructuredOutput is null ? null : output.ToString(),
                             Usage: new LlmUsage(promptTokens, outputTokens,
-                                TotalTokens: promptTokens + outputTokens,
+                                TotalTokens: LlmUsage.SumTokenCounts(promptTokens, outputTokens),
                                 CachedPromptTokens: GetInt(root, "prompt_eval_cached_count")),
                             FinishReason: finishReason,
                             Metadata: new Dictionary<string, string>(StringComparer.Ordinal)

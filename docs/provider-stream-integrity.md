@@ -16,6 +16,10 @@ This follows the [official Anthropic SDK stream accumulator](https://github.com/
 This change preserves the existing usage field mapping and does not add billing
 categories or reinterpret cache-creation tokens.
 
+Output and thinking counters can overlap. The optional inclusion metadata and
+derived quantities are described in [provider usage semantics](provider-usage-semantics.md);
+the original source counters remain available without reinterpretation.
+
 HTTP stream fixtures cover contradictory Gemini output without a completed event,
 ordered terminal output with and without text deltas, and cumulative Anthropic usage
 updates with omitted and zero counts. No live account is required for these checks.

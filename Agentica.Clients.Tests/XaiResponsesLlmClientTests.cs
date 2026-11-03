@@ -45,6 +45,10 @@ public sealed class XaiResponsesLlmClientTests
         Assert.Equal("xai", first.ProviderName);
         Assert.Equal("four", first.Text);
         Assert.Equal(6, first.Usage?.ThinkingTokens);
+        Assert.Equal(LlmOutputTokenSemantics.IncludesThinking, first.Usage?.OutputTokenSemantics);
+        Assert.Equal(8, first.Usage?.OutputTokens);
+        Assert.Equal(2, first.Usage?.NonThinkingOutputTokens);
+        Assert.Equal(8, first.Usage?.GeneratedOutputTokens);
         Assert.NotNull(first.NativeContinuation);
         Assert.Contains(events, item => item is
         { Kind: LlmStreamEventKind.Activity, Text: "reasoning.streaming" });
