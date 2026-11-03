@@ -62,6 +62,7 @@ public sealed record ExperimentExecutionContext(string ConversationId, Experimen
 {
     public IConversationEvidenceSource? EvidenceSource { get; init; }
     public ExperimentRecallContext? Recall { get; init; }
+    public IExperimentInputTokenCounter? InputTokenCounter { get; init; }
 }
 public sealed record ExperimentExecutionResult(string Status, string? AssistantText = null,
     object? Usage = null, string? ErrorCode = null, string? ErrorMessage = null);
@@ -77,6 +78,8 @@ public sealed record ExperimentContextManifest(string ConversationId, string Tur
     string HistoryPolicy, string Continuity, bool MemoryEnabled = false)
 {
     public ExperimentHistoryPage? HistoryPage { get; init; }
+    public ExperimentTokenCount? TokenCount { get; init; }
+    public int? WireBytes { get; init; }
 }
 public sealed record ExperimentPreparedContext(IReadOnlyList<ExperimentMessage> Messages,
     ExperimentContextManifest Manifest)

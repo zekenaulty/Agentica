@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Agentica.Lab.Web.Chat;
@@ -163,13 +164,38 @@ public sealed class ExperimentContextBudgetTests
     }
     private static ExperimentExecutionContext Context(ExperimentTurn turn, IReadOnlyList<ExperimentMessage> history,
         List<ExperimentTraceInput> traces) => new(turn.ConversationId, turn, history, Path.GetTempPath(),
-            item => { traces.Add(item); return Task.CompletedTask; }, _ => Task.CompletedTask);
+            item => { traces.Add(item); return Task.CompletedTask; }, _ => Task.CompletedTask)
+        { InputTokenCounter = new LegacyProxyFixtureCounter() };
+    // The synchronous compiler intentionally preserves this legacy compatibility
+    // policy. Its paired dispatch fixture must use the same declared measurement;
+    // native-token admission is qualified by the separate measured/native fixtures.
+    private sealed class LegacyProxyFixtureCounter : IExperimentInputTokenCounter
+    {
+        public IReadOnlyList<ExperimentTokenCount> Measurements => [];
+        public Task<ExperimentTokenCount> CountAsync(ReadOnlyMemory<byte> request, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(new ExperimentTokenCount(checked(request.Length + 512),
+                "fixture-only legacy full-request-byte proxy; not provider tokens",
+                Convert.ToHexStringLower(SHA256.HashData(request.Span))));
+        }
+    }
     private static OpenAiProviderConfiguration Configuration() => new(name => name == "OPENAI_API_KEY" ? "fixture-key" : null);
     private sealed class Handler : HttpMessageHandler
     {
         public List<byte[]> Bodies { get; } = [];
+        public List<byte[]> CountBodies { get; } = [];
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            if (request.RequestUri!.AbsolutePath == "/v1/responses/input_tokens")
+            {
+                CountBodies.Add(await request.Content!.ReadAsByteArrayAsync(cancellationToken));
+                return new(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                    "{\"object\":\"response.input_tokens\",\"input_tokens\":1024}", Encoding.UTF8, "application/json")
+                };
+            }
             Bodies.Add(await request.Content!.ReadAsByteArrayAsync(cancellationToken));
             var completed = new
             {

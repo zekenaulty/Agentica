@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Agentica.Lab.Web.Providers;
 
 namespace Agentica.Lab.Web.Chat;
@@ -15,9 +16,15 @@ public sealed class ExperimentService(ExperimentStore store, IExperimentExecutor
         return store.Create(new() { Model = provider.Model, ReasoningEffort = provider.ThinkingEffort }, title);
     }
 
-    public ExperimentTurn Send(string conversationId, ExperimentSendRequest request)
+    public ExperimentTurn Send(string conversationId, ExperimentSendRequest request) =>
+        SendAsync(conversationId, request).GetAwaiter().GetResult();
+
+    public async Task<ExperimentTurn> SendAsync(string conversationId, ExperimentSendRequest request,
+        CancellationToken cancellationToken = default)
     {
         if (request.RequestId is not null && store.FindRequest(conversationId, request.RequestId, request.Content) is { } existing) return existing;
+        ValidateContent(request.Content);
+        var started = Stopwatch.StartNew();
         var head = store.GetHead(conversationId);
         var conversation = head.Conversation;
         // Compile before creating an active turn so an over-budget request leaves no uncertain dispatch.
@@ -25,21 +32,90 @@ public sealed class ExperimentService(ExperimentStore store, IExperimentExecutor
             DateTimeOffset.UtcNow, null, conversation.SettingsRevision, conversation.Settings, "transcript-only; native reasoning state is not persisted");
         // Preflight only mandatory input and its recent floor. Historical selection runs
         // once against the admitted turn's frozen source cut, never twice per send.
-        _ = ExperimentContextCompiler.Prepare(Window(head, preview), preview);
-        var (turn, created) = store.Begin(conversationId, request, conversation.SettingsRevision, head.LatestSequence);
-        if (!created) return turn;
-        var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
-        // The executor owns its deadline so explicit cancellation and timeout remain distinguishable.
-        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _active[turn.Id] = (cancellation, completion.Task);
-        _ = ExecuteAsync(conversationId, turn, cancellation, completion);
-        return turn;
+        var counter = Counter(conversation.Settings);
+        try
+        {
+            using var preflightDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stopping.Token);
+            preflightDeadline.CancelAfter(TimeSpan.FromSeconds(conversation.Settings.TimeoutSeconds));
+            try
+            {
+                _ = await ExperimentContextCompiler.PrepareAsync(Window(head, preview), preview, counter,
+                    cancellationToken: preflightDeadline.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && !_stopping.IsCancellationRequested)
+            { throw new ExperimentException("context.token_count_timeout", "Context counting exceeded the turn deadline. No turn or model response was created; the draft can be retried.", 503); }
+            preflightDeadline.Token.ThrowIfCancellationRequested();
+            var remaining = TimeSpan.FromSeconds(conversation.Settings.TimeoutSeconds) - started.Elapsed;
+            if (remaining <= TimeSpan.Zero)
+                throw new ExperimentException("context.token_count_timeout", "Context admission exceeded the turn deadline. No turn or model response was created.", 503);
+            var (turn, created) = store.Begin(conversationId, request, conversation.SettingsRevision, head.LatestSequence);
+            if (!created)
+            {
+                (counter as IDisposable)?.Dispose();
+                return turn;
+            }
+            var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
+            // The executor owns its deadline so explicit cancellation and timeout remain distinguishable.
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _active[turn.Id] = (cancellation, completion.Task);
+            _ = ExecuteAsync(conversationId, turn, cancellation, completion, counter, remaining);
+            return turn;
+        }
+        catch
+        {
+            (counter as IDisposable)?.Dispose();
+            throw;
+        }
     }
 
-    private async Task ExecuteAsync(string conversationId, ExperimentTurn turn, CancellationTokenSource cancellation, TaskCompletionSource completion)
+    public async Task<object> CheckContextAsync(string conversationId, ExperimentSendRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateContent(request.Content);
+        var head = store.GetHead(conversationId);
+        var conversation = head.Conversation;
+        var turn = new ExperimentTurn("preview", conversationId, head.LatestSequence + 1, request.Content, "", "running",
+            DateTimeOffset.UtcNow, null, conversation.SettingsRevision, conversation.Settings, "transcript-only");
+        var counter = Counter(conversation.Settings);
+        using var counterLifetime = counter as IDisposable;
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stopping.Token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(conversation.Settings.TimeoutSeconds));
+        var source = conversation.Settings.ThreadRecallEnabled ? store.BindEvidenceSource(conversationId, head.LatestSequence) : null;
+        ExperimentPreparedContext prepared;
+        try
+        {
+            prepared = await ExperimentContextCompiler.PrepareAsync(Window(head, turn), turn, counter, source, deadline.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && !_stopping.IsCancellationRequested)
+        { throw new ExperimentException("context.token_count_timeout", "Context counting exceeded the deadline. No model response or turn was created.", 503); }
+        var current = store.GetHead(conversationId);
+        if (current.Conversation.SettingsRevision != conversation.SettingsRevision || current.LatestSequence != head.LatestSequence)
+            throw new ExperimentException("settings.conflict", "The conversation changed while counting. Reload its saved configuration before checking again.", 409);
+        return new
+        {
+            manifest = prepared.Manifest,
+            recall = prepared.Recall?.Manifest,
+            measurements = counter.Measurements,
+            settingsRevision = conversation.SettingsRevision,
+            inferenceDispatched = false,
+            turnCreated = false
+        };
+    }
+
+    private IExperimentInputTokenCounter Counter(ExperimentSettings settings) => executor is IExperimentInputCounterSource source
+        ? source.CreateInputTokenCounter(settings) : ExperimentByteProxyCounter.Instance;
+
+    private static void ValidateContent(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content) || content.Length > 128000)
+            throw new ExperimentException("turn.content", "Supply a nonempty message of at most 128000 characters.");
+    }
+
+    private async Task ExecuteAsync(string conversationId, ExperimentTurn turn, CancellationTokenSource cancellation,
+        TaskCompletionSource completion, IExperimentInputTokenCounter counter, TimeSpan remaining)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token);
-        deadline.CancelAfter(TimeSpan.FromSeconds(turn.Settings.TimeoutSeconds));
+        deadline.CancelAfter(remaining);
         try
         {
             await Task.Yield();
@@ -47,9 +123,10 @@ public sealed class ExperimentService(ExperimentStore store, IExperimentExecutor
             var head = store.GetHead(conversationId);
             var window = Window(head, turn);
             var source = turn.Settings.ThreadRecallEnabled ? store.BindEvidenceSource(conversationId, turn.Sequence - 1) : null;
-            var context = ExperimentContextCompiler.Prepare(window, turn, source, deadline.Token);
+            var context = await ExperimentContextCompiler.PrepareAsync(window, turn, counter, source, deadline.Token).ConfigureAwait(false);
             store.Append(conversationId, turn.Id, new("context.manifest", context.Manifest with { HistoryPage = window.HistoryPage }));
             if (context.Recall is not null) store.Append(conversationId, turn.Id, new("context.recall", context.Recall.Manifest));
+            store.Append(conversationId, turn.Id, new("context.token-counts", new { measurements = counter.Measurements, inference = false }));
             store.Append(conversationId, turn.Id, new("context.isolation", new
             {
                 conversationId,
@@ -73,7 +150,7 @@ public sealed class ExperimentService(ExperimentStore store, IExperimentExecutor
                     store.OutputAndTrace(conversationId, turn.Id, delta);
                     return Task.CompletedTask;
                 })
-            { EvidenceSource = source, Recall = context.Recall };
+            { EvidenceSource = source, Recall = context.Recall, InputTokenCounter = counter };
             var result = await executor.ExecuteAsync(execution, deadline.Token).ConfigureAwait(false);
             if (result.Status == "cancelled" && deadline.IsCancellationRequested && !cancellation.IsCancellationRequested)
                 result = result with
@@ -108,6 +185,7 @@ public sealed class ExperimentService(ExperimentStore store, IExperimentExecutor
         {
             _active.TryRemove(turn.Id, out _);
             cancellation.Dispose();
+            (counter as IDisposable)?.Dispose();
             completion.TrySetResult();
         }
     }

@@ -25,6 +25,7 @@ public sealed class ExperimentRecallTests
         await Execute(first, fixture.Context(prepared));
         await Execute(second, fixture.Context(prepared) with { EvidenceSource = source });
         Assert.Equal(Assert.Single(first.Bodies), Assert.Single(second.Bodies));
+        Assert.Single(first.CountBodies); Assert.Single(second.CountBodies);
         Assert.Equal(0, source.Accesses);
     }
 
@@ -499,8 +500,20 @@ public sealed class ExperimentRecallTests
     private sealed class Handler(Func<int, string> response) : HttpMessageHandler
     {
         public List<string> Bodies { get; } = [];
+        public List<string> CountBodies { get; } = [];
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            if (request.RequestUri!.AbsolutePath == "/v1/responses/input_tokens")
+            {
+                CountBodies.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
+                // Explicit synthetic native count: source/execution fixtures below do
+                // not claim tokenizer accuracy. Generation numbering stays separate.
+                return new(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                    "{\"object\":\"response.input_tokens\",\"input_tokens\":1024}", Encoding.UTF8, "application/json")
+                };
+            }
             Bodies.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
             return new(HttpStatusCode.OK) { Content = new StringContent(response(Bodies.Count), Encoding.UTF8, "text/event-stream") };
         }

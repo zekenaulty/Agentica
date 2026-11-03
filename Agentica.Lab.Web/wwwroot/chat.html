@@ -28,8 +28,9 @@
       <div id="jump-container" class="jump-container" hidden><button id="jump-latest" class="button secondary" type="button">↓ Latest activity</button></div>
       <form id="composer" class="composer">
         <label class="sr-only" for="message">Message</label><textarea id="message" rows="2" placeholder="Ask something. Start an experiment." aria-describedby="composer-help" disabled></textarea>
-        <div class="composer-bottom"><span id="composer-help" class="micro">Enter to send · Shift+Enter for a new line</span><div><button id="cancel-turn" class="button danger" type="button" hidden>Stop</button><button id="send-message" class="button primary" type="submit" disabled>Send ↑</button></div></div>
+        <div class="composer-bottom"><span id="composer-help" class="micro">Enter to send · Shift+Enter for a new line</span><div><button id="check-context" class="button secondary" type="button" title="Count provider input tokens for the saved configuration. Does not create a turn or generate a response." disabled>Check context</button><button id="cancel-turn" class="button danger" type="button" hidden>Stop</button><button id="send-message" class="button primary" type="submit" disabled>Send ↑</button></div></div>
         <p id="composer-status" class="micro" role="status">Select or create a conversation.</p>
+        <p id="context-check-result" class="context-check-result" role="status" hidden></p>
       </form>
     </main>
     <aside id="settings-panel" class="settings-panel" aria-label="Experiment configuration">

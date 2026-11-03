@@ -72,6 +72,23 @@ export function actionErrorMessage(error) {
   const message = `${error.code ? `${error.code}: ` : ''}${error.message ?? 'The request failed.'}`;
   return error.code === 'settings.conflict' ? `${message} Use “Reload saved configuration” to load the current revision. Your message draft is preserved.` : message;
 }
+export function contextCheckSummary(result, settings) {
+  const count = result?.manifest?.tokenCount;
+  const unavailable = () => { const error = new Error('Provider input token count is unavailable. No estimate was substituted and no generation was dispatched.'); error.code = 'context.token_count_unavailable'; return error; };
+  if (result?.inferenceDispatched !== false || !result?.manifest) throw unavailable();
+  const format = value => value.toLocaleString('en-US');
+  const history = Math.max(0, (result.manifest.selectedMessageIds?.length ?? 1) - 1);
+  const quotes = result.recall?.selected ?? [];
+  const characters = result.recall?.presentedCharacters ?? quotes.reduce((sum, quote) => sum + (quote.content?.length ?? 0), 0);
+  const floor = settings.threadRecallEnabled ? `${settings.threadRecallRecentTurns ?? 2} complete turns configured as the protected recent floor` : 'protected recent floor off';
+  const projection = `${history} history messages retained · ${floor} · ${quotes.length} quoted passages, ${format(characters)} characters · settings revision ${result.settingsRevision}`;
+  if (settings.mode === 'harness' && count == null)
+    return `Harness projection valid · ${projection}. Provider token count is deferred until an actual planner request is prepared. Input projection only; no generation or turn created.`;
+  if (count?.providerCount !== true || !Number.isSafeInteger(count.tokens) || count.tokens < 0 || !Number.isSafeInteger(result.manifest.inputAllowance)) {
+    throw unavailable();
+  }
+  return `Provider input: ${format(count.tokens)} / ${format(result.manifest.inputAllowance)} tokens allowed · ${projection}. Count method: ${count.method}. Input counting only; no generation or turn created.`;
+}
 export function mergeTurnPages(current, incoming, limit = 200) {
   const turns = [...new Map([...current, ...incoming].map(turn => [turn.id, turn])).values()].sort((a, b) => a.sequence - b.sequence);
   return { turns: turns.slice(-limit), omitted: Math.max(0, turns.length - limit) };
@@ -143,7 +160,7 @@ if (typeof document !== 'undefined') startChat();
 
 function startChat() {
   const $ = id => document.getElementById(id);
-  const state = { conversations: [], conversation: null, capabilities: [], models: null, dirty: false, instructionsDirty: false, busy: false, generation: 0, streams: new Map(), traces: new Map(), nodes: new Map(), pendingSend: null, recallSelections: [], recallStatus: null, recallStatusLoading: false, recallRebuilding: false, source: null, historyPage: null, historyLoading: false, historyWindowOmitted: 0 };
+  const state = { conversations: [], conversation: null, capabilities: [], models: null, dirty: false, instructionsDirty: false, busy: false, contextAction: null, generation: 0, streams: new Map(), traces: new Map(), nodes: new Map(), pendingSend: null, recallSelections: [], recallStatus: null, recallStatusLoading: false, recallRebuilding: false, source: null, historyPage: null, historyLoading: false, historyWindowOmitted: 0 };
   const json = value => JSON.stringify(value ?? null, null, 2);
   const node = (tag, className, text) => { const value = document.createElement(tag); if (className) value.className = className; if (text !== undefined) value.textContent = text; return value; };
   const label = value => String(value ?? 'unknown').replaceAll('_', ' ').replaceAll('.', ' ');
@@ -151,6 +168,7 @@ function startChat() {
   const statusClass = value => /complete|succeed/i.test(value) ? 'success' : /fail|error|cancel|interrupt|indeterminate/i.test(value) ? 'error' : /running|queued|active/i.test(value) ? 'running' : 'neutral';
   const badge = value => node('span', `badge ${statusClass(value)}`, label(value));
   const notice = message => { $('chat-notice').hidden = !message; $('chat-notice').textContent = message ?? ''; };
+  const clearContextCheck = () => { $('context-check-result').hidden = true; $('context-check-result').textContent = ''; };
   const activeTurn = () => state.conversation?.turns?.find(turn => !isTerminal(turn.status));
   const nearBottom = () => $('transcript').scrollHeight - $('transcript').scrollTop - $('transcript').clientHeight < 140;
   const scrollLatest = force => { if (force || nearBottom()) $('transcript').scrollTop = $('transcript').scrollHeight; else $('jump-container').hidden = false; };
@@ -216,17 +234,22 @@ function startChat() {
   }
   function updateControls() {
     const selected = Boolean(state.conversation); const running = Boolean(activeTurn());
+    if (state.dirty) clearContextCheck();
     $('settings-fields').disabled = !selected || state.busy || running;
     $('save-settings').disabled = !selected || !state.dirty || state.busy || running;
     $('reload-settings').disabled = !selected || state.busy || running;
     $('rename-chat').disabled = !selected || state.busy;
     $('message').disabled = !selected || state.busy || running;
     $('send-message').disabled = !selected || state.busy || running || !$('message').value.trim();
+    $('check-context').disabled = !selected || state.busy || running || !$('message').value.trim();
+    $('send-message').textContent = state.contextAction === 'send' ? 'Checking context…' : 'Send ↑';
+    $('check-context').textContent = state.contextAction === 'check' ? state.conversation?.settings.mode === 'harness' ? 'Checking projection…' : 'Counting input…' : 'Check context';
+    $('check-context').title = state.conversation?.settings.mode === 'harness' ? 'Validate the saved Harness input projection. Provider token counting waits for the actual planner request. Does not create a turn or generate a response.' : 'Count provider input tokens for the saved configuration. Does not create a turn or generate a response.';
     $('new-chat').disabled = state.busy;
     $('cancel-turn').hidden = !running; $('cancel-turn').disabled = state.busy;
     $('transcript').setAttribute('aria-busy', String(running));
     $('save-status').textContent = selected ? state.dirty ? 'Unsaved changes · saved before sending or switching.' : `Saved · revision ${state.conversation.settingsRevision}` : 'No conversation selected.';
-    $('composer-status').textContent = running ? 'Turn running · settings are frozen for this invocation.' : selected ? state.dirty ? 'The next turn will use your edited configuration.' : 'Saved conversation · only its own context is eligible.' : 'Select or create a conversation.';
+    $('composer-status').textContent = state.contextAction === 'send' ? 'Checking context; waiting for turn admission.' : state.contextAction === 'check' ? state.conversation?.settings.mode === 'harness' ? 'Checking the Harness input projection. Provider token counting waits for the actual planner request; no generation or turn is being created.' : 'Counting provider input tokens only. No generation request or turn is being created.' : running ? 'Turn running · settings are frozen for this invocation.' : selected ? state.dirty ? 'The next turn will use your edited configuration.' : 'Saved conversation · only its own context is eligible.' : 'Select or create a conversation.';
     if (selected) $('conversation-subtitle').textContent = `${state.conversation.settings.mode === 'harness' ? 'Agentica Harness' : 'Clean Room'} · ${state.conversation.settings.model} · ${state.conversation.settings.reasoningEffort ?? 'model default'} effort · ${state.conversation.settings.threadRecallEnabled ? `thread recall ${state.conversation.settings.threadRecallMode} · conditioned` : 'thread recall off'} · personal memory off`;
     $('pin-history-source').disabled = !selected || running || state.busy || !$('thread-recall-enabled').checked;
     renderHistoryPaging();
@@ -260,7 +283,7 @@ function startChat() {
     const generation = ++state.generation;
     const conversation = await api(`/api/chats/${encodeURIComponent(id)}?limit=20`);
     if (generation !== state.generation) return;
-    stopStreams(); state.conversation = conversation; state.traces.clear(); state.nodes.clear(); state.pendingSend = null;
+    stopStreams(); state.conversation = conversation; state.traces.clear(); state.nodes.clear(); state.pendingSend = null; clearContextCheck();
     state.historyPage = conversation.historyPage ?? null; state.historyWindowOmitted = 0; state.recallStatus = null; state.recallStatusLoading = false; state.source = null;
     state.recallRebuilding = false; $('rebuild-recall-index').disabled = false; $('cancel-recall-rebuild').hidden = true; capabilityPreviewSignature = ''; capabilityPreviewGeneration++;
     if ($('history-source-dialog').open) $('history-source-dialog').close();
@@ -543,7 +566,10 @@ function startChat() {
     await saveSettings();
     const pending = state.pendingSend?.content === content ? state.pendingSend : { content, requestId: crypto.randomUUID() };
     state.pendingSend = pending;
-    const turn = await api(`${base()}/turns`, 'POST', pending);
+    clearContextCheck(); state.contextAction = 'send'; updateControls();
+    let turn;
+    try { turn = await api(`${base()}/turns`, 'POST', pending); }
+    finally { state.contextAction = null; updateControls(); }
     state.pendingSend = null; $('message').value = ''; $('message').style.height = '';
     if (!state.conversation.turns.length) $('transcript').replaceChildren();
     const existing = turnById(turn.id);
@@ -552,6 +578,17 @@ function startChat() {
     else Object.assign(existing, turn);
     if (!isTerminal(turn.status)) connectTurn(existing ?? turn);
     reorderLoadedTurns(); updateControls(); scrollLatest(true); notice(null);
+  }
+  async function checkContext() {
+    if (!state.conversation || activeTurn()) return;
+    clearContextCheck();
+    if (state.dirty) throw new Error('Save configuration before checking context. Your message draft is preserved.');
+    const content = $('message').value; if (!content.trim()) return;
+    state.contextAction = 'check'; updateControls(); notice(null);
+    try {
+      const result = await api(`${base()}/context-check`, 'POST', { content });
+      $('context-check-result').textContent = contextCheckSummary(result, state.conversation.settings); $('context-check-result').hidden = false;
+    } finally { state.contextAction = null; updateControls(); }
   }
   async function runAction(action) {
     if (state.busy) return;
@@ -743,12 +780,12 @@ function startChat() {
   }
   $('new-chat').addEventListener('click', () => runAction(newConversation));
   $('refresh-chats').addEventListener('click', () => runAction(async () => { await refreshList(); if (state.conversation && !state.dirty) await reconcileConversation(); }));
-  $('settings-form').addEventListener('input', event => { if (state.conversation && event.target !== $('thread-history-query')) { state.dirty = true; if (event.target === $('instructions')) state.instructionsDirty = true; updateMode(); updateControls(); } });
+  $('settings-form').addEventListener('input', event => { if (state.conversation && event.target !== $('thread-history-query')) { state.dirty = true; clearContextCheck(); if (event.target === $('instructions')) state.instructionsDirty = true; updateMode(); updateControls(); } });
   $('settings-form').addEventListener('submit', event => { event.preventDefault(); runAction(saveSettings); });
   $('reload-settings').addEventListener('click', () => runAction(async () => {
     const saved = await api(`${base()}?limit=20`);
     state.conversation.settings = saved.settings; state.conversation.settingsRevision = saved.settingsRevision;
-    fillSettings(); notice(null);
+    fillSettings(); clearContextCheck(); notice(null);
   }));
   $('mode').addEventListener('change', updateMode);
   $('thread-recall-section').addEventListener('toggle', () => { if ($('thread-recall-section').open) updateRecallUI(); });
@@ -770,7 +807,8 @@ function startChat() {
   $('model').addEventListener('input', syncModelSelection);
   $('context-depth').addEventListener('change', () => { const preset = depthPresets[$('context-depth').value]; if (preset) for (const [key, value] of Object.entries(preset)) $(numericFields[key]).value = value; state.dirty = true; updateControls(); });
   $('composer').addEventListener('submit', event => { event.preventDefault(); runAction(sendMessage); });
-  $('message').addEventListener('input', () => { $('message').style.height = 'auto'; $('message').style.height = `${Math.min(180, Math.max(58, $('message').scrollHeight))}px`; updateControls(); });
+  $('check-context').addEventListener('click', () => runAction(checkContext));
+  $('message').addEventListener('input', () => { clearContextCheck(); $('message').style.height = 'auto'; $('message').style.height = `${Math.min(180, Math.max(58, $('message').scrollHeight))}px`; updateControls(); });
   $('message').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (!$('send-message').disabled) $('composer').requestSubmit(); } });
   $('cancel-turn').addEventListener('click', () => runAction(async () => { const turn = activeTurn(); if (turn) { await api(`${turnBase(turn.id)}/cancel`, 'POST', {}); $('composer-status').textContent = 'Cancellation requested; waiting for a durable terminal result.'; } }));
   $('rename-chat').addEventListener('click', () => { $('rename-title').value = state.conversation.title; $('rename-dialog').showModal(); $('rename-title').select(); });

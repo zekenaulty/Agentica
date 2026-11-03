@@ -1,6 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { actionErrorMessage, catalogSelection, citationPresentation, classifyEvent, depthPresets, exactSourceSelection, familyModelCatalog, instructionValue, isTerminal, knownFamilyModelIds, mergeTrace, mergeTurnPages, safeHttpUrl, summarizeTrace, validateSettings } from '../Agentica.Lab.Web/wwwroot/chat.mjs';
+import { actionErrorMessage, catalogSelection, citationPresentation, classifyEvent, contextCheckSummary, depthPresets, exactSourceSelection, familyModelCatalog, instructionValue, isTerminal, knownFamilyModelIds, mergeTrace, mergeTurnPages, safeHttpUrl, summarizeTrace, validateSettings } from '../Agentica.Lab.Web/wwwroot/chat.mjs';
+
+test('explicit context check displays provider tokens and evidence without using byte estimates', () => {
+  const result = { inferenceDispatched: false, settingsRevision: 7, manifest: { inputAllowance: 62976, estimatedInputUnits: 999999, selectedMessageIds: ['u1', 'a1', 'u2', 'a2', 'current'], tokenCount: { tokens: 62600, method: 'openai.responses.input_tokens', providerCount: true } }, recall: { selected: [{ content: 'exact quote' }], presentedCharacters: 11 } };
+  const text = contextCheckSummary(result, { threadRecallEnabled: true, threadRecallRecentTurns: 2 });
+  assert.match(text, /62,600 \/ 62,976/); assert.match(text, /4 history messages/); assert.match(text, /2 complete turns configured/); assert.match(text, /1 quoted passages, 11 characters/); assert.match(text, /no generation or turn created/); assert.doesNotMatch(text, /999999|estimate/i);
+  for (const tokenCount of [null, { tokens: 62600, providerCount: false }, { tokens: -1, providerCount: true }]) assert.throws(() => contextCheckSummary({ ...result, manifest: { ...result.manifest, tokenCount } }, {}), /unavailable.*No estimate was substituted/);
+});
+
+test('Harness context check reports projection-only validity without claiming measured tokens', () => {
+  const result = { inferenceDispatched: false, settingsRevision: 9, manifest: { tokenCount: null, estimatedInputUnits: 999999, inputAllowance: 62976, selectedMessageIds: ['u1', 'a1', 'current'] }, recall: { selected: [{ content: 'quote' }], presentedCharacters: 5 } };
+  const text = contextCheckSummary(result, { mode: 'harness', threadRecallEnabled: true, threadRecallRecentTurns: 1 });
+  assert.match(text, /Harness projection valid/); assert.match(text, /Provider token count is deferred until an actual planner request is prepared/); assert.match(text, /2 history messages/); assert.match(text, /1 quoted passages, 5 characters/); assert.match(text, /no generation or turn created/); assert.doesNotMatch(text, /999999|62,976|Provider input:/);
+  assert.throws(() => contextCheckSummary(result, { mode: 'clean-room' }), /unavailable/);
+});
 
 test('history pages merge chronologically without duplicates and remain bounded', () => {
   const turns = Array.from({ length: 5000 }, (_, index) => ({ id: `turn-${index + 1}`, sequence: index + 1 }));

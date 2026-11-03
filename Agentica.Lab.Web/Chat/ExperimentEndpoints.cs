@@ -69,7 +69,8 @@ public static class ExperimentEndpoints
         });
         group.MapPatch("/{id}", (string id, ExperimentRenameRequest request, ExperimentStore store) => store.Rename(id, request.Title));
         group.MapPut("/{id}/settings", (string id, ExperimentSettingsUpdate request, ExperimentStore store) => store.UpdateSettings(id, request));
-        group.MapPost("/{id}/turns", (string id, ExperimentSendRequest request, ExperimentService service) => service.Send(id, request));
+        group.MapPost("/{id}/turns", (string id, ExperimentSendRequest request, ExperimentService service, CancellationToken cancellationToken) => service.SendAsync(id, request, cancellationToken));
+        group.MapPost("/{id}/context-check", (string id, ExperimentSendRequest request, ExperimentService service, CancellationToken cancellationToken) => service.CheckContextAsync(id, request, cancellationToken));
         group.MapGet("/{id}/turns/{turnId}", (string id, string turnId, ExperimentStore store) => store.GetTurn(id, turnId));
         group.MapPost("/{id}/turns/{turnId}/cancel", (string id, string turnId, ExperimentService service) =>
         { service.Cancel(id, turnId); return Results.Ok(new { status = "cancel_requested" }); });

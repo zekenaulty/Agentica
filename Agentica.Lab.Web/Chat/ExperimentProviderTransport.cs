@@ -17,6 +17,8 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
     private readonly Func<string, JsonElement, Task>? _nativeObserver;
     private int _calls;
     private string? _credential;
+    private IExperimentInputTokenCounter? _counter;
+    private bool _ownsCounter;
     public int Calls => Volatile.Read(ref _calls);
     public string? LatestCallId { get; private set; }
     public string? AdmissionFailure { get; private set; }
@@ -48,7 +50,31 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
         _credential = request.Headers.Authorization?.Parameter;
         var body = JsonSerializer.Deserialize<JsonElement>(bytes);
         var allowance = ExperimentDirectRequest.InputAllowance(settings);
-        var estimate = bytes.LongLength + ExperimentDirectRequest.ProxyEnvelopeReserve;
+        if (Encoding.UTF8.GetCharCount(bytes) > settings.MaxInputCharacters)
+        {
+            await _context.Trace(new("provider.request", new
+            {
+                body = Sanitize(body, _credential),
+                hash = Convert.ToHexStringLower(SHA256.HashData(bytes)),
+                wireBytes = bytes.Length,
+                serializedCharacters = Encoding.UTF8.GetCharCount(bytes),
+                inputAllowance = allowance,
+                inputTokens = (int?)null,
+                estimator = "not counted; request character limit failed first",
+                dispatchState = "prepared; character-denied",
+                instructionsOmitted = !body.TryGetProperty("instructions", out _)
+            }, callId)).ConfigureAwait(false);
+            AdmissionFailure = "context.wire_limit";
+            throw new ExperimentException("context.wire_limit", "The complete provider request exceeds the configured character limit. No generation request was dispatched.");
+        }
+        if (_counter is null)
+        {
+            _counter = _context.InputTokenCounter ?? new OpenAiExperimentInputTokenCounter(_inner,
+                _credential ?? throw new ExperimentException("provider.not_configured", "The provider credential is unavailable."), settings.MaxProviderCalls + 32);
+            _ownsCounter = _context.InputTokenCounter is null;
+        }
+        var measurement = await _counter.CountAsync(bytes, cancellationToken).ConfigureAwait(false);
+        var estimate = measurement.Tokens;
         var purpose = request.Options.TryGetValue(PurposeOption, out var requestPurpose) ? requestPurpose : settings.Mode;
         await _context.Trace(new("provider.request", new
         {
@@ -62,14 +88,17 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
             method = request.Method.Method,
             url = request.RequestUri?.GetLeftPart(UriPartial.Path),
             estimatedInputUnits = estimate,
+            inputTokens = measurement.ProviderCount ? measurement.Tokens : (int?)null,
+            tokenCount = measurement,
+            wireBytes = bytes.Length,
             inputAllowance = allowance,
-            estimator = "utf8-wire-byte-proxy-plus-512",
+            estimator = measurement.Method,
             instructionsOmitted = !body.TryGetProperty("instructions", out _)
         }, callId)).ConfigureAwait(false);
-        if (Encoding.UTF8.GetCharCount(bytes) > settings.MaxInputCharacters || estimate > allowance)
+        if (estimate > allowance)
         {
             AdmissionFailure = "context.wire_limit";
-            throw new ExperimentException("context.wire_limit", "The complete provider request, including harness instructions and schemas, exceeds the configured input allowance. No request was dispatched.");
+            throw new ExperimentException("context.wire_limit", $"The complete provider request has {estimate} input tokens, exceeding the {allowance}-token allowance (window {settings.ContextWindowTokens} minus output {settings.MaxOutputTokens} minus safety 4096). Instructions, tools and schemas are included. No generation request was dispatched.");
         }
 
         // HttpClient marks its request as sent before entering this handler. Forward a detached
@@ -94,6 +123,12 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
             response.Content = new InspectedContent(response.Content, item => ObserveAsync(callId, item, observer));
         }
         return response;
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && _ownsCounter) (_counter as IDisposable)?.Dispose();
+        base.Dispose(disposing);
     }
 
     private async Task ErrorAsync(HttpResponseMessage response, string callId, CancellationToken cancellationToken)

@@ -8,6 +8,15 @@ internal static class ExperimentRecallAllocator
 {
     internal static ExperimentPreparedContext Prepare(ExperimentConversation conversation, ExperimentTurn turn,
         IReadOnlyList<ExperimentMessage> eligible, IConversationEvidenceSource? source, CancellationToken cancellationToken = default)
+        => PrepareCoreAsync(conversation, turn, eligible, source, null, cancellationToken).GetAwaiter().GetResult();
+
+    internal static Task<ExperimentPreparedContext> PrepareAsync(ExperimentConversation conversation, ExperimentTurn turn,
+        IReadOnlyList<ExperimentMessage> eligible, IConversationEvidenceSource? source, ExperimentContextMeasurements measurements,
+        CancellationToken cancellationToken = default) => PrepareCoreAsync(conversation, turn, eligible, source, measurements, cancellationToken);
+
+    private static async Task<ExperimentPreparedContext> PrepareCoreAsync(ExperimentConversation conversation, ExperimentTurn turn,
+        IReadOnlyList<ExperimentMessage> eligible, IConversationEvidenceSource? source, ExperimentContextMeasurements? measurements,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var settings = turn.Settings;
@@ -18,10 +27,62 @@ internal static class ExperimentRecallAllocator
         var asOf = turn.Sequence - 1;
         if (source is not null) ValidateSource(source, conversation.Id, asOf);
         cancellationToken.ThrowIfCancellationRequested();
-        if (recent.Length > settings.MaxHistoryMessages || !Fits(settings, recent, turn.UserText, null))
+        ExperimentDirectRequest.Envelope? floorEnvelope = null;
+        ExperimentTokenCount? floorCount = null;
+        if (measurements is null && (recent.Length > settings.MaxHistoryMessages || !Fits(settings, recent, turn.UserText, null)))
             throw new ExperimentException("context.recent_floor_limit",
                 "The current input, instructions and protected recent-turn floor do not fit the configured complete-input allowance. " +
                 "Reduce the recent-turn floor or current input, or adjust character/window/output limits. Optional recall cannot displace that floor. No model call was made.", 409);
+        if (measurements is not null)
+        {
+            if (settings.Mode == "clean-room")
+            {
+                var rawFloorCharacters = settings.Instructions.Length + turn.UserText.Length + recent.Sum(message => message.Content.Length);
+                if (rawFloorCharacters > settings.MaxInputCharacters)
+                {
+                    var current = ExperimentDirectRequest.Build(settings, [], turn.UserText);
+                    var currentFails = current.SerializedCharacters > settings.MaxInputCharacters;
+                    throw ExperimentContextMeasurements.CharacterLowerBoundLimit(currentFails ? "context.current_input_limit" : "context.recent_floor_limit",
+                        settings, current, rawFloorCharacters, recent.Length, recent.Length / 2,
+                        currentFails ? "The current input and instructions alone exceed the character limit; changing the floor or token settings cannot repair this character failure." :
+                            "The current input alone fits the character limit; reduce the declared protected floor or change the applicable character limit. Token settings cannot repair this character failure.");
+                }
+                floorEnvelope = ExperimentDirectRequest.Build(settings, recent, turn.UserText);
+                if (recent.Length > settings.MaxHistoryMessages || floorEnvelope.SerializedCharacters > settings.MaxInputCharacters)
+                {
+                    var current = ExperimentDirectRequest.Build(settings, [], turn.UserText);
+                    var currentFails = current.SerializedCharacters > settings.MaxInputCharacters;
+                    var failed = string.Join(", ", new[] { recent.Length > settings.MaxHistoryMessages ? "history-message limit" : null,
+                        floorEnvelope.SerializedCharacters > settings.MaxInputCharacters ? "serialized request character limit" : null }.Where(item => item is not null));
+                    throw ExperimentContextMeasurements.Limit(currentFails ? "context.current_input_limit" : "context.recent_floor_limit", settings,
+                        failed, floorEnvelope, null, current, null, recent.Length / 2, omittedIds.Length / 2,
+                        currentFails ? "The current input and instructions alone exceed the character limit. Changing the recent floor or token settings cannot repair this character failure." :
+                            $"The current input alone fits the character limit. The protected floor contains {recent.Length / 2} complete turns (requested {settings.ThreadRecallRecentTurns}); reduce that floor or change the applicable history/character limit. Token settings do not repair a character failure.");
+                }
+                floorCount = await measurements.CountAsync(floorEnvelope, cancellationToken).ConfigureAwait(false);
+                if (floorCount.Tokens > ExperimentDirectRequest.InputAllowance(settings))
+                {
+                    var current = ExperimentDirectRequest.Build(settings, [], turn.UserText);
+                    var currentCount = await measurements.CountAsync(current, cancellationToken).ConfigureAwait(false);
+                    var currentFails = currentCount.Tokens > ExperimentDirectRequest.InputAllowance(settings);
+                    throw ExperimentContextMeasurements.Limit(currentFails ? "context.current_input_limit" : "context.recent_floor_limit", settings,
+                        "model input token allowance", floorEnvelope, floorCount, current, currentCount, recent.Length / 2, omittedIds.Length / 2,
+                        currentFails ? "The current input and instructions alone exceed the measured token allowance. Changing the recall floor cannot repair it; shorten that input or explicitly change the context window/output reservation." :
+                            $"The current input alone fits the measured token allowance. The protected floor contains {recent.Length / 2} complete turns (requested {settings.ThreadRecallRecentTurns}); reduce that floor or explicitly change the context window/output reservation. Optional recall cannot displace protected turns.");
+                }
+            }
+            else
+            {
+                var currentCharacters = settings.Instructions.Length + turn.UserText.Length;
+                var floorCharacters = currentCharacters + recent.Sum(message => message.Content.Length);
+                if (recent.Length > settings.MaxHistoryMessages || floorCharacters > settings.MaxInputCharacters)
+                    throw new ExperimentException(currentCharacters > settings.MaxInputCharacters ? "context.current_input_limit" : "context.recent_floor_limit",
+                        $"Failed: harness projection history-message/character limit. Current-only projection {currentCharacters} characters; " +
+                        $"protected-floor projection {floorCharacters} characters (limit {settings.MaxInputCharacters}), {recent.Length} messages (limit {settings.MaxHistoryMessages}). " +
+                        (currentCharacters > settings.MaxInputCharacters ? "The current input alone does not fit; changing the floor cannot repair it. " : "The current input fits; reduce the declared protected floor or change the applicable character/history limit. ") +
+                        "Model tokens are deferred to native full request admission; token settings cannot repair this character failure. No generation request was dispatched.", 409);
+            }
+        }
 
         var omissions = new List<ExperimentRecallOmission>();
         var candidates = new List<ConversationEvidenceHit>();
@@ -192,7 +253,7 @@ internal static class ExperimentRecallAllocator
                     var content = ExactPrefix(part.Content, middle);
                     var proposal = part with { Content = content, EndOffset = part.StartOffset + content.Length };
                     accepted.Add(proposal);
-                    var fits = Fits(settings, recent, turn.UserText, Context());
+                    var fits = measurements is null ? Fits(settings, recent, turn.UserText, Context()) : FitsCharacters(settings, recent, turn.UserText, Context());
                     accepted.RemoveAt(accepted.Count - 1);
                     if (fits) low = middle; else high = middle - 1;
                 }
@@ -200,20 +261,62 @@ internal static class ExperimentRecallAllocator
                 if (chosen.Length != 0) accepted.Add(part with { Content = chosen, EndOffset = part.StartOffset + chosen.Length });
                 if (chosen.Length < part.Content.Length)
                     omissions.Add(new(part.SourceId, part.StartOffset + chosen.Length, part.EndOffset,
-                        maximum < part.Content.Length ? "retrieval-character-limit" : "complete-request-input-limit"));
+                        maximum < part.Content.Length ? "retrieval-character-limit" : measurements is null ? "complete-request-input-limit" : "serialized-request-character-limit"));
             }
         }
         var recall = Context();
         cancellationToken.ThrowIfCancellationRequested();
         var envelope = ExperimentDirectRequest.Build(settings, recent, turn.UserText, recall);
-        var units = settings.Mode == "clean-room" ? envelope.EstimatedInputUnits : HarnessUnits(settings, recent, turn.UserText, recall);
+        ExperimentTokenCount? tokenCount = null;
+        if (measurements is not null && settings.Mode == "clean-room")
+        {
+            tokenCount = accepted.Count == 0 ? floorCount! : await measurements.CountAsync(envelope, cancellationToken).ConfigureAwait(false);
+            // These are explicit exact-span reductions, not a token-estimation heuristic.
+            // At most four additional measurements precede a cached mandatory-floor fallback.
+            for (var attempt = 0; tokenCount.Tokens > ExperimentDirectRequest.InputAllowance(settings) && accepted.Count > 0 && attempt < 4; attempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                RetainQuotePrefix(accepted, accepted.Sum(item => item.Content.Length) / 2, omissions, "model-input-token-limit; optional exact span reduced");
+                recall = Context();
+                envelope = ExperimentDirectRequest.Build(settings, recent, turn.UserText, recall);
+                tokenCount = accepted.Count == 0 ? floorCount! : await measurements.CountAsync(envelope, cancellationToken).ConfigureAwait(false);
+            }
+            if (tokenCount.Tokens > ExperimentDirectRequest.InputAllowance(settings))
+            {
+                RetainQuotePrefix(accepted, 0, omissions, "model-input-token-limit; optional evidence omitted after bounded fitting");
+                recall = Context(); envelope = floorEnvelope!; tokenCount = floorCount!;
+            }
+        }
+        var units = measurements is null ? settings.Mode == "clean-room" ? envelope.EstimatedInputUnits : HarnessUnits(settings, recent, turn.UserText, recall) : tokenCount?.Tokens ?? 0;
+        var estimator = measurements is null ? settings.Mode == "clean-room" ? "utf8-wire-byte-proxy-plus-512; exact direct request including recall; not measured provider tokens" :
+            "conservative UTF-8 content projection including quoted recall; complete harness wire guard remains authoritative" :
+            tokenCount?.Method ?? "deferred to native full request admission";
         return new(recent, new(conversation.Id, turn.Id, selectedIds, omittedIds,
             settings.Instructions.Length + turn.UserText.Length + recent.Sum(message => message.Content.Length) + recall.Manifest.PresentedCharacters,
             units, ExperimentDirectRequest.InputAllowance(settings),
-            settings.Mode == "clean-room" ? "utf8-wire-byte-proxy-plus-512; exact direct request including recall; not measured provider tokens" :
-                "conservative UTF-8 content projection including quoted recall; complete harness wire guard remains authoritative",
-            "thread-recall protected recent floor; exact optional historical evidence", turn.Continuity))
+            estimator, "thread-recall protected recent floor; exact optional historical evidence", turn.Continuity)
+        { TokenCount = tokenCount, WireBytes = measurements is not null && settings.Mode == "clean-room" ? envelope.Utf8.Length : null })
         { Recall = recall };
+    }
+
+    private static bool FitsCharacters(ExperimentSettings settings, IReadOnlyList<ExperimentMessage> recent, string userText, ExperimentRecallContext recall) =>
+        settings.Mode == "clean-room" ? ExperimentDirectRequest.Build(settings, recent, userText, recall).SerializedCharacters <= settings.MaxInputCharacters :
+        settings.Instructions.Length + userText.Length + recent.Sum(message => message.Content.Length) +
+            (recall.Evidence.Count > 0 ? ExperimentDirectRequest.FormatEvidence(recall).Length : 0) <= settings.MaxInputCharacters;
+
+    private static void RetainQuotePrefix(List<ExperimentRecallEvidence> evidence, int maximumCharacters,
+        List<ExperimentRecallOmission> omissions, string reason)
+    {
+        var remaining = maximumCharacters;
+        var retained = new List<ExperimentRecallEvidence>();
+        foreach (var item in evidence)
+        {
+            var content = ExactPrefix(item.Content, remaining);
+            if (content.Length != 0) retained.Add(item with { Content = content, EndOffset = item.StartOffset + content.Length });
+            if (content.Length < item.Content.Length) omissions.Add(new(item.SourceId, item.StartOffset + content.Length, item.EndOffset, reason));
+            remaining -= content.Length;
+        }
+        evidence.Clear(); evidence.AddRange(retained);
     }
 
     private static bool Fits(ExperimentSettings settings, IReadOnlyList<ExperimentMessage> recent, string userText, ExperimentRecallContext? recall)

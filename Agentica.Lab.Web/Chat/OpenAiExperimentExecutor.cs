@@ -16,7 +16,7 @@ using Agentica.Tools;
 namespace Agentica.Lab.Web.Chat;
 
 /// <summary>Lab-owned direct experiment transport and opt-in real Agentica harness host.</summary>
-public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IDisposable
+public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentInputCounterSource, IDisposable
 {
     public const string ResponseToolId = "experiment.response.emit";
     public const string ResponseArtifactKind = "experiment.response";
@@ -73,6 +73,13 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IDisposable
             return new("failed", state.Text.ToString(), new { providerCalls = transport.Calls }, "provider.stream_failed",
                 "The provider stream did not complete. Partial output is retained; no automatic retry was made.");
         }
+    }
+
+    public IExperimentInputTokenCounter CreateInputTokenCounter(ExperimentSettings settings)
+    {
+        var key = _configuration.Capture().ApiKey ?? throw new ExperimentException("provider.not_configured",
+            "Configure the existing OpenAI credential before counting this conversation's input.");
+        return new OpenAiExperimentInputTokenCounter(_http, key, settings.MaxProviderCalls + 32);
     }
 
     /// <summary>Provider-owned accessible IDs; this makes no generation request.</summary>
@@ -166,7 +173,8 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IDisposable
     {
         var settings = context.Turn.Settings;
         using var ownedFactory = _plannerFactory is null ? new LabPlannerFactory(observed,
-            openAiConfiguration: _configuration, useStatelessPlanRepair: true) : null;
+            openAiConfiguration: _configuration, useStatelessPlanRepair: true, inputBudgetOwnedByChatTransport: true,
+            compiledInputCharacterLimit: settings.MaxInputCharacters) : null;
         var factory = _plannerFactory ?? ownedFactory!;
         void Stream(LlmStreamEvent item) => context.Trace(new("planner.stream", new
         {

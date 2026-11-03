@@ -9,6 +9,7 @@ using Agentica.Requests;
 using Agentica.Lab.Web.Chat;
 using Agentica.Lab.Web.Contracts;
 using Agentica.Lab.Web.Providers;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Agentica.Lab.Web.Tests;
 
@@ -28,6 +29,7 @@ public sealed class ExperimentExecutorTests
         Assert.Equal("Hello", result.AssistantText);
         Assert.Equal("Hello", probe.Output.ToString());
         var wire = Assert.Single(handler.Bodies);
+        Assert.Single(handler.CountBodies);
         using var document = JsonDocument.Parse(wire);
         var body = document.RootElement;
         Assert.False(body.GetProperty("store").GetBoolean());
@@ -202,6 +204,7 @@ public sealed class ExperimentExecutorTests
         var result = await executor.ExecuteAsync(probe.Context, CancellationToken.None);
         Assert.Equal("context.wire_limit", result.ErrorCode);
         Assert.Empty(handler.Bodies);
+        Assert.Empty(handler.CountBodies);
         Assert.Single(probe.Events, item => item.Type == "provider.request");
         Assert.DoesNotContain(probe.Events, item => item.Type == "provider.dispatch");
     }
@@ -237,6 +240,7 @@ public sealed class ExperimentExecutorTests
         Assert.Equal("completed", result.Status);
         Assert.Equal("The observed clock is available.", result.AssistantText);
         Assert.Equal(2, handler.Bodies.Count);
+        Assert.Equal(2, handler.CountBodies.Count);
         Assert.Equal(result.AssistantText, probe.Output.ToString());
         var outcome = Payload(Assert.Single(probe.Events, item => item.Type == "harness.outcome"));
         Assert.Equal("Succeeded", outcome.GetProperty("status").GetString());
@@ -278,6 +282,7 @@ public sealed class ExperimentExecutorTests
         var result = await executor.ExecuteAsync(probe.Context, CancellationToken.None);
         Assert.Equal("completed", result.Status);
         Assert.Equal(3, handler.Bodies.Count);
+        Assert.Equal(3, handler.CountBodies.Count);
         Assert.Equal("Final answer from searched evidence.", probe.Output.ToString());
         Assert.DoesNotContain("Search result answer.", probe.Output.ToString(), StringComparison.Ordinal);
         using var search = JsonDocument.Parse(handler.Bodies[1]);
@@ -391,18 +396,24 @@ public sealed class ExperimentExecutorTests
             saved.EnsureSuccessStatusCode();
             using var sent = await http.PostAsJsonAsync($"/api/chats/{conversation.Id}/turns",
                 new ExperimentSendRequest("Exercise the chat-owned harness", "di-regression"), HostProtocol.Json, deadline.Token);
-            sent.EnsureSuccessStatusCode();
-            var turn = (await sent.Content.ReadFromJsonAsync<ExperimentTurn>(HostProtocol.Json, deadline.Token))!;
-            while (turn.Status == "running")
-            {
-                await Task.Delay(20, deadline.Token);
-                turn = (await http.GetFromJsonAsync<ExperimentTurn>($"/api/chats/{conversation.Id}/turns/{turn.Id}", HostProtocol.Json, deadline.Token))!;
-            }
-            Assert.Equal("failed", turn.Status); // No configured credential; no provider dispatch is possible.
+            Assert.Equal(HttpStatusCode.BadRequest, sent.StatusCode);
+            using var refused = JsonDocument.Parse(await sent.Content.ReadAsStringAsync(deadline.Token));
+            Assert.Equal("provider.not_configured", refused.RootElement.GetProperty("code").GetString());
+            var unchanged = await http.GetFromJsonAsync<ExperimentConversation>($"/api/chats/{conversation.Id}?limit=20", HostProtocol.Json, deadline.Token);
+            Assert.Empty(unchanged!.Turns); // Native-count admission requires a key before a durable turn exists.
+
+            // Exercise the executor actually composed by the public app as well. This
+            // detects accidental injection of the external-host planner even though
+            // public admission now rejects the missing credential before execution.
+            var composed = Assert.IsType<OpenAiExperimentExecutor>(app.Services.GetRequiredService<IExperimentExecutor>());
+            var probe = new Probe(new ExperimentSettings { Mode = "harness" });
+            var result = await composed.ExecuteAsync(probe.Context, deadline.Token);
+            Assert.Equal("failed", result.Status); // No credential: factory creation stops before outbound work.
             Assert.Equal(0, spy.CreateCalls);
-            var trace = await http.GetStringAsync($"/api/chats/{conversation.Id}/turns/{turn.Id}/trace", deadline.Token);
+            var trace = JsonSerializer.Serialize(probe.Events);
             Assert.DoesNotContain("injected-planner-fixture", trace, StringComparison.Ordinal);
             Assert.DoesNotContain("provider.dispatch", trace, StringComparison.Ordinal);
+            Assert.DoesNotContain("provider.request", trace, StringComparison.Ordinal);
         }
         finally
         {
@@ -567,9 +578,21 @@ public sealed class ExperimentExecutorTests
     {
         public List<string> Bodies { get; } = [];
         public List<string> Urls { get; } = [];
+        public List<string> CountBodies { get; } = [];
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Assert.Equal("fixture-secret", request.Headers.Authorization?.Parameter);
+            if (request.RequestUri!.AbsolutePath == "/v1/responses/input_tokens")
+            {
+                CountBodies.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
+                // These fixtures qualify streaming, binding and generation call limits;
+                // the native-count contract and real measured budgets have separate fixtures.
+                return new(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                    "{\"object\":\"response.input_tokens\",\"input_tokens\":1024}", Encoding.UTF8, "application/json")
+                };
+            }
             Urls.Add(request.RequestUri!.ToString());
             if (request.Content is not null) Bodies.Add(await request.Content.ReadAsStringAsync(cancellationToken));
             return response(Urls.Count);
