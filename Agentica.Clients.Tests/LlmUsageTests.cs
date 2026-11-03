@@ -94,8 +94,12 @@ public sealed class LlmUsageTests
             Candidates = [new() { Content = new() { Role = "model", Parts = [new() { Text = "answer" }] } }],
             UsageMetadata = new()
             {
-                PromptTokenCount = 11, CandidatesTokenCount = 2, ThoughtsTokenCount = 3,
-                TotalTokenCount = 20, CachedContentTokenCount = 1, ToolUsePromptTokenCount = 4
+                PromptTokenCount = 11,
+                CandidatesTokenCount = 2,
+                ThoughtsTokenCount = 3,
+                TotalTokenCount = 20,
+                CachedContentTokenCount = 1,
+                ToolUsePromptTokenCount = 4
             }
         };
         var response = GeminiResponseMapper.Map("fixture-model", native);

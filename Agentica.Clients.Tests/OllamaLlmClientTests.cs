@@ -161,8 +161,12 @@ public sealed class OllamaLlmClientTests
     {
         var final = JsonSerializer.Serialize(new
         {
-            model = "qwen3", message = new { content = "ok" }, done = true,
-            done_reason = "stop", prompt_eval_count = prompt, eval_count = output
+            model = "qwen3",
+            message = new { content = "ok" },
+            done = true,
+            done_reason = "stop",
+            prompt_eval_count = prompt,
+            eval_count = output
         });
         var client = CreateClient(new StubHandler(_ => Task.FromResult(StreamResponse(final + "\n"))));
         var response = await client.GenerateAsync(Request());
