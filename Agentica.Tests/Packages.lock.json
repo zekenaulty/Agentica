@@ -306,7 +306,8 @@
       "agentica.nyxlearninghost": {
         "type": "Project",
         "dependencies": {
-          "Agentica.Clients": "[0.1.0-research.1, )"
+          "Agentica.Clients": "[0.1.0-research.1, )",
+          "Agentica.Mcp": "[1.0.0, )"
         }
       }
     }
