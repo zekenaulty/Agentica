@@ -41,7 +41,8 @@ public static class GeminiResponseMapper
                     ThinkingTokens: response.UsageMetadata.ThoughtsTokenCount,
                     TotalTokens: response.UsageMetadata.TotalTokenCount,
                     CachedPromptTokens: response.UsageMetadata.CachedContentTokenCount,
-                    ToolUsePromptTokens: response.UsageMetadata.ToolUsePromptTokenCount),
+                    ToolUsePromptTokens: response.UsageMetadata.ToolUsePromptTokenCount)
+                { OutputTokenSemantics = LlmOutputTokenSemantics.ExcludesThinking },
             FinishReason: MapFinishReason(candidate?.FinishReason?.ToString()),
             Metadata: response.ResponseId is null
                 ? null

@@ -207,7 +207,8 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
                                             GetInt(usage, "output_tokens"),
                                             GetInt(outputDetails, "reasoning_tokens"),
                                             GetInt(usage, "total_tokens"),
-                                            GetInt(inputDetails, "cached_tokens")),
+                                            GetInt(inputDetails, "cached_tokens"))
+                                        { OutputTokenSemantics = LlmOutputTokenSemantics.IncludesThinking },
                                         LlmFinishReason.Stop,
                                         new Dictionary<string, string>(StringComparer.Ordinal)
                                         {
@@ -294,20 +295,7 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
         if (thinking?.IncludeThoughts == true) reasoning["summary"] = "auto";
         if (reasoning.Count > 0) body["reasoning"] = reasoning;
         if (request.StructuredOutput is { } structured)
-        {
-            if (structured.ResponseMimeType != "application/json")
-                throw Failure("unsupported_response_format", LlmClientErrorKind.BadRequest);
-            if (!string.IsNullOrWhiteSpace(structured.JsonSchema))
-            {
-                try { using var _ = JsonDocument.Parse(structured.JsonSchema); }
-                catch (JsonException exception)
-                {
-                    throw new LlmClientException(_providerName, "Responses schema must be valid JSON.",
-                        exception, LlmClientErrorKind.BadRequest, errorClass: "invalid_json_schema");
-                }
-            }
-            body["text"] = new { format = new { type = "json_object" } };
-        }
+            body["text"] = new { format = ResponsesStructuredOutput.CreateFormat(structured, _providerName) };
         return body;
     }
 
