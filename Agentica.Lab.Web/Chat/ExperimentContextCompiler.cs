@@ -7,8 +7,9 @@ namespace Agentica.Lab.Web.Chat;
 public static class ExperimentContextCompiler
 {
     public static ExperimentPreparedContext Prepare(ExperimentConversation conversation, ExperimentTurn turn,
-        IConversationEvidenceSource? evidenceSource = null)
+        IConversationEvidenceSource? evidenceSource = null, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (conversation.Id != turn.ConversationId) throw new ExperimentException("context.scope", "Conversation context does not match this turn.");
         var settings = turn.Settings;
         ExperimentStore.ValidateSettings(settings);
@@ -16,13 +17,17 @@ public static class ExperimentContextCompiler
             .SelectMany(t => new[] { new ExperimentMessage(t.Id + ":user", "user", t.UserText, t.CreatedAt),
                 new ExperimentMessage(t.Id + ":assistant", "assistant", t.AssistantText, t.FinishedAt ?? t.CreatedAt) }).ToArray();
         var selected = eligible.ToList();
-        if (settings.ThreadRecallEnabled) return ExperimentRecallAllocator.Prepare(conversation, turn, eligible, evidenceSource);
-        if (settings.Mode == "clean-room") return PrepareDirect(conversation, turn, eligible, selected);
+        if (settings.ThreadRecallEnabled) return ExperimentRecallAllocator.Prepare(conversation, turn, eligible, evidenceSource, cancellationToken);
+        if (settings.Mode == "clean-room") return PrepareDirect(conversation, turn, eligible, selected, cancellationToken);
         var allowance = settings.ContextWindowTokens - settings.MaxOutputTokens - 4096;
         int Characters() => settings.Instructions.Length + turn.UserText.Length + selected.Sum(m => m.Content.Length);
         int Units() => Encoding.UTF8.GetByteCount(settings.Instructions) + Encoding.UTF8.GetByteCount(turn.UserText) +
             selected.Sum(m => Encoding.UTF8.GetByteCount(m.Content) + 64) + 1024;
-        bool Over() => selected.Count > settings.MaxHistoryMessages || Characters() > settings.MaxInputCharacters || Units() > allowance;
+        bool Over()
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return selected.Count > settings.MaxHistoryMessages || Characters() > settings.MaxInputCharacters || Units() > allowance;
+        }
         if (settings.HistoryPolicy == "recent")
             while (selected.Count >= 2 && Over()) selected.RemoveRange(0, 2);
         if (Over()) throw new ExperimentException("context.limit",
@@ -34,13 +39,14 @@ public static class ExperimentContextCompiler
     }
 
     private static ExperimentPreparedContext PrepareDirect(ExperimentConversation conversation, ExperimentTurn turn,
-        ExperimentMessage[] eligible, List<ExperimentMessage> selected)
+        ExperimentMessage[] eligible, List<ExperimentMessage> selected, CancellationToken cancellationToken)
     {
         var settings = turn.Settings;
         var allowance = ExperimentDirectRequest.InputAllowance(settings);
         int ContentCharacters() => settings.Instructions.Length + turn.UserText.Length + selected.Sum(message => message.Content.Length);
         bool Over()
         {
+            cancellationToken.ThrowIfCancellationRequested();
             // A complete JSON request cannot be shorter than its unescaped content. Avoid
             // materializing large histories already certain to exceed these cheap gates.
             if (selected.Count > settings.MaxHistoryMessages || ContentCharacters() > settings.MaxInputCharacters) return true;
@@ -49,6 +55,7 @@ public static class ExperimentContextCompiler
         }
         if (settings.HistoryPolicy == "recent")
             while (selected.Count >= 2 && Over()) selected.RemoveRange(0, 2);
+        cancellationToken.ThrowIfCancellationRequested();
         var currentOnly = ExperimentDirectRequest.Build(settings, [], turn.UserText);
         var currentDoesNotFit = currentOnly.SerializedCharacters > settings.MaxInputCharacters || currentOnly.EstimatedInputUnits > allowance;
         var advice = currentDoesNotFit

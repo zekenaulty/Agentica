@@ -14,6 +14,51 @@ namespace Agentica.Lab.Web.Tests;
 
 public sealed class ExperimentRecallApiTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Turn_deadline_and_explicit_stop_retain_distinct_terminal_results(bool stopExplicitly)
+    {
+        var directory = Directory.CreateTempSubdirectory("agentica-recall-deadline-").FullName;
+        try
+        {
+            using var store = new ExperimentStore(directory);
+            var chat = store.Create(new() { TimeoutSeconds = 10, ThreadRecallEnabled = true, ThreadRecallMode = "manual" }, null);
+            var executor = new WaitingExecutor();
+            using var service = new ExperimentService(store, executor, new OpenAiProviderConfiguration(_ => null));
+            var turn = service.Send(chat.Id, new("Synthetic deadline check"));
+            await executor.Started.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            if (stopExplicitly) service.Cancel(chat.Id, turn.Id);
+            var until = DateTimeOffset.UtcNow.AddSeconds(20);
+            while (store.GetTurn(chat.Id, turn.Id).Status == "running" && DateTimeOffset.UtcNow < until)
+                await Task.Delay(20, TestContext.Current.CancellationToken);
+            var final = store.GetTurn(chat.Id, turn.Id);
+            Assert.Equal(stopExplicitly ? "cancelled" : "failed", final.Status);
+            Assert.Equal(stopExplicitly ? "turn.cancelled" : "turn.timeout", final.ErrorCode);
+            Assert.Equal("partial evidence", final.AssistantText);
+            Assert.Equal(1, executor.Calls);
+            Assert.Equal("turn." + final.Status, store.ReadEvents(chat.Id, turn.Id, 0, 100)[^1].Type);
+            await service.StopAsync(TestContext.Current.CancellationToken);
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    private sealed class WaitingExecutor : IExperimentExecutor
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int Calls { get; private set; }
+        public async Task<ExperimentExecutionResult> ExecuteAsync(ExperimentExecutionContext context, CancellationToken cancellationToken)
+        {
+            Calls++;
+            await context.Output("partial evidence");
+            Started.TrySetResult();
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            { return new("cancelled", Usage: new { providerCalls = 0 }, ErrorCode: "turn.cancelled"); }
+            throw new InvalidOperationException("The synthetic wait must end by cancellation.");
+        }
+    }
+
     [Fact]
     public async Task Conversation_and_source_pages_are_bounded_disjoint_and_scope_bound()
     {

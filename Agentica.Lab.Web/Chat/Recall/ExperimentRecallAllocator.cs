@@ -7,8 +7,9 @@ namespace Agentica.Lab.Web.Chat.Recall;
 internal static class ExperimentRecallAllocator
 {
     internal static ExperimentPreparedContext Prepare(ExperimentConversation conversation, ExperimentTurn turn,
-        IReadOnlyList<ExperimentMessage> eligible, IConversationEvidenceSource? source)
+        IReadOnlyList<ExperimentMessage> eligible, IConversationEvidenceSource? source, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var settings = turn.Settings;
         var recent = eligible.TakeLast(settings.ThreadRecallRecentTurns * 2).ToArray();
         var selectedIds = recent.Select(message => message.Id).Append(turn.Id + ":user").ToArray();
@@ -16,6 +17,7 @@ internal static class ExperimentRecallAllocator
             .Select(message => message.Id).ToArray();
         var asOf = turn.Sequence - 1;
         if (source is not null) ValidateSource(source, conversation.Id, asOf);
+        cancellationToken.ThrowIfCancellationRequested();
         if (recent.Length > settings.MaxHistoryMessages || !Fits(settings, recent, turn.UserText, null))
             throw new ExperimentException("context.recent_floor_limit",
                 "The current input, instructions and protected recent-turn floor do not fit the configured complete-input allowance. " +
@@ -31,7 +33,14 @@ internal static class ExperimentRecallAllocator
         object? coverage = null;
         ConversationEvidenceHead? head = null;
         var sourceUnavailable = false;
-        try { coverage = source?.GetCoverage(); head = source?.GetHead(); }
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            coverage = source?.GetCoverage();
+            cancellationToken.ThrowIfCancellationRequested();
+            head = source?.GetHead();
+            cancellationToken.ThrowIfCancellationRequested();
+        }
         catch (Exception error) when (IsSourceUnavailable(error))
         {
             sourceUnavailable = true;
@@ -46,10 +55,12 @@ internal static class ExperimentRecallAllocator
 
         ConversationEvidenceResult? Retrieve(Func<ConversationEvidenceResult> operation, string sourceId, int start, int end)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             calls++;
             try
             {
                 var result = operation();
+                cancellationToken.ThrowIfCancellationRequested();
                 ValidateResult(result, conversation.Id, asOf);
                 return result;
             }
@@ -70,13 +81,14 @@ internal static class ExperimentRecallAllocator
         {
             foreach (var selection in settings.ThreadRecallSelections.Take(settings.ThreadRecallTopK))
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (calls >= settings.ThreadRecallMaxCalls)
                 {
                     omissions.Add(new(selection.SourceId, selection.StartOffset, selection.EndOffset, "source-call-limit"));
                     continue;
                 }
                 var length = Math.Min(selection.EndOffset - selection.StartOffset, settings.ThreadRecallMaxCharacters);
-                var result = Retrieve(() => source.ReadExact(selection.SourceId, selection.StartOffset, length), selection.SourceId, selection.StartOffset, selection.EndOffset);
+                var result = Retrieve(() => source.ReadExact(selection.SourceId, selection.StartOffset, length, cancellationToken), selection.SourceId, selection.StartOffset, selection.EndOffset);
                 if (result is null) continue;
                 coverage = result.Coverage;
                 sourceTruncated |= result.Truncated;
@@ -91,7 +103,7 @@ internal static class ExperimentRecallAllocator
                         length < selection.EndOffset - selection.StartOffset ? "retrieval-character-limit" : "requested source range not fully returned"));
                 if (settings.ThreadRecallNeighborRadius > 0 && result.Hits.Count != 0 && calls < settings.ThreadRecallMaxCalls)
                 {
-                    var neighbors = Retrieve(() => source.ReadNeighbors(selection.SourceId, settings.ThreadRecallNeighborRadius, settings.ThreadRecallMaxCharacters),
+                    var neighbors = Retrieve(() => source.ReadNeighbors(selection.SourceId, settings.ThreadRecallNeighborRadius, settings.ThreadRecallMaxCharacters, cancellationToken),
                         selection.SourceId, selection.StartOffset, selection.EndOffset);
                     if (neighbors is null) continue;
                     candidateCount += neighbors.CandidateCount; inspectedCount += neighbors.InspectedCount;
@@ -115,7 +127,7 @@ internal static class ExperimentRecallAllocator
                 effectiveQuery = boundedQuery;
                 if (boundedQuery.Length != query.Length) omissions.Add(new("", boundedQuery.Length, query.Length, "query-character-limit"));
                 var result = Retrieve(() => source.Search(new(boundedQuery, settings.ThreadRecallTopK, settings.ThreadRecallMaxCharacters,
-                    settings.ThreadRecallNeighborRadius)), "", 0, 0);
+                    settings.ThreadRecallNeighborRadius), cancellationToken), "", 0, 0);
                 if (result is not null)
                 {
                     coverage = result.Coverage; method = result.QueryMethod;
@@ -124,6 +136,7 @@ internal static class ExperimentRecallAllocator
                     var expandedSources = new HashSet<string>(StringComparer.Ordinal);
                     foreach (var hit in result.Hits)
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
                         candidates.Add(hit); // Preserve the exact primary anchor before optional neighboring text.
                         if (settings.ThreadRecallNeighborRadius == 0 || !expandedSources.Add(hit.Source.SourceId)) continue;
                         if (calls >= settings.ThreadRecallMaxCalls)
@@ -131,7 +144,7 @@ internal static class ExperimentRecallAllocator
                             omissions.Add(new(hit.Source.SourceId, hit.StartOffset, hit.EndOffset, "neighbor-expansion-call-limit"));
                             continue;
                         }
-                        var neighbors = Retrieve(() => source.ReadNeighbors(hit.Source.SourceId, settings.ThreadRecallNeighborRadius, settings.ThreadRecallMaxCharacters),
+                        var neighbors = Retrieve(() => source.ReadNeighbors(hit.Source.SourceId, settings.ThreadRecallNeighborRadius, settings.ThreadRecallMaxCharacters, cancellationToken),
                             hit.Source.SourceId, hit.StartOffset, hit.EndOffset);
                         if (neighbors is null) continue;
                         candidateCount += neighbors.CandidateCount; inspectedCount += neighbors.InspectedCount;
@@ -153,6 +166,7 @@ internal static class ExperimentRecallAllocator
             calls, Query: effectiveQuery, SourceHead: head), accepted.ToArray());
         foreach (var hit in candidates)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ValidateHit(hit, asOf);
             if (recentIds.Contains(hit.Source.SourceId))
             {
@@ -173,6 +187,7 @@ internal static class ExperimentRecallAllocator
                 var low = 0; var high = Math.Max(0, maximum);
                 while (low < high)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var middle = low + (high - low + 1) / 2;
                     var content = ExactPrefix(part.Content, middle);
                     var proposal = part with { Content = content, EndOffset = part.StartOffset + content.Length };
@@ -189,6 +204,7 @@ internal static class ExperimentRecallAllocator
             }
         }
         var recall = Context();
+        cancellationToken.ThrowIfCancellationRequested();
         var envelope = ExperimentDirectRequest.Build(settings, recent, turn.UserText, recall);
         var units = settings.Mode == "clean-room" ? envelope.EstimatedInputUnits : HarnessUnits(settings, recent, turn.UserText, recall);
         return new(recent, new(conversation.Id, turn.Id, selectedIds, omittedIds,

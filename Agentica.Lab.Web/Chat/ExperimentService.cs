@@ -38,6 +38,8 @@ public sealed class ExperimentService(ExperimentStore store, IExperimentExecutor
 
     private async Task ExecuteAsync(string conversationId, ExperimentTurn turn, CancellationTokenSource cancellation, TaskCompletionSource completion)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(turn.Settings.TimeoutSeconds));
         try
         {
             await Task.Yield();
@@ -45,7 +47,7 @@ public sealed class ExperimentService(ExperimentStore store, IExperimentExecutor
             var head = store.GetHead(conversationId);
             var window = Window(head, turn);
             var source = turn.Settings.ThreadRecallEnabled ? store.BindEvidenceSource(conversationId, turn.Sequence - 1) : null;
-            var context = ExperimentContextCompiler.Prepare(window, turn, source);
+            var context = ExperimentContextCompiler.Prepare(window, turn, source, deadline.Token);
             store.Append(conversationId, turn.Id, new("context.manifest", context.Manifest with { HistoryPage = window.HistoryPage }));
             if (context.Recall is not null) store.Append(conversationId, turn.Id, new("context.recall", context.Recall.Manifest));
             store.Append(conversationId, turn.Id, new("context.isolation", new
@@ -72,13 +74,25 @@ public sealed class ExperimentService(ExperimentStore store, IExperimentExecutor
                     return Task.CompletedTask;
                 })
             { EvidenceSource = source, Recall = context.Recall };
-            var result = await executor.ExecuteAsync(execution, cancellation.Token).ConfigureAwait(false);
+            var result = await executor.ExecuteAsync(execution, deadline.Token).ConfigureAwait(false);
+            if (result.Status == "cancelled" && deadline.IsCancellationRequested && !cancellation.IsCancellationRequested)
+                result = result with
+                {
+                    Status = "failed",
+                    ErrorCode = "turn.timeout",
+                    ErrorMessage = "The turn time limit expired. Partial evidence is retained; provider usage or an in-flight effect may be unknown. No automatic replay occurred."
+                };
             Finish(conversationId, turn.Id, result);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
             Finish(conversationId, turn.Id, new("cancelled", ErrorCode: "turn.cancelled",
                 ErrorMessage: "Cancelled or timed out. Partial output is retained. Provider usage or an in-flight effect may be unknown; no automatic replay occurred."));
+        }
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+        {
+            Finish(conversationId, turn.Id, new("failed", ErrorCode: "turn.timeout",
+                ErrorMessage: "The turn time limit expired during context preparation or execution. Partial evidence is retained; no automatic replay occurred."));
         }
         catch (ExperimentException exception)
         {

@@ -408,6 +408,60 @@ public sealed class ExperimentRecallTests
         Assert.Equal(0, source.NeighborCalls);
     }
 
+    [Fact]
+    public void Already_cancelled_preparation_stops_before_floor_work_or_source_access()
+    {
+        var fixture = new Fixture(new ExperimentSettings { ThreadRecallEnabled = true });
+        var source = new Source { ThrowOnAccess = true };
+        using var cancellation = new CancellationTokenSource(); cancellation.Cancel();
+        Assert.ThrowsAny<OperationCanceledException>(() => ExperimentContextCompiler.Prepare(fixture.Conversation, fixture.Turn, source, cancellation.Token));
+        Assert.Equal(0, source.Accesses);
+    }
+
+    [Fact]
+    public async Task Cancellation_during_prefetch_reaches_the_source_and_prevents_provider_dispatch()
+    {
+        var fixture = new Fixture(new ExperimentSettings { ThreadRecallEnabled = true, ThreadRecallMode = "auto" });
+        using var cancellation = new CancellationTokenSource();
+        var source = new Source
+        {
+            OnSearch = token =>
+            {
+                Assert.Equal(cancellation.Token, token);
+                cancellation.Cancel();
+                token.ThrowIfCancellationRequested();
+            }
+        };
+        using var handler = new Handler(_ => Text("A cancelled preparation must never reach this response."));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            var prepared = ExperimentContextCompiler.Prepare(fixture.Conversation, fixture.Turn, source, cancellation.Token);
+            await Execute(handler, fixture.Context(prepared));
+        });
+        Assert.Equal(1, source.SearchCalls);
+        Assert.Equal(cancellation.Token, Assert.Single(source.RetrievalTokens));
+        Assert.Empty(handler.Bodies);
+    }
+
+    [Theory]
+    [InlineData("manual")]
+    [InlineData("auto")]
+    public void Every_exact_search_and_neighbor_prefetch_uses_the_same_preparation_token(string mode)
+    {
+        var fixture = new Fixture(new ExperimentSettings
+        {
+            ThreadRecallEnabled = true,
+            ThreadRecallMode = mode,
+            ThreadRecallSelections = [new("old:user", 0, 16)],
+            ThreadRecallNeighborRadius = 1
+        });
+        var source = new Source(); source.Add("old", 1, "user", "special old fact"); source.SearchIds = ["old:user"];
+        using var cancellation = new CancellationTokenSource();
+        _ = ExperimentContextCompiler.Prepare(fixture.Conversation, fixture.Turn, source, cancellation.Token);
+        Assert.Equal(2, source.RetrievalTokens.Count);
+        Assert.All(source.RetrievalTokens, token => Assert.Equal(cancellation.Token, token));
+    }
+
     private static ToolInvocation Invoke(string tool, params (string Name, object Value)[] values) =>
         new("run", "step", tool, values.ToDictionary(item => item.Name, item => (object?)item.Value));
     private static JsonElement Data(ToolResult result) => JsonSerializer.SerializeToElement(result.Receipt.Data).GetProperty("result");
@@ -480,6 +534,8 @@ public sealed class ExperimentRecallTests
         public string CoverageStatus { get; init; } = "COMPLETE";
         public bool SearchUnavailable { get; init; }
         public bool NeighborUnavailable { get; init; }
+        public Action<CancellationToken>? OnSearch { get; init; }
+        public List<CancellationToken> RetrievalTokens { get; } = [];
         public Dictionary<string, string[]> NeighborIds { get; } = new(StringComparer.Ordinal);
         public Dictionary<string, string> Text { get; } = new(StringComparer.Ordinal);
         private readonly Dictionary<string, ConversationSourceHeader> _headers = new(StringComparer.Ordinal);
@@ -499,6 +555,8 @@ public sealed class ExperimentRecallTests
         public ConversationEvidenceResult ReadExact(string sourceId, int startOffset = 0, int maxCharacters = 4000, CancellationToken cancellationToken = default)
         {
             Access(); ReadCalls++;
+            RetrievalTokens.Add(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             if (!Text.TryGetValue(sourceId, out var text)) return Result([], "UNAVAILABLE");
             var end = Math.Min(text.Length, startOffset + maxCharacters);
             if (end < text.Length && end > startOffset && char.IsHighSurrogate(text[end - 1])) end--;
@@ -507,12 +565,17 @@ public sealed class ExperimentRecallTests
         public ConversationEvidenceResult ReadNeighbors(string sourceId, int radius = 1, int maxCharacters = 8000, CancellationToken cancellationToken = default)
         {
             Access(); NeighborCalls++; LastNeighborMaximum = maxCharacters;
+            RetrievalTokens.Add(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             if (NeighborUnavailable) throw new IOException("Synthetic private neighbor failure; never expose exception text.");
             return Result(NeighborIds.GetValueOrDefault(sourceId, []).Select(id => new ConversationEvidenceHit(_headers[id], 0, Text[id].Length, Text[id], "adjacent source fixture", [])).ToArray());
         }
         public ConversationEvidenceResult Search(ConversationEvidenceSearch query, CancellationToken cancellationToken = default)
         {
             Access(); SearchCalls++;
+            RetrievalTokens.Add(cancellationToken);
+            OnSearch?.Invoke(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             if (SearchUnavailable) throw new IOException("Synthetic private source failure; never expose exception text.");
             return Result(SearchIds.Select(id => new ConversationEvidenceHit(_headers[id], 0, Text[id].Length, Text[id], "lexical fixture", [])).ToArray());
         }
