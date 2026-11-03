@@ -1,12 +1,20 @@
 # Agentica Product Status And Goal Xref
 
-Canonical status date: 2026-10-09
+Canonical status date: 2026-11-03
 
 Lifecycle: Incubating
 
 This is the authoritative high-level status page for Agentica. Detailed goal documents remain useful design records and evidence logs, but they do not independently set current priority. When another document conflicts with this page about product identity, active work, lifecycle, or completion, this page wins.
 
-## Current integration slice: Lab web and external hosts
+## Current program: reconcile, integrate and prove the next contracts
+
+The owner has authorized Agentica issue creation, bounded implementation and stable reviewed merges. [Program #12](https://github.com/zekenaulty/Agentica/issues/12) links five epics covering obligation contracts, provider/MCP correctness, interpretation reuse, qualification, and the independent Nyx learning path. [The reconciliation](reconciliation/2026-11-03/planning-reconciliation.md) pins the live Google planning cuts and distinguishes shipped source, existing branches, proposals and external-host gates. [Git custody](reconciliation/2026-11-03/git-custody.md) records the pre-integration local and remote inventory.
+
+The Lab-owned clean-room chat was merged through [PR #11](https://github.com/zekenaulty/Agentica/pull/11) on 2026-11-03 at `3cb2d63395fee277a8eb790c57b271cd6277125b`. Its exact admitted head `cc813f6a9c2b1a851a1698b52ab2e96a4a68716f` passed both Windows and Linux jobs in [CI run 41643125122](https://github.com/zekenaulty/Agentica/actions/runs/41643125122); the retained-trace finding is corrected and its review thread resolved. [The admission record](reconciliation/2026-11-03/pr11-review.md) preserves the initial review and focused correction evidence. This is a merged experimental Lab slice, with no new live-provider or public-package readiness claim.
+
+The separate durable operation/start/adoption/action-recovery frontier is tracked by [#32](https://github.com/zekenaulty/Agentica/issues/32). New obligation contracts and learning fixtures remain planned or under qualification; local conformance evidence does not establish admission to main or operational Nyx integration. Agentica owns these changes; Bridge, Cloud, Nyx and Maze Battle remain independently owned and untouched by this program.
+
+## Retained October 9 integration baseline: Lab web and external hosts
 
 The initial `Agentica.Lab.Web` service is implemented and locally qualified. It runs the existing Agentica loop with five streaming provider adapters, a browser dashboard, a reusable external-host WebSocket contract, bounded context and evidence tools, and durable original-action custody for reconnect/restart reconciliation. The scoped inventory is a deterministic fixture. The service contains no Maze Battle simulation or domain policy.
 
@@ -252,7 +260,7 @@ The following are intentionally outside the active slice:
 - additional ChessQuest, MazeQuest, HexQuest, WorkbenchQuest, or campaign feature growth;
 - workspace context graph implementation;
 - domain router/binding implementation;
-- MCP server/client adapters;
+- MCP server adapter and broader client parity beyond the implemented read-only client slice;
 - full multi-agent orchestration;
 - self-training, skill mining, prompt evolution, or automatic policy promotion;
 - the full multi-hash, taint, generated-tool, registry, and automatic-promotion architecture beyond the minimal T3 vertical slice;

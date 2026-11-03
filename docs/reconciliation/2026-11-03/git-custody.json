@@ -1,0 +1,3176 @@
+{
+  "capturedUtc": "2026-11-03T12:10:05.020623+00:00",
+  "repository": "C:/Users/Zythis/source/repos/Agentica",
+  "mainReference": "origin/main",
+  "mainHead": "977d0cab5421fd4e09fd33f1224f241b7e425abe",
+  "worktrees": [
+    {
+      "worktree": "C:/Users/Zythis/source/repos/Agentica",
+      "HEAD": "e075d932bdf13db713b1e338eaa443a093a6953e",
+      "branch": "refs/heads/codex/mcp-streaming-first-slice",
+      "exists": true,
+      "changes": [
+        {
+          "status": " M",
+          "path": "README.md",
+          "bytes": 32582,
+          "sha256": "4226fc5d3c05261d0f13741b5b962651a9b1eba5e3a973c389f371e34347ec9c",
+          "trackedContentComparison": {
+            "origin/main": {
+              "exists": true,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            },
+            "codex/lab-clean-room-chat": {
+              "exists": true,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            }
+          },
+          "disposition": "Harvest selected MCP client/status corrections and direction link onto current main; do not copy the stale whole README."
+        },
+        {
+          "status": " M",
+          "path": "docs/Agentica.DeferredWork.md",
+          "bytes": 4153,
+          "sha256": "5bf06432a97544e8eb5f45d0d23044bb989f86b0f4ee465b4c4d4625d8035c3d",
+          "trackedContentComparison": {
+            "origin/main": {
+              "exists": true,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            },
+            "codex/lab-clean-room-chat": {
+              "exists": true,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            }
+          },
+          "disposition": "Harvest selected MCP client/status corrections onto current main; reconcile remaining work against current source."
+        },
+        {
+          "status": " M",
+          "path": "docs/Agentica.ProductStatus.md",
+          "bytes": 34242,
+          "sha256": "5df54971e9aae774b5cefe76061a56cf3d081606ed6bda9b04363e1bca8a60c6",
+          "trackedContentComparison": {
+            "origin/main": {
+              "exists": true,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            },
+            "codex/lab-clean-room-chat": {
+              "exists": true,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            }
+          },
+          "disposition": "Harvest MCP client parity wording into current lifecycle/status file; preserve later merged status content."
+        },
+        {
+          "status": "??",
+          "path": ".agents/learning/MEMORY.md",
+          "bytes": 1748,
+          "sha256": "6c42c011071ddbeb31ebbb5447085e97353b706d2a3b149e1e394686a8c69255",
+          "trackedContentComparison": {
+            "origin/main": {
+              "exists": false,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            },
+            "codex/lab-clean-room-chat": {
+              "exists": false,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            }
+          },
+          "disposition": "Harvest local development learning registry; verify evidence pins and retain corrections separately from implementation claims."
+        },
+        {
+          "status": "??",
+          "path": ".agents/learning/records/agentica-conservative-input-budget.json",
+          "bytes": 1456,
+          "sha256": "6444c216d880ac8a7fd30a6f94e256d55f5b7e22b8e45389913606576971d911",
+          "trackedContentComparison": {
+            "origin/main": {
+              "exists": false,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            },
+            "codex/lab-clean-room-chat": {
+              "exists": false,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            }
+          },
+          "disposition": "Harvest as pinned core observation; Lab native counting now differs and must be stated to avoid reinstating byte-based production admission."
+        },
+        {
+          "status": "??",
+          "path": ".agents/learning/records/agentica-host-owned-state.json",
+          "bytes": 1384,
+          "sha256": "70d7683c84571f4b2f1bdd00a770743f8113fd572ce3540ac7238e1ea50edde2",
+          "trackedContentComparison": {
+            "origin/main": {
+              "exists": false,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            },
+            "codex/lab-clean-room-chat": {
+              "exists": false,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            }
+          },
+          "disposition": "Harvest pinned host-ownership lesson."
+        },
+        {
+          "status": "??",
+          "path": ".agents/learning/records/agentica-observability-is-not-call-admission.json",
+          "bytes": 1648,
+          "sha256": "ea953af8e6df20fea88cba33341ca15c5c0aa934753b3cdecdc59d1c932e1f5d",
+          "trackedContentComparison": {
+            "origin/main": {
+              "exists": false,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            },
+            "codex/lab-clean-room-chat": {
+              "exists": false,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            }
+          },
+          "disposition": "Harvest pinned observability/admission lesson."
+        },
+        {
+          "status": "??",
+          "path": ".agents/learning/scope.json",
+          "bytes": 49,
+          "sha256": "bceda6a34f704015ab065626ccbb3e3ffcfcd97cc4f890ed2a7806573124ee71",
+          "trackedContentComparison": {
+            "origin/main": {
+              "exists": false,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            },
+            "codex/lab-clean-room-chat": {
+              "exists": false,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            }
+          },
+          "disposition": "Harvest Agentica learning scope configuration."
+        },
+        {
+          "status": "??",
+          "path": ".agents/skills/agentica-work-learning/SKILL.md",
+          "bytes": 2317,
+          "sha256": "fe9839d59f220b159dd63c8b153576e5ff58ce769e12d2ef1af8321d2f98dbc5",
+          "trackedContentComparison": {
+            "origin/main": {
+              "exists": false,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            },
+            "codex/lab-clean-room-chat": {
+              "exists": false,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            }
+          },
+          "disposition": "Harvest repository-local learning skill; global/shared helpers are external dependencies and must not be edited in this Agentica-only task."
+        },
+        {
+          "status": "??",
+          "path": ".agents/skills/agentica-work-learning/agents/openai.yaml",
+          "bytes": 248,
+          "sha256": "633089b8aa4d7aa50e88e862939ca840d5a1ac35a95ef3bd81df709e187b9708",
+          "trackedContentComparison": {
+            "origin/main": {
+              "exists": false,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            },
+            "codex/lab-clean-room-chat": {
+              "exists": false,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            }
+          },
+          "disposition": "Harvest companion skill metadata."
+        },
+        {
+          "status": "??",
+          "path": "AGENTS.md",
+          "bytes": 823,
+          "sha256": "1a33219c35ccbfab5269371d697a89361accb4a19099c0df06f2634ebbe0181b",
+          "trackedContentComparison": {
+            "origin/main": {
+              "exists": false,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            },
+            "codex/lab-clean-room-chat": {
+              "exists": false,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            }
+          },
+          "disposition": "Harvest repository-local development guidance."
+        },
+        {
+          "status": "??",
+          "path": "docs/Agentica.TypedObligationActivation.Direction.md",
+          "bytes": 7170,
+          "sha256": "e80b90db90b85338575833ab72091b00f6c4e838300a86bd955703418707f6a9",
+          "trackedContentComparison": {
+            "origin/main": {
+              "exists": false,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            },
+            "codex/lab-clean-room-chat": {
+              "exists": false,
+              "sameBytes": false,
+              "sameNormalizedLines": false
+            }
+          },
+          "disposition": "Harvest whole planning-only direction note after checking linked decision revisions; dated implementation claims remain pinned to e075d93."
+        }
+      ],
+      "statusSummary": "## codex/mcp-streaming-first-slice...origin/codex/mcp-streaming-first-slice\n M README.md\n M docs/Agentica.DeferredWork.md\n M docs/Agentica.ProductStatus.md\n?? .agents/\n?? AGENTS.md\n?? docs/Agentica.TypedObligationActivation.Direction.md",
+      "ignoredTopLevelPaths": [
+        ".agentica/",
+        ".env",
+        ".vs/",
+        "Agentica.CLI/obj/",
+        "Agentica.Clients/bin/",
+        "Agentica.Clients/obj/",
+        "Agentica.Lab/.agentica/",
+        "Agentica.Lab/Agentica.Lab.csproj.user",
+        "Agentica.Lab/Properties/launchSettings.json",
+        "Agentica.Lab/bin/",
+        "Agentica.Lab/obj/",
+        "Agentica.Mcp/bin/",
+        "Agentica.Mcp/obj/",
+        "Agentica.Tests/bin/",
+        "Agentica.Tests/obj/",
+        "Agentica/bin/",
+        "Agentica/obj/",
+        "artifacts/"
+      ],
+      "headAtCapture": "e075d932bdf13db713b1e338eaa443a093a6953e",
+      "upstream": "origin/codex/mcp-streaming-first-slice"
+    },
+    {
+      "worktree": "C:/Users/Zythis/.codex/worktrees/lab-clean-room-chat/Agentica",
+      "HEAD": "785040e3a7dc2c0b3c905716f14c8fbe01143a8e",
+      "branch": "refs/heads/codex/lab-clean-room-chat",
+      "exists": true,
+      "changes": [],
+      "statusSummary": "## codex/lab-clean-room-chat...origin/codex/lab-clean-room-chat",
+      "ignoredTopLevelPaths": [
+        ".agentica/",
+        "Agentica.Clients.Tests/bin/",
+        "Agentica.Clients.Tests/obj/",
+        "Agentica.Clients/bin/",
+        "Agentica.Clients/obj/",
+        "Agentica.Lab.Web.Tests/bin/",
+        "Agentica.Lab.Web.Tests/obj/",
+        "Agentica.Lab.Web/bin/",
+        "Agentica.Lab.Web/obj/",
+        "Agentica.Lab/bin/",
+        "Agentica.Lab/obj/",
+        "Agentica.Mcp/bin/",
+        "Agentica.Mcp/obj/",
+        "Agentica.Tests/bin/",
+        "Agentica.Tests/obj/",
+        "Agentica/bin/",
+        "Agentica/obj/",
+        "samples/Agentica.Lab.Web.FixtureHost/bin/",
+        "samples/Agentica.Lab.Web.FixtureHost/obj/"
+      ],
+      "headAtCapture": "785040e3a7dc2c0b3c905716f14c8fbe01143a8e",
+      "upstream": "origin/codex/lab-clean-room-chat"
+    },
+    {
+      "worktree": "C:/Users/Zythis/.codex/worktrees/maze-action-recovery/Agentica",
+      "HEAD": "27cb2ce9717438edfe19487e3920faa183112c97",
+      "branch": "refs/heads/codex/maze-action-recovery",
+      "exists": true,
+      "changes": [],
+      "statusSummary": "## codex/maze-action-recovery...origin/codex/maze-action-recovery",
+      "ignoredTopLevelPaths": [
+        "Agentica.Clients/bin/",
+        "Agentica.Clients/obj/",
+        "Agentica.Lab.Web.Tests/bin/",
+        "Agentica.Lab.Web.Tests/obj/",
+        "Agentica.Lab.Web/bin/",
+        "Agentica.Lab.Web/obj/",
+        "Agentica/bin/",
+        "Agentica/obj/",
+        "artifacts/",
+        "samples/Agentica.Lab.Web.FixtureHost/bin/",
+        "samples/Agentica.Lab.Web.FixtureHost/obj/"
+      ],
+      "headAtCapture": "27cb2ce9717438edfe19487e3920faa183112c97",
+      "upstream": "origin/codex/maze-action-recovery"
+    },
+    {
+      "worktree": "C:/Users/Zythis/.codex/worktrees/maze-adoption-tests/Agentica",
+      "HEAD": "50d635c6f037a14694c0152159ff78662556249a",
+      "branch": "refs/heads/codex/maze-adoption-tests",
+      "exists": true,
+      "changes": [],
+      "statusSummary": "## codex/maze-adoption-tests",
+      "ignoredTopLevelPaths": [
+        "Agentica.Clients/bin/",
+        "Agentica.Clients/obj/",
+        "Agentica.Lab.Web.Tests/bin/",
+        "Agentica.Lab.Web.Tests/obj/",
+        "Agentica.Lab.Web/bin/",
+        "Agentica.Lab.Web/obj/",
+        "Agentica/bin/",
+        "Agentica/obj/",
+        "samples/Agentica.Lab.Web.FixtureHost/bin/",
+        "samples/Agentica.Lab.Web.FixtureHost/obj/"
+      ],
+      "headAtCapture": "50d635c6f037a14694c0152159ff78662556249a",
+      "upstream": null
+    },
+    {
+      "worktree": "C:/Users/Zythis/.codex/worktrees/maze-compact-outcome/Agentica",
+      "HEAD": "a1f00ac142a4e38cec2ff175849c67afd6ea17f0",
+      "branch": "refs/heads/codex/maze-compact-outcome",
+      "exists": true,
+      "changes": [],
+      "statusSummary": "## codex/maze-compact-outcome",
+      "ignoredTopLevelPaths": [
+        "Agentica.Clients/bin/",
+        "Agentica.Clients/obj/",
+        "Agentica.Lab.Web.Tests/bin/",
+        "Agentica.Lab.Web.Tests/obj/",
+        "Agentica.Lab.Web/bin/",
+        "Agentica.Lab.Web/obj/",
+        "Agentica/bin/",
+        "Agentica/obj/",
+        "artifacts/",
+        "samples/Agentica.Lab.Web.FixtureHost/bin/",
+        "samples/Agentica.Lab.Web.FixtureHost/obj/"
+      ],
+      "headAtCapture": "a1f00ac142a4e38cec2ff175849c67afd6ea17f0",
+      "upstream": null
+    },
+    {
+      "worktree": "C:/Users/Zythis/.codex/worktrees/maze-operation-stop/Agentica",
+      "HEAD": "d65fb5b7a5d4895921f8854054215b1d6279852e",
+      "branch": "refs/heads/codex/maze-decision-adoption",
+      "exists": true,
+      "changes": [],
+      "statusSummary": "## codex/maze-decision-adoption...origin/codex/maze-decision-adoption",
+      "ignoredTopLevelPaths": [
+        "Agentica.Clients/bin/",
+        "Agentica.Clients/obj/",
+        "Agentica.Lab.Web.Tests/bin/",
+        "Agentica.Lab.Web.Tests/obj/",
+        "Agentica.Lab.Web/bin/",
+        "Agentica.Lab.Web/obj/",
+        "Agentica/bin/",
+        "Agentica/obj/",
+        "artifacts/",
+        "samples/Agentica.Lab.Web.FixtureHost/bin/",
+        "samples/Agentica.Lab.Web.FixtureHost/obj/"
+      ],
+      "headAtCapture": "d65fb5b7a5d4895921f8854054215b1d6279852e",
+      "upstream": "origin/codex/maze-decision-adoption"
+    },
+    {
+      "worktree": "C:/Users/Zythis/.codex/worktrees/maze-start-admission/Agentica",
+      "HEAD": "adb5cfecdc73888e9d9243a6b4131e50b9c9761b",
+      "branch": "refs/heads/codex/maze-start-admission",
+      "exists": true,
+      "changes": [],
+      "statusSummary": "## codex/maze-start-admission...origin/codex/maze-start-admission",
+      "ignoredTopLevelPaths": [
+        "Agentica.Clients/bin/",
+        "Agentica.Clients/obj/",
+        "Agentica.Lab.Web.Tests/bin/",
+        "Agentica.Lab.Web.Tests/obj/",
+        "Agentica.Lab.Web/bin/",
+        "Agentica.Lab.Web/obj/",
+        "Agentica/bin/",
+        "Agentica/obj/",
+        "samples/Agentica.Lab.Web.FixtureHost/bin/",
+        "samples/Agentica.Lab.Web.FixtureHost/obj/"
+      ],
+      "headAtCapture": "adb5cfecdc73888e9d9243a6b4131e50b9c9761b",
+      "upstream": "origin/codex/maze-start-admission"
+    },
+    {
+      "worktree": "C:/Users/Zythis/.codex/worktrees/maze-start-sdk/Agentica",
+      "HEAD": "ea8d808912a75f26eea107a9c0bcfd0b0e5a991c",
+      "branch": "refs/heads/codex/maze-start-sdk",
+      "exists": true,
+      "changes": [],
+      "statusSummary": "## codex/maze-start-sdk",
+      "ignoredTopLevelPaths": [],
+      "headAtCapture": "ea8d808912a75f26eea107a9c0bcfd0b0e5a991c",
+      "upstream": null
+    },
+    {
+      "worktree": "C:/Users/Zythis/.codex/worktrees/maze-start-store/Agentica",
+      "HEAD": "deff22970ab1dd75765a9cb683e8c85ba589d6ca",
+      "branch": "refs/heads/codex/maze-start-store",
+      "exists": true,
+      "changes": [],
+      "statusSummary": "## codex/maze-start-store",
+      "ignoredTopLevelPaths": [
+        "Agentica.Clients/bin/",
+        "Agentica.Clients/obj/",
+        "Agentica.Lab.Web.Tests/bin/",
+        "Agentica.Lab.Web.Tests/obj/",
+        "Agentica.Lab.Web/bin/",
+        "Agentica.Lab.Web/obj/",
+        "Agentica/bin/",
+        "Agentica/obj/",
+        "samples/Agentica.Lab.Web.FixtureHost/bin/",
+        "samples/Agentica.Lab.Web.FixtureHost/obj/"
+      ],
+      "headAtCapture": "deff22970ab1dd75765a9cb683e8c85ba589d6ca",
+      "upstream": null
+    },
+    {
+      "worktree": "C:/Users/Zythis/.codex/worktrees/maze-stop-tests/Agentica",
+      "HEAD": "1888eefe31fff65fcd3b3ac631766b6343fd9580",
+      "branch": "refs/heads/codex/maze-stop-tests",
+      "exists": true,
+      "changes": [],
+      "statusSummary": "## codex/maze-stop-tests",
+      "ignoredTopLevelPaths": [],
+      "headAtCapture": "1888eefe31fff65fcd3b3ac631766b6343fd9580",
+      "upstream": null
+    },
+    {
+      "worktree": "C:/Users/Zythis/.codex/worktrees/maze-wake-replay/Agentica",
+      "HEAD": "577a214d020ba35ba3188761da6a114b978516b7",
+      "branch": "refs/heads/codex/maze-wake-replay",
+      "exists": true,
+      "changes": [],
+      "statusSummary": "## codex/maze-wake-replay",
+      "ignoredTopLevelPaths": [
+        "Agentica.Clients/bin/",
+        "Agentica.Clients/obj/",
+        "Agentica.Lab.Web.Tests/bin/",
+        "Agentica.Lab.Web.Tests/obj/",
+        "Agentica.Lab.Web/bin/",
+        "Agentica.Lab.Web/obj/",
+        "Agentica/bin/",
+        "Agentica/obj/",
+        "artifacts/",
+        "samples/Agentica.Lab.Web.FixtureHost/bin/",
+        "samples/Agentica.Lab.Web.FixtureHost/obj/"
+      ],
+      "headAtCapture": "577a214d020ba35ba3188761da6a114b978516b7",
+      "upstream": null
+    },
+    {
+      "worktree": "C:/Users/Zythis/.codex/worktrees/roadmap-reconciliation/Agentica",
+      "HEAD": "977d0cab5421fd4e09fd33f1224f241b7e425abe",
+      "detached": "",
+      "exists": true,
+      "changes": [],
+      "statusSummary": "## HEAD (no branch)",
+      "ignoredTopLevelPaths": [],
+      "headAtCapture": "977d0cab5421fd4e09fd33f1224f241b7e425abe",
+      "upstream": null
+    },
+    {
+      "worktree": "C:/Users/Zythis/Documents/Codex/2026-09-30/files-pasted-by-the-user-you/work/agentica-lab-web",
+      "HEAD": "1e1a2df3c489d633b62b739b7bd61eba2cfa3c5d",
+      "branch": "refs/heads/codex/lab-durable-handoff",
+      "exists": true,
+      "changes": [],
+      "statusSummary": "## codex/lab-durable-handoff...origin/codex/lab-durable-handoff",
+      "ignoredTopLevelPaths": [
+        "Agentica.Clients/bin/",
+        "Agentica.Clients/obj/",
+        "Agentica.Lab.Web.Tests/bin/",
+        "Agentica.Lab.Web.Tests/obj/",
+        "Agentica.Lab.Web/.agentica/",
+        "Agentica.Lab.Web/bin/",
+        "Agentica.Lab.Web/obj/",
+        "Agentica.Lab/bin/",
+        "Agentica.Lab/obj/",
+        "Agentica.Mcp/bin/",
+        "Agentica.Mcp/obj/",
+        "Agentica.Tests/bin/",
+        "Agentica.Tests/obj/",
+        "Agentica/bin/",
+        "Agentica/obj/",
+        "artifacts/",
+        "browser-tests/artifacts/",
+        "samples/Agentica.Lab.Web.FixtureHost/bin/",
+        "samples/Agentica.Lab.Web.FixtureHost/obj/"
+      ],
+      "headAtCapture": "1e1a2df3c489d633b62b739b7bd61eba2cfa3c5d",
+      "upstream": "origin/codex/lab-durable-handoff"
+    },
+    {
+      "worktree": "C:/Users/Zythis/Documents/Codex/2026-09-30/files-pasted-by-the-user-you/work/agentica-mcp-acceptance",
+      "HEAD": "6ee6224d78fb0860ab889c08499cd4639e646568",
+      "branch": "refs/heads/codex/mcp-sdk-acceptance",
+      "exists": true,
+      "changes": [],
+      "statusSummary": "## codex/mcp-sdk-acceptance",
+      "ignoredTopLevelPaths": [
+        "Agentica.Clients/bin/",
+        "Agentica.Clients/obj/",
+        "Agentica.Lab/bin/",
+        "Agentica.Lab/obj/",
+        "Agentica.Mcp/bin/",
+        "Agentica.Mcp/obj/",
+        "Agentica.Tests/bin/",
+        "Agentica.Tests/obj/",
+        "Agentica/bin/",
+        "Agentica/obj/"
+      ],
+      "headAtCapture": "6ee6224d78fb0860ab889c08499cd4639e646568",
+      "upstream": null
+    },
+    {
+      "worktree": "C:/Users/Zythis/Documents/Codex/2026-09-30/files-pasted-by-the-user-you/work/agentica-provider-continuation",
+      "HEAD": "cd34431a2be1f6a5878c35666f6115d7253a7830",
+      "branch": "refs/heads/codex/provider-run-continuation",
+      "exists": true,
+      "changes": [],
+      "statusSummary": "## codex/provider-run-continuation",
+      "ignoredTopLevelPaths": [
+        "Agentica.Clients/bin/",
+        "Agentica.Clients/obj/",
+        "Agentica.Lab/bin/",
+        "Agentica.Lab/obj/",
+        "Agentica.Mcp/bin/",
+        "Agentica.Mcp/obj/",
+        "Agentica.Tests/bin/",
+        "Agentica.Tests/obj/",
+        "Agentica/bin/",
+        "Agentica/obj/"
+      ],
+      "headAtCapture": "cd34431a2be1f6a5878c35666f6115d7253a7830",
+      "upstream": null
+    },
+    {
+      "worktree": "C:/Users/Zythis/Documents/Codex/2026-09-30/files-pasted-by-the-user-you/work/agentica-reasoning-cli",
+      "HEAD": "f9c777301b6bb9c306b942a2ecc2a66e107b3b15",
+      "branch": "refs/heads/codex/reasoning-effort-cli",
+      "exists": true,
+      "changes": [],
+      "statusSummary": "## codex/reasoning-effort-cli",
+      "ignoredTopLevelPaths": [
+        "Agentica.Clients/bin/",
+        "Agentica.Clients/obj/",
+        "Agentica.Lab/bin/",
+        "Agentica.Lab/obj/",
+        "Agentica.Mcp/bin/",
+        "Agentica.Mcp/obj/",
+        "Agentica.Tests/bin/",
+        "Agentica.Tests/obj/",
+        "Agentica/bin/",
+        "Agentica/obj/"
+      ],
+      "headAtCapture": "f9c777301b6bb9c306b942a2ecc2a66e107b3b15",
+      "upstream": null
+    },
+    {
+      "worktree": "C:/Users/Zythis/source/repos/Agentica-projection",
+      "HEAD": "d964b3e48f17e28009420e3a675fdba00a12ad7f",
+      "branch": "refs/heads/codex/semantic-projection",
+      "exists": true,
+      "changes": [],
+      "statusSummary": "## codex/semantic-projection",
+      "ignoredTopLevelPaths": [
+        "Agentica.Clients/bin/",
+        "Agentica.Clients/obj/",
+        "Agentica.Lab/bin/",
+        "Agentica.Lab/obj/",
+        "Agentica.Mcp/bin/",
+        "Agentica.Mcp/obj/",
+        "Agentica.Tests/bin/",
+        "Agentica.Tests/obj/",
+        "Agentica/bin/",
+        "Agentica/obj/"
+      ],
+      "headAtCapture": "d964b3e48f17e28009420e3a675fdba00a12ad7f",
+      "upstream": null
+    },
+    {
+      "worktree": "C:/Users/Zythis/source/repos/Agentica-provider-controls",
+      "HEAD": "eedd9df27590145c085378433d6c83b9c489af1a",
+      "branch": "refs/heads/codex/provider-reasoning-controls",
+      "exists": true,
+      "changes": [],
+      "statusSummary": "## codex/provider-reasoning-controls",
+      "ignoredTopLevelPaths": [
+        "Agentica.Clients/bin/",
+        "Agentica.Clients/obj/",
+        "Agentica.Lab/bin/",
+        "Agentica.Lab/obj/",
+        "Agentica.Mcp/bin/",
+        "Agentica.Mcp/obj/",
+        "Agentica.Tests/bin/",
+        "Agentica.Tests/obj/",
+        "Agentica/bin/",
+        "Agentica/obj/"
+      ],
+      "headAtCapture": "eedd9df27590145c085378433d6c83b9c489af1a",
+      "upstream": null
+    },
+    {
+      "worktree": "C:/Users/Zythis/source/repos/Agentica-worktrees/capability-test-suites",
+      "HEAD": "408407aa8d99e036a0422d84b6f6babcbd9e891e",
+      "branch": "refs/heads/codex/capability-test-suites",
+      "exists": true,
+      "changes": [],
+      "statusSummary": "## codex/capability-test-suites...origin/codex/capability-test-suites",
+      "ignoredTopLevelPaths": [
+        "Agentica.Clients.Tests/bin/",
+        "Agentica.Clients.Tests/obj/",
+        "Agentica.Clients/bin/",
+        "Agentica.Clients/obj/",
+        "Agentica.Lab/bin/",
+        "Agentica.Lab/obj/",
+        "Agentica.Mcp/bin/",
+        "Agentica.Mcp/obj/",
+        "Agentica.Tests/bin/",
+        "Agentica.Tests/obj/",
+        "Agentica/bin/",
+        "Agentica/obj/",
+        "artifacts/"
+      ],
+      "headAtCapture": "408407aa8d99e036a0422d84b6f6babcbd9e891e",
+      "upstream": "origin/codex/capability-test-suites"
+    }
+  ],
+  "localBranches": [
+    {
+      "ref": "refs/heads/codex/capability-test-suites",
+      "head": "408407aa8d99e036a0422d84b6f6babcbd9e891e",
+      "upstream": "refs/remotes/origin/codex/capability-test-suites",
+      "trackingStatus": null,
+      "behindMain": 17,
+      "aheadMain": 0,
+      "ancestorOfMain": true,
+      "mainCherry": [],
+      "uniqueCommitCount": 0,
+      "equivalentCommitCount": 0,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [],
+          "ancestor": true
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [],
+          "ancestor": true
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/chessquest-replay-resume",
+      "head": "30ee3540b2e21898d4bf80e30bc274249a7264c5",
+      "upstream": null,
+      "trackingStatus": null,
+      "behindMain": 73,
+      "aheadMain": 0,
+      "ancestorOfMain": true,
+      "mainCherry": [],
+      "uniqueCommitCount": 0,
+      "equivalentCommitCount": 0,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [],
+          "ancestor": true
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [],
+          "ancestor": true
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/lab-clean-room-chat",
+      "head": "785040e3a7dc2c0b3c905716f14c8fbe01143a8e",
+      "upstream": "refs/remotes/origin/codex/lab-clean-room-chat",
+      "trackingStatus": null,
+      "behindMain": 0,
+      "aheadMain": 9,
+      "ancestorOfMain": false,
+      "mainCherry": [
+        {
+          "equivalence": "+",
+          "sha": "3e3b9a45e7a0d6cbf53cd264344d679812b101cc"
+        },
+        {
+          "equivalence": "+",
+          "sha": "f06b4591821af92a723f39a6190f72bb81d95c67"
+        },
+        {
+          "equivalence": "+",
+          "sha": "b2a0cccf0ca82878c8d4158b6e596ae4a5849355"
+        },
+        {
+          "equivalence": "+",
+          "sha": "16ca1b8c9c1ba41509bb98411372b25bd0e12f19"
+        },
+        {
+          "equivalence": "+",
+          "sha": "b9ddb0bed99af9be0516c1ac3efe733b9c60f33f"
+        },
+        {
+          "equivalence": "+",
+          "sha": "99c17f464d88b2ff430c9980a64b02d422d09b21"
+        },
+        {
+          "equivalence": "+",
+          "sha": "c2f8c815b55f9db1e2abe1b7739aa9acf872c074"
+        },
+        {
+          "equivalence": "+",
+          "sha": "a604597311e07922ddc051d802af68b1b139d4fe"
+        },
+        {
+          "equivalence": "+",
+          "sha": "785040e3a7dc2c0b3c905716f14c8fbe01143a8e"
+        }
+      ],
+      "uniqueCommitCount": 9,
+      "equivalentCommitCount": 0,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [
+            "3e3b9a45e7a0d6cbf53cd264344d679812b101cc",
+            "f06b4591821af92a723f39a6190f72bb81d95c67",
+            "b2a0cccf0ca82878c8d4158b6e596ae4a5849355",
+            "16ca1b8c9c1ba41509bb98411372b25bd0e12f19",
+            "b9ddb0bed99af9be0516c1ac3efe733b9c60f33f",
+            "99c17f464d88b2ff430c9980a64b02d422d09b21",
+            "c2f8c815b55f9db1e2abe1b7739aa9acf872c074",
+            "a604597311e07922ddc051d802af68b1b139d4fe",
+            "785040e3a7dc2c0b3c905716f14c8fbe01143a8e"
+          ],
+          "equivalentCommits": [],
+          "ancestor": false
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [],
+          "ancestor": true
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/lab-durable-handoff",
+      "head": "1e1a2df3c489d633b62b739b7bd61eba2cfa3c5d",
+      "upstream": "refs/remotes/origin/codex/lab-durable-handoff",
+      "trackingStatus": null,
+      "behindMain": 2,
+      "aheadMain": 0,
+      "ancestorOfMain": true,
+      "mainCherry": [],
+      "uniqueCommitCount": 0,
+      "equivalentCommitCount": 0,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [],
+          "ancestor": true
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [],
+          "ancestor": true
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/lab-provider-settings",
+      "head": "54831b4031b3a8fac058ab73fc2ab73f4328f8c8",
+      "upstream": "refs/remotes/origin/codex/lab-provider-settings",
+      "trackingStatus": null,
+      "behindMain": 3,
+      "aheadMain": 0,
+      "ancestorOfMain": true,
+      "mainCherry": [],
+      "uniqueCommitCount": 0,
+      "equivalentCommitCount": 0,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [],
+          "ancestor": true
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [],
+          "ancestor": true
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/lab-web-host",
+      "head": "7e233cdf735d85c3b34a7b13730a6b720dbd2afa",
+      "upstream": "refs/remotes/origin/codex/lab-web-host",
+      "trackingStatus": null,
+      "behindMain": 5,
+      "aheadMain": 0,
+      "ancestorOfMain": true,
+      "mainCherry": [],
+      "uniqueCommitCount": 0,
+      "equivalentCommitCount": 0,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [],
+          "ancestor": true
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [],
+          "ancestor": true
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/maze-action-recovery",
+      "head": "27cb2ce9717438edfe19487e3920faa183112c97",
+      "upstream": "refs/remotes/origin/codex/maze-action-recovery",
+      "trackingStatus": null,
+      "behindMain": 2,
+      "aheadMain": 26,
+      "ancestorOfMain": false,
+      "mainCherry": [
+        {
+          "equivalence": "+",
+          "sha": "f1b32f40e3c447ab90fc5259c2a3f433f9afa625"
+        },
+        {
+          "equivalence": "+",
+          "sha": "7cd9b466951e71a886580a4a4bbc7ec2c5b5b930"
+        },
+        {
+          "equivalence": "+",
+          "sha": "90d516665eaf541a10387e7f95d6265ea8fa94f7"
+        },
+        {
+          "equivalence": "+",
+          "sha": "bd351cd1c61e6a68a39677e1cf7bf1d5197f314f"
+        },
+        {
+          "equivalence": "+",
+          "sha": "70bd26515fb664db0d2d0d0ecb532db17f1857cd"
+        },
+        {
+          "equivalence": "+",
+          "sha": "6d8db3b68a3851c9118adb6e05010921b850138b"
+        },
+        {
+          "equivalence": "+",
+          "sha": "0606e4c927040dc82361918dada86070f5adf593"
+        },
+        {
+          "equivalence": "+",
+          "sha": "140f606714cb98628a6e78502989f2049667bbf5"
+        },
+        {
+          "equivalence": "+",
+          "sha": "7e7ee865707051231b0a37d96a569cb0e6f26ac3"
+        },
+        {
+          "equivalence": "+",
+          "sha": "43c3a3c761d229d3b526fd426f4be63876eebe48"
+        },
+        {
+          "equivalence": "+",
+          "sha": "d65fb5b7a5d4895921f8854054215b1d6279852e"
+        },
+        {
+          "equivalence": "+",
+          "sha": "b3f45f630c5304cac8841b48f823dd8a5e6c4e46"
+        },
+        {
+          "equivalence": "+",
+          "sha": "cd5f76c5156cbd83e44d42ca3469c3faed863a46"
+        },
+        {
+          "equivalence": "+",
+          "sha": "0965c78cb537c423f941da34cde0a6baec634b24"
+        },
+        {
+          "equivalence": "+",
+          "sha": "53b513d8bd216758e49d315726fd934c15ca5050"
+        },
+        {
+          "equivalence": "+",
+          "sha": "7347a3bd194fa4d5392ccd854cd0dac9f865e587"
+        },
+        {
+          "equivalence": "+",
+          "sha": "136ac5b92bbea574e58132f96617b2fcf9935bab"
+        },
+        {
+          "equivalence": "+",
+          "sha": "ebab9e941c14807da8798fcd8fe7c505e2ec6a20"
+        },
+        {
+          "equivalence": "+",
+          "sha": "9af88010b637850b0a3fee3d6a20502fc2d84efb"
+        },
+        {
+          "equivalence": "+",
+          "sha": "602f15ac24a60faee8665cb165cb2d7c761c9eed"
+        },
+        {
+          "equivalence": "+",
+          "sha": "a1f00ac142a4e38cec2ff175849c67afd6ea17f0"
+        },
+        {
+          "equivalence": "+",
+          "sha": "1e75357dfe3545b95573fe346d396a4683aa154c"
+        },
+        {
+          "equivalence": "+",
+          "sha": "adb5cfecdc73888e9d9243a6b4131e50b9c9761b"
+        },
+        {
+          "equivalence": "+",
+          "sha": "b8896bea2a6ef371e049d8f52cf2b4c265757025"
+        },
+        {
+          "equivalence": "+",
+          "sha": "90a8798ac45ee783991ccc993bd34faf573461e4"
+        },
+        {
+          "equivalence": "+",
+          "sha": "27cb2ce9717438edfe19487e3920faa183112c97"
+        }
+      ],
+      "uniqueCommitCount": 26,
+      "equivalentCommitCount": 0,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [],
+          "ancestor": true
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [
+            "f1b32f40e3c447ab90fc5259c2a3f433f9afa625",
+            "7cd9b466951e71a886580a4a4bbc7ec2c5b5b930",
+            "90d516665eaf541a10387e7f95d6265ea8fa94f7",
+            "bd351cd1c61e6a68a39677e1cf7bf1d5197f314f",
+            "70bd26515fb664db0d2d0d0ecb532db17f1857cd",
+            "6d8db3b68a3851c9118adb6e05010921b850138b",
+            "0606e4c927040dc82361918dada86070f5adf593",
+            "140f606714cb98628a6e78502989f2049667bbf5",
+            "7e7ee865707051231b0a37d96a569cb0e6f26ac3",
+            "43c3a3c761d229d3b526fd426f4be63876eebe48",
+            "d65fb5b7a5d4895921f8854054215b1d6279852e",
+            "b3f45f630c5304cac8841b48f823dd8a5e6c4e46",
+            "cd5f76c5156cbd83e44d42ca3469c3faed863a46",
+            "0965c78cb537c423f941da34cde0a6baec634b24",
+            "53b513d8bd216758e49d315726fd934c15ca5050",
+            "7347a3bd194fa4d5392ccd854cd0dac9f865e587",
+            "136ac5b92bbea574e58132f96617b2fcf9935bab",
+            "ebab9e941c14807da8798fcd8fe7c505e2ec6a20",
+            "9af88010b637850b0a3fee3d6a20502fc2d84efb",
+            "602f15ac24a60faee8665cb165cb2d7c761c9eed",
+            "a1f00ac142a4e38cec2ff175849c67afd6ea17f0",
+            "1e75357dfe3545b95573fe346d396a4683aa154c",
+            "adb5cfecdc73888e9d9243a6b4131e50b9c9761b",
+            "b8896bea2a6ef371e049d8f52cf2b4c265757025",
+            "90a8798ac45ee783991ccc993bd34faf573461e4",
+            "27cb2ce9717438edfe19487e3920faa183112c97"
+          ],
+          "equivalentCommits": [],
+          "ancestor": false
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/maze-adoption-tests",
+      "head": "50d635c6f037a14694c0152159ff78662556249a",
+      "upstream": null,
+      "trackingStatus": null,
+      "behindMain": 2,
+      "aheadMain": 10,
+      "ancestorOfMain": false,
+      "mainCherry": [
+        {
+          "equivalence": "+",
+          "sha": "f1b32f40e3c447ab90fc5259c2a3f433f9afa625"
+        },
+        {
+          "equivalence": "+",
+          "sha": "7cd9b466951e71a886580a4a4bbc7ec2c5b5b930"
+        },
+        {
+          "equivalence": "+",
+          "sha": "90d516665eaf541a10387e7f95d6265ea8fa94f7"
+        },
+        {
+          "equivalence": "+",
+          "sha": "bd351cd1c61e6a68a39677e1cf7bf1d5197f314f"
+        },
+        {
+          "equivalence": "+",
+          "sha": "70bd26515fb664db0d2d0d0ecb532db17f1857cd"
+        },
+        {
+          "equivalence": "+",
+          "sha": "6d8db3b68a3851c9118adb6e05010921b850138b"
+        },
+        {
+          "equivalence": "+",
+          "sha": "41cc2284beb9cf184c33b0907e3059f30e79b8c7"
+        },
+        {
+          "equivalence": "+",
+          "sha": "3123ab904134df3d51066738c58ce787faeb5b9a"
+        },
+        {
+          "equivalence": "+",
+          "sha": "cf7780a676010d24d9bd67cd0e1d600025860139"
+        },
+        {
+          "equivalence": "+",
+          "sha": "50d635c6f037a14694c0152159ff78662556249a"
+        }
+      ],
+      "uniqueCommitCount": 10,
+      "equivalentCommitCount": 0,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [
+            "41cc2284beb9cf184c33b0907e3059f30e79b8c7",
+            "3123ab904134df3d51066738c58ce787faeb5b9a",
+            "cf7780a676010d24d9bd67cd0e1d600025860139",
+            "50d635c6f037a14694c0152159ff78662556249a"
+          ],
+          "ancestor": false
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [
+            "f1b32f40e3c447ab90fc5259c2a3f433f9afa625",
+            "7cd9b466951e71a886580a4a4bbc7ec2c5b5b930",
+            "90d516665eaf541a10387e7f95d6265ea8fa94f7",
+            "bd351cd1c61e6a68a39677e1cf7bf1d5197f314f",
+            "70bd26515fb664db0d2d0d0ecb532db17f1857cd",
+            "6d8db3b68a3851c9118adb6e05010921b850138b",
+            "41cc2284beb9cf184c33b0907e3059f30e79b8c7",
+            "3123ab904134df3d51066738c58ce787faeb5b9a",
+            "cf7780a676010d24d9bd67cd0e1d600025860139",
+            "50d635c6f037a14694c0152159ff78662556249a"
+          ],
+          "equivalentCommits": [],
+          "ancestor": false
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/maze-compact-outcome",
+      "head": "a1f00ac142a4e38cec2ff175849c67afd6ea17f0",
+      "upstream": null,
+      "trackingStatus": null,
+      "behindMain": 2,
+      "aheadMain": 21,
+      "ancestorOfMain": false,
+      "mainCherry": [
+        {
+          "equivalence": "+",
+          "sha": "f1b32f40e3c447ab90fc5259c2a3f433f9afa625"
+        },
+        {
+          "equivalence": "+",
+          "sha": "7cd9b466951e71a886580a4a4bbc7ec2c5b5b930"
+        },
+        {
+          "equivalence": "+",
+          "sha": "90d516665eaf541a10387e7f95d6265ea8fa94f7"
+        },
+        {
+          "equivalence": "+",
+          "sha": "bd351cd1c61e6a68a39677e1cf7bf1d5197f314f"
+        },
+        {
+          "equivalence": "+",
+          "sha": "70bd26515fb664db0d2d0d0ecb532db17f1857cd"
+        },
+        {
+          "equivalence": "+",
+          "sha": "6d8db3b68a3851c9118adb6e05010921b850138b"
+        },
+        {
+          "equivalence": "+",
+          "sha": "0606e4c927040dc82361918dada86070f5adf593"
+        },
+        {
+          "equivalence": "+",
+          "sha": "140f606714cb98628a6e78502989f2049667bbf5"
+        },
+        {
+          "equivalence": "+",
+          "sha": "7e7ee865707051231b0a37d96a569cb0e6f26ac3"
+        },
+        {
+          "equivalence": "+",
+          "sha": "43c3a3c761d229d3b526fd426f4be63876eebe48"
+        },
+        {
+          "equivalence": "+",
+          "sha": "d65fb5b7a5d4895921f8854054215b1d6279852e"
+        },
+        {
+          "equivalence": "+",
+          "sha": "b3f45f630c5304cac8841b48f823dd8a5e6c4e46"
+        },
+        {
+          "equivalence": "+",
+          "sha": "cd5f76c5156cbd83e44d42ca3469c3faed863a46"
+        },
+        {
+          "equivalence": "+",
+          "sha": "0965c78cb537c423f941da34cde0a6baec634b24"
+        },
+        {
+          "equivalence": "+",
+          "sha": "53b513d8bd216758e49d315726fd934c15ca5050"
+        },
+        {
+          "equivalence": "+",
+          "sha": "7347a3bd194fa4d5392ccd854cd0dac9f865e587"
+        },
+        {
+          "equivalence": "+",
+          "sha": "136ac5b92bbea574e58132f96617b2fcf9935bab"
+        },
+        {
+          "equivalence": "+",
+          "sha": "ebab9e941c14807da8798fcd8fe7c505e2ec6a20"
+        },
+        {
+          "equivalence": "+",
+          "sha": "9af88010b637850b0a3fee3d6a20502fc2d84efb"
+        },
+        {
+          "equivalence": "+",
+          "sha": "602f15ac24a60faee8665cb165cb2d7c761c9eed"
+        },
+        {
+          "equivalence": "+",
+          "sha": "a1f00ac142a4e38cec2ff175849c67afd6ea17f0"
+        }
+      ],
+      "uniqueCommitCount": 21,
+      "equivalentCommitCount": 0,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [],
+          "ancestor": true
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [
+            "f1b32f40e3c447ab90fc5259c2a3f433f9afa625",
+            "7cd9b466951e71a886580a4a4bbc7ec2c5b5b930",
+            "90d516665eaf541a10387e7f95d6265ea8fa94f7",
+            "bd351cd1c61e6a68a39677e1cf7bf1d5197f314f",
+            "70bd26515fb664db0d2d0d0ecb532db17f1857cd",
+            "6d8db3b68a3851c9118adb6e05010921b850138b",
+            "0606e4c927040dc82361918dada86070f5adf593",
+            "140f606714cb98628a6e78502989f2049667bbf5",
+            "7e7ee865707051231b0a37d96a569cb0e6f26ac3",
+            "43c3a3c761d229d3b526fd426f4be63876eebe48",
+            "d65fb5b7a5d4895921f8854054215b1d6279852e",
+            "b3f45f630c5304cac8841b48f823dd8a5e6c4e46",
+            "cd5f76c5156cbd83e44d42ca3469c3faed863a46",
+            "0965c78cb537c423f941da34cde0a6baec634b24",
+            "53b513d8bd216758e49d315726fd934c15ca5050",
+            "7347a3bd194fa4d5392ccd854cd0dac9f865e587",
+            "136ac5b92bbea574e58132f96617b2fcf9935bab",
+            "ebab9e941c14807da8798fcd8fe7c505e2ec6a20",
+            "9af88010b637850b0a3fee3d6a20502fc2d84efb",
+            "602f15ac24a60faee8665cb165cb2d7c761c9eed",
+            "a1f00ac142a4e38cec2ff175849c67afd6ea17f0"
+          ],
+          "equivalentCommits": [],
+          "ancestor": false
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/maze-decision-adoption",
+      "head": "d65fb5b7a5d4895921f8854054215b1d6279852e",
+      "upstream": "refs/remotes/origin/codex/maze-decision-adoption",
+      "trackingStatus": null,
+      "behindMain": 2,
+      "aheadMain": 11,
+      "ancestorOfMain": false,
+      "mainCherry": [
+        {
+          "equivalence": "+",
+          "sha": "f1b32f40e3c447ab90fc5259c2a3f433f9afa625"
+        },
+        {
+          "equivalence": "+",
+          "sha": "7cd9b466951e71a886580a4a4bbc7ec2c5b5b930"
+        },
+        {
+          "equivalence": "+",
+          "sha": "90d516665eaf541a10387e7f95d6265ea8fa94f7"
+        },
+        {
+          "equivalence": "+",
+          "sha": "bd351cd1c61e6a68a39677e1cf7bf1d5197f314f"
+        },
+        {
+          "equivalence": "+",
+          "sha": "70bd26515fb664db0d2d0d0ecb532db17f1857cd"
+        },
+        {
+          "equivalence": "+",
+          "sha": "6d8db3b68a3851c9118adb6e05010921b850138b"
+        },
+        {
+          "equivalence": "+",
+          "sha": "0606e4c927040dc82361918dada86070f5adf593"
+        },
+        {
+          "equivalence": "+",
+          "sha": "140f606714cb98628a6e78502989f2049667bbf5"
+        },
+        {
+          "equivalence": "+",
+          "sha": "7e7ee865707051231b0a37d96a569cb0e6f26ac3"
+        },
+        {
+          "equivalence": "+",
+          "sha": "43c3a3c761d229d3b526fd426f4be63876eebe48"
+        },
+        {
+          "equivalence": "+",
+          "sha": "d65fb5b7a5d4895921f8854054215b1d6279852e"
+        }
+      ],
+      "uniqueCommitCount": 11,
+      "equivalentCommitCount": 0,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [],
+          "ancestor": true
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [
+            "f1b32f40e3c447ab90fc5259c2a3f433f9afa625",
+            "7cd9b466951e71a886580a4a4bbc7ec2c5b5b930",
+            "90d516665eaf541a10387e7f95d6265ea8fa94f7",
+            "bd351cd1c61e6a68a39677e1cf7bf1d5197f314f",
+            "70bd26515fb664db0d2d0d0ecb532db17f1857cd",
+            "6d8db3b68a3851c9118adb6e05010921b850138b",
+            "0606e4c927040dc82361918dada86070f5adf593",
+            "140f606714cb98628a6e78502989f2049667bbf5",
+            "7e7ee865707051231b0a37d96a569cb0e6f26ac3",
+            "43c3a3c761d229d3b526fd426f4be63876eebe48",
+            "d65fb5b7a5d4895921f8854054215b1d6279852e"
+          ],
+          "equivalentCommits": [],
+          "ancestor": false
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/maze-operation-stop",
+      "head": "6d8db3b68a3851c9118adb6e05010921b850138b",
+      "upstream": "refs/remotes/origin/codex/maze-operation-stop",
+      "trackingStatus": null,
+      "behindMain": 2,
+      "aheadMain": 6,
+      "ancestorOfMain": false,
+      "mainCherry": [
+        {
+          "equivalence": "+",
+          "sha": "f1b32f40e3c447ab90fc5259c2a3f433f9afa625"
+        },
+        {
+          "equivalence": "+",
+          "sha": "7cd9b466951e71a886580a4a4bbc7ec2c5b5b930"
+        },
+        {
+          "equivalence": "+",
+          "sha": "90d516665eaf541a10387e7f95d6265ea8fa94f7"
+        },
+        {
+          "equivalence": "+",
+          "sha": "bd351cd1c61e6a68a39677e1cf7bf1d5197f314f"
+        },
+        {
+          "equivalence": "+",
+          "sha": "70bd26515fb664db0d2d0d0ecb532db17f1857cd"
+        },
+        {
+          "equivalence": "+",
+          "sha": "6d8db3b68a3851c9118adb6e05010921b850138b"
+        }
+      ],
+      "uniqueCommitCount": 6,
+      "equivalentCommitCount": 0,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [],
+          "ancestor": true
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [
+            "f1b32f40e3c447ab90fc5259c2a3f433f9afa625",
+            "7cd9b466951e71a886580a4a4bbc7ec2c5b5b930",
+            "90d516665eaf541a10387e7f95d6265ea8fa94f7",
+            "bd351cd1c61e6a68a39677e1cf7bf1d5197f314f",
+            "70bd26515fb664db0d2d0d0ecb532db17f1857cd",
+            "6d8db3b68a3851c9118adb6e05010921b850138b"
+          ],
+          "equivalentCommits": [],
+          "ancestor": false
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/maze-start-admission",
+      "head": "adb5cfecdc73888e9d9243a6b4131e50b9c9761b",
+      "upstream": "refs/remotes/origin/codex/maze-start-admission",
+      "trackingStatus": null,
+      "behindMain": 2,
+      "aheadMain": 23,
+      "ancestorOfMain": false,
+      "mainCherry": [
+        {
+          "equivalence": "+",
+          "sha": "f1b32f40e3c447ab90fc5259c2a3f433f9afa625"
+        },
+        {
+          "equivalence": "+",
+          "sha": "7cd9b466951e71a886580a4a4bbc7ec2c5b5b930"
+        },
+        {
+          "equivalence": "+",
+          "sha": "90d516665eaf541a10387e7f95d6265ea8fa94f7"
+        },
+        {
+          "equivalence": "+",
+          "sha": "bd351cd1c61e6a68a39677e1cf7bf1d5197f314f"
+        },
+        {
+          "equivalence": "+",
+          "sha": "70bd26515fb664db0d2d0d0ecb532db17f1857cd"
+        },
+        {
+          "equivalence": "+",
+          "sha": "6d8db3b68a3851c9118adb6e05010921b850138b"
+        },
+        {
+          "equivalence": "+",
+          "sha": "0606e4c927040dc82361918dada86070f5adf593"
+        },
+        {
+          "equivalence": "+",
+          "sha": "140f606714cb98628a6e78502989f2049667bbf5"
+        },
+        {
+          "equivalence": "+",
+          "sha": "7e7ee865707051231b0a37d96a569cb0e6f26ac3"
+        },
+        {
+          "equivalence": "+",
+          "sha": "43c3a3c761d229d3b526fd426f4be63876eebe48"
+        },
+        {
+          "equivalence": "+",
+          "sha": "d65fb5b7a5d4895921f8854054215b1d6279852e"
+        },
+        {
+          "equivalence": "+",
+          "sha": "b3f45f630c5304cac8841b48f823dd8a5e6c4e46"
+        },
+        {
+          "equivalence": "+",
+          "sha": "cd5f76c5156cbd83e44d42ca3469c3faed863a46"
+        },
+        {
+          "equivalence": "+",
+          "sha": "0965c78cb537c423f941da34cde0a6baec634b24"
+        },
+        {
+          "equivalence": "+",
+          "sha": "53b513d8bd216758e49d315726fd934c15ca5050"
+        },
+        {
+          "equivalence": "+",
+          "sha": "7347a3bd194fa4d5392ccd854cd0dac9f865e587"
+        },
+        {
+          "equivalence": "+",
+          "sha": "136ac5b92bbea574e58132f96617b2fcf9935bab"
+        },
+        {
+          "equivalence": "+",
+          "sha": "ebab9e941c14807da8798fcd8fe7c505e2ec6a20"
+        },
+        {
+          "equivalence": "+",
+          "sha": "9af88010b637850b0a3fee3d6a20502fc2d84efb"
+        },
+        {
+          "equivalence": "+",
+          "sha": "602f15ac24a60faee8665cb165cb2d7c761c9eed"
+        },
+        {
+          "equivalence": "+",
+          "sha": "a1f00ac142a4e38cec2ff175849c67afd6ea17f0"
+        },
+        {
+          "equivalence": "+",
+          "sha": "1e75357dfe3545b95573fe346d396a4683aa154c"
+        },
+        {
+          "equivalence": "+",
+          "sha": "adb5cfecdc73888e9d9243a6b4131e50b9c9761b"
+        }
+      ],
+      "uniqueCommitCount": 23,
+      "equivalentCommitCount": 0,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [],
+          "ancestor": true
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [
+            "f1b32f40e3c447ab90fc5259c2a3f433f9afa625",
+            "7cd9b466951e71a886580a4a4bbc7ec2c5b5b930",
+            "90d516665eaf541a10387e7f95d6265ea8fa94f7",
+            "bd351cd1c61e6a68a39677e1cf7bf1d5197f314f",
+            "70bd26515fb664db0d2d0d0ecb532db17f1857cd",
+            "6d8db3b68a3851c9118adb6e05010921b850138b",
+            "0606e4c927040dc82361918dada86070f5adf593",
+            "140f606714cb98628a6e78502989f2049667bbf5",
+            "7e7ee865707051231b0a37d96a569cb0e6f26ac3",
+            "43c3a3c761d229d3b526fd426f4be63876eebe48",
+            "d65fb5b7a5d4895921f8854054215b1d6279852e",
+            "b3f45f630c5304cac8841b48f823dd8a5e6c4e46",
+            "cd5f76c5156cbd83e44d42ca3469c3faed863a46",
+            "0965c78cb537c423f941da34cde0a6baec634b24",
+            "53b513d8bd216758e49d315726fd934c15ca5050",
+            "7347a3bd194fa4d5392ccd854cd0dac9f865e587",
+            "136ac5b92bbea574e58132f96617b2fcf9935bab",
+            "ebab9e941c14807da8798fcd8fe7c505e2ec6a20",
+            "9af88010b637850b0a3fee3d6a20502fc2d84efb",
+            "602f15ac24a60faee8665cb165cb2d7c761c9eed",
+            "a1f00ac142a4e38cec2ff175849c67afd6ea17f0",
+            "1e75357dfe3545b95573fe346d396a4683aa154c",
+            "adb5cfecdc73888e9d9243a6b4131e50b9c9761b"
+          ],
+          "equivalentCommits": [],
+          "ancestor": false
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/maze-start-sdk",
+      "head": "ea8d808912a75f26eea107a9c0bcfd0b0e5a991c",
+      "upstream": null,
+      "trackingStatus": null,
+      "behindMain": 2,
+      "aheadMain": 14,
+      "ancestorOfMain": false,
+      "mainCherry": [
+        {
+          "equivalence": "+",
+          "sha": "f1b32f40e3c447ab90fc5259c2a3f433f9afa625"
+        },
+        {
+          "equivalence": "+",
+          "sha": "7cd9b466951e71a886580a4a4bbc7ec2c5b5b930"
+        },
+        {
+          "equivalence": "+",
+          "sha": "90d516665eaf541a10387e7f95d6265ea8fa94f7"
+        },
+        {
+          "equivalence": "+",
+          "sha": "bd351cd1c61e6a68a39677e1cf7bf1d5197f314f"
+        },
+        {
+          "equivalence": "+",
+          "sha": "70bd26515fb664db0d2d0d0ecb532db17f1857cd"
+        },
+        {
+          "equivalence": "+",
+          "sha": "6d8db3b68a3851c9118adb6e05010921b850138b"
+        },
+        {
+          "equivalence": "+",
+          "sha": "0606e4c927040dc82361918dada86070f5adf593"
+        },
+        {
+          "equivalence": "+",
+          "sha": "140f606714cb98628a6e78502989f2049667bbf5"
+        },
+        {
+          "equivalence": "+",
+          "sha": "7e7ee865707051231b0a37d96a569cb0e6f26ac3"
+        },
+        {
+          "equivalence": "+",
+          "sha": "43c3a3c761d229d3b526fd426f4be63876eebe48"
+        },
+        {
+          "equivalence": "+",
+          "sha": "d65fb5b7a5d4895921f8854054215b1d6279852e"
+        },
+        {
+          "equivalence": "+",
+          "sha": "40a3e0af5c95817e04b423d81d4b10d82b6e86ac"
+        },
+        {
+          "equivalence": "+",
+          "sha": "5627d96f4ae58d0a41bd590cd385adee1ed8ea51"
+        },
+        {
+          "equivalence": "+",
+          "sha": "ea8d808912a75f26eea107a9c0bcfd0b0e5a991c"
+        }
+      ],
+      "uniqueCommitCount": 14,
+      "equivalentCommitCount": 0,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [
+            "40a3e0af5c95817e04b423d81d4b10d82b6e86ac",
+            "5627d96f4ae58d0a41bd590cd385adee1ed8ea51",
+            "ea8d808912a75f26eea107a9c0bcfd0b0e5a991c"
+          ],
+          "ancestor": false
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [
+            "f1b32f40e3c447ab90fc5259c2a3f433f9afa625",
+            "7cd9b466951e71a886580a4a4bbc7ec2c5b5b930",
+            "90d516665eaf541a10387e7f95d6265ea8fa94f7",
+            "bd351cd1c61e6a68a39677e1cf7bf1d5197f314f",
+            "70bd26515fb664db0d2d0d0ecb532db17f1857cd",
+            "6d8db3b68a3851c9118adb6e05010921b850138b",
+            "0606e4c927040dc82361918dada86070f5adf593",
+            "140f606714cb98628a6e78502989f2049667bbf5",
+            "7e7ee865707051231b0a37d96a569cb0e6f26ac3",
+            "43c3a3c761d229d3b526fd426f4be63876eebe48",
+            "d65fb5b7a5d4895921f8854054215b1d6279852e",
+            "40a3e0af5c95817e04b423d81d4b10d82b6e86ac",
+            "5627d96f4ae58d0a41bd590cd385adee1ed8ea51",
+            "ea8d808912a75f26eea107a9c0bcfd0b0e5a991c"
+          ],
+          "equivalentCommits": [],
+          "ancestor": false
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/maze-start-store",
+      "head": "deff22970ab1dd75765a9cb683e8c85ba589d6ca",
+      "upstream": null,
+      "trackingStatus": null,
+      "behindMain": 2,
+      "aheadMain": 15,
+      "ancestorOfMain": false,
+      "mainCherry": [
+        {
+          "equivalence": "+",
+          "sha": "f1b32f40e3c447ab90fc5259c2a3f433f9afa625"
+        },
+        {
+          "equivalence": "+",
+          "sha": "7cd9b466951e71a886580a4a4bbc7ec2c5b5b930"
+        },
+        {
+          "equivalence": "+",
+          "sha": "90d516665eaf541a10387e7f95d6265ea8fa94f7"
+        },
+        {
+          "equivalence": "+",
+          "sha": "bd351cd1c61e6a68a39677e1cf7bf1d5197f314f"
+        },
+        {
+          "equivalence": "+",
+          "sha": "70bd26515fb664db0d2d0d0ecb532db17f1857cd"
+        },
+        {
+          "equivalence": "+",
+          "sha": "6d8db3b68a3851c9118adb6e05010921b850138b"
+        },
+        {
+          "equivalence": "+",
+          "sha": "0606e4c927040dc82361918dada86070f5adf593"
+        },
+        {
+          "equivalence": "+",
+          "sha": "140f606714cb98628a6e78502989f2049667bbf5"
+        },
+        {
+          "equivalence": "+",
+          "sha": "7e7ee865707051231b0a37d96a569cb0e6f26ac3"
+        },
+        {
+          "equivalence": "+",
+          "sha": "43c3a3c761d229d3b526fd426f4be63876eebe48"
+        },
+        {
+          "equivalence": "+",
+          "sha": "d65fb5b7a5d4895921f8854054215b1d6279852e"
+        },
+        {
+          "equivalence": "+",
+          "sha": "a71e8bd8541cd4fefe544ae6327ec98aa2ba69f3"
+        },
+        {
+          "equivalence": "+",
+          "sha": "875710f1c1731f459e770dff60ba57fa1b92ec5b"
+        },
+        {
+          "equivalence": "+",
+          "sha": "5be619a940615fb3d6fad20bfdc83f41e04f36ee"
+        },
+        {
+          "equivalence": "+",
+          "sha": "deff22970ab1dd75765a9cb683e8c85ba589d6ca"
+        }
+      ],
+      "uniqueCommitCount": 15,
+      "equivalentCommitCount": 0,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [
+            "a71e8bd8541cd4fefe544ae6327ec98aa2ba69f3",
+            "875710f1c1731f459e770dff60ba57fa1b92ec5b",
+            "5be619a940615fb3d6fad20bfdc83f41e04f36ee",
+            "deff22970ab1dd75765a9cb683e8c85ba589d6ca"
+          ],
+          "ancestor": false
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [
+            "f1b32f40e3c447ab90fc5259c2a3f433f9afa625",
+            "7cd9b466951e71a886580a4a4bbc7ec2c5b5b930",
+            "90d516665eaf541a10387e7f95d6265ea8fa94f7",
+            "bd351cd1c61e6a68a39677e1cf7bf1d5197f314f",
+            "70bd26515fb664db0d2d0d0ecb532db17f1857cd",
+            "6d8db3b68a3851c9118adb6e05010921b850138b",
+            "0606e4c927040dc82361918dada86070f5adf593",
+            "140f606714cb98628a6e78502989f2049667bbf5",
+            "7e7ee865707051231b0a37d96a569cb0e6f26ac3",
+            "43c3a3c761d229d3b526fd426f4be63876eebe48",
+            "d65fb5b7a5d4895921f8854054215b1d6279852e",
+            "a71e8bd8541cd4fefe544ae6327ec98aa2ba69f3",
+            "875710f1c1731f459e770dff60ba57fa1b92ec5b",
+            "5be619a940615fb3d6fad20bfdc83f41e04f36ee",
+            "deff22970ab1dd75765a9cb683e8c85ba589d6ca"
+          ],
+          "equivalentCommits": [],
+          "ancestor": false
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/maze-stop-tests",
+      "head": "1888eefe31fff65fcd3b3ac631766b6343fd9580",
+      "upstream": null,
+      "trackingStatus": null,
+      "behindMain": 2,
+      "aheadMain": 3,
+      "ancestorOfMain": false,
+      "mainCherry": [
+        {
+          "equivalence": "+",
+          "sha": "ae8d711e05c1376cb7d41dfd4d4e72aacd64f1c6"
+        },
+        {
+          "equivalence": "+",
+          "sha": "c3ef776501dd79ba5ea2245373f8f1040e263b74"
+        },
+        {
+          "equivalence": "+",
+          "sha": "1888eefe31fff65fcd3b3ac631766b6343fd9580"
+        }
+      ],
+      "uniqueCommitCount": 3,
+      "equivalentCommitCount": 0,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [
+            "ae8d711e05c1376cb7d41dfd4d4e72aacd64f1c6",
+            "c3ef776501dd79ba5ea2245373f8f1040e263b74",
+            "1888eefe31fff65fcd3b3ac631766b6343fd9580"
+          ],
+          "ancestor": false
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [
+            "ae8d711e05c1376cb7d41dfd4d4e72aacd64f1c6",
+            "c3ef776501dd79ba5ea2245373f8f1040e263b74",
+            "1888eefe31fff65fcd3b3ac631766b6343fd9580"
+          ],
+          "equivalentCommits": [],
+          "ancestor": false
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/maze-wake-replay",
+      "head": "577a214d020ba35ba3188761da6a114b978516b7",
+      "upstream": null,
+      "trackingStatus": null,
+      "behindMain": 2,
+      "aheadMain": 23,
+      "ancestorOfMain": false,
+      "mainCherry": [
+        {
+          "equivalence": "+",
+          "sha": "f1b32f40e3c447ab90fc5259c2a3f433f9afa625"
+        },
+        {
+          "equivalence": "+",
+          "sha": "7cd9b466951e71a886580a4a4bbc7ec2c5b5b930"
+        },
+        {
+          "equivalence": "+",
+          "sha": "90d516665eaf541a10387e7f95d6265ea8fa94f7"
+        },
+        {
+          "equivalence": "+",
+          "sha": "bd351cd1c61e6a68a39677e1cf7bf1d5197f314f"
+        },
+        {
+          "equivalence": "+",
+          "sha": "70bd26515fb664db0d2d0d0ecb532db17f1857cd"
+        },
+        {
+          "equivalence": "+",
+          "sha": "6d8db3b68a3851c9118adb6e05010921b850138b"
+        },
+        {
+          "equivalence": "+",
+          "sha": "0606e4c927040dc82361918dada86070f5adf593"
+        },
+        {
+          "equivalence": "+",
+          "sha": "140f606714cb98628a6e78502989f2049667bbf5"
+        },
+        {
+          "equivalence": "+",
+          "sha": "7e7ee865707051231b0a37d96a569cb0e6f26ac3"
+        },
+        {
+          "equivalence": "+",
+          "sha": "43c3a3c761d229d3b526fd426f4be63876eebe48"
+        },
+        {
+          "equivalence": "+",
+          "sha": "d65fb5b7a5d4895921f8854054215b1d6279852e"
+        },
+        {
+          "equivalence": "+",
+          "sha": "b3f45f630c5304cac8841b48f823dd8a5e6c4e46"
+        },
+        {
+          "equivalence": "+",
+          "sha": "cd5f76c5156cbd83e44d42ca3469c3faed863a46"
+        },
+        {
+          "equivalence": "+",
+          "sha": "0965c78cb537c423f941da34cde0a6baec634b24"
+        },
+        {
+          "equivalence": "+",
+          "sha": "53b513d8bd216758e49d315726fd934c15ca5050"
+        },
+        {
+          "equivalence": "+",
+          "sha": "7347a3bd194fa4d5392ccd854cd0dac9f865e587"
+        },
+        {
+          "equivalence": "+",
+          "sha": "136ac5b92bbea574e58132f96617b2fcf9935bab"
+        },
+        {
+          "equivalence": "+",
+          "sha": "ebab9e941c14807da8798fcd8fe7c505e2ec6a20"
+        },
+        {
+          "equivalence": "+",
+          "sha": "9af88010b637850b0a3fee3d6a20502fc2d84efb"
+        },
+        {
+          "equivalence": "+",
+          "sha": "602f15ac24a60faee8665cb165cb2d7c761c9eed"
+        },
+        {
+          "equivalence": "+",
+          "sha": "a1f00ac142a4e38cec2ff175849c67afd6ea17f0"
+        },
+        {
+          "equivalence": "+",
+          "sha": "1e75357dfe3545b95573fe346d396a4683aa154c"
+        },
+        {
+          "equivalence": "+",
+          "sha": "577a214d020ba35ba3188761da6a114b978516b7"
+        }
+      ],
+      "uniqueCommitCount": 23,
+      "equivalentCommitCount": 0,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [
+            "577a214d020ba35ba3188761da6a114b978516b7"
+          ],
+          "ancestor": false
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [
+            "f1b32f40e3c447ab90fc5259c2a3f433f9afa625",
+            "7cd9b466951e71a886580a4a4bbc7ec2c5b5b930",
+            "90d516665eaf541a10387e7f95d6265ea8fa94f7",
+            "bd351cd1c61e6a68a39677e1cf7bf1d5197f314f",
+            "70bd26515fb664db0d2d0d0ecb532db17f1857cd",
+            "6d8db3b68a3851c9118adb6e05010921b850138b",
+            "0606e4c927040dc82361918dada86070f5adf593",
+            "140f606714cb98628a6e78502989f2049667bbf5",
+            "7e7ee865707051231b0a37d96a569cb0e6f26ac3",
+            "43c3a3c761d229d3b526fd426f4be63876eebe48",
+            "d65fb5b7a5d4895921f8854054215b1d6279852e",
+            "b3f45f630c5304cac8841b48f823dd8a5e6c4e46",
+            "cd5f76c5156cbd83e44d42ca3469c3faed863a46",
+            "0965c78cb537c423f941da34cde0a6baec634b24",
+            "53b513d8bd216758e49d315726fd934c15ca5050",
+            "7347a3bd194fa4d5392ccd854cd0dac9f865e587",
+            "136ac5b92bbea574e58132f96617b2fcf9935bab",
+            "ebab9e941c14807da8798fcd8fe7c505e2ec6a20",
+            "9af88010b637850b0a3fee3d6a20502fc2d84efb",
+            "602f15ac24a60faee8665cb165cb2d7c761c9eed",
+            "a1f00ac142a4e38cec2ff175849c67afd6ea17f0",
+            "1e75357dfe3545b95573fe346d396a4683aa154c",
+            "577a214d020ba35ba3188761da6a114b978516b7"
+          ],
+          "equivalentCommits": [],
+          "ancestor": false
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/mcp-sdk-acceptance",
+      "head": "6ee6224d78fb0860ab889c08499cd4639e646568",
+      "upstream": null,
+      "trackingStatus": null,
+      "behindMain": 28,
+      "aheadMain": 1,
+      "ancestorOfMain": false,
+      "mainCherry": [
+        {
+          "equivalence": "-",
+          "sha": "6ee6224d78fb0860ab889c08499cd4639e646568"
+        }
+      ],
+      "uniqueCommitCount": 0,
+      "equivalentCommitCount": 1,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [
+            "6ee6224d78fb0860ab889c08499cd4639e646568"
+          ],
+          "ancestor": false
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [
+            "6ee6224d78fb0860ab889c08499cd4639e646568"
+          ],
+          "ancestor": false
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/mcp-streaming-first-slice",
+      "head": "e075d932bdf13db713b1e338eaa443a093a6953e",
+      "upstream": "refs/remotes/origin/codex/mcp-streaming-first-slice",
+      "trackingStatus": null,
+      "behindMain": 19,
+      "aheadMain": 0,
+      "ancestorOfMain": true,
+      "mainCherry": [],
+      "uniqueCommitCount": 0,
+      "equivalentCommitCount": 0,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [],
+          "ancestor": true
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [],
+          "ancestor": true
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/provider-reasoning-controls",
+      "head": "eedd9df27590145c085378433d6c83b9c489af1a",
+      "upstream": null,
+      "trackingStatus": null,
+      "behindMain": 28,
+      "aheadMain": 1,
+      "ancestorOfMain": false,
+      "mainCherry": [
+        {
+          "equivalence": "-",
+          "sha": "eedd9df27590145c085378433d6c83b9c489af1a"
+        }
+      ],
+      "uniqueCommitCount": 0,
+      "equivalentCommitCount": 1,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [
+            "eedd9df27590145c085378433d6c83b9c489af1a"
+          ],
+          "ancestor": false
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [
+            "eedd9df27590145c085378433d6c83b9c489af1a"
+          ],
+          "ancestor": false
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/provider-run-continuation",
+      "head": "cd34431a2be1f6a5878c35666f6115d7253a7830",
+      "upstream": null,
+      "trackingStatus": null,
+      "behindMain": 28,
+      "aheadMain": 4,
+      "ancestorOfMain": false,
+      "mainCherry": [
+        {
+          "equivalence": "-",
+          "sha": "67bf370e6d481f43eb0183ef02ad40b5f03a3d91"
+        },
+        {
+          "equivalence": "-",
+          "sha": "bee4acefdc2e6396cca7fc677c13dba210d6c3da"
+        },
+        {
+          "equivalence": "-",
+          "sha": "d418b6a40e487cbe9b749464dc28e34ff02cf62e"
+        },
+        {
+          "equivalence": "-",
+          "sha": "cd34431a2be1f6a5878c35666f6115d7253a7830"
+        }
+      ],
+      "uniqueCommitCount": 0,
+      "equivalentCommitCount": 4,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [
+            "67bf370e6d481f43eb0183ef02ad40b5f03a3d91",
+            "bee4acefdc2e6396cca7fc677c13dba210d6c3da",
+            "d418b6a40e487cbe9b749464dc28e34ff02cf62e",
+            "cd34431a2be1f6a5878c35666f6115d7253a7830"
+          ],
+          "ancestor": false
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [
+            "67bf370e6d481f43eb0183ef02ad40b5f03a3d91",
+            "bee4acefdc2e6396cca7fc677c13dba210d6c3da",
+            "d418b6a40e487cbe9b749464dc28e34ff02cf62e",
+            "cd34431a2be1f6a5878c35666f6115d7253a7830"
+          ],
+          "ancestor": false
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/reasoning-effort-cli",
+      "head": "f9c777301b6bb9c306b942a2ecc2a66e107b3b15",
+      "upstream": null,
+      "trackingStatus": null,
+      "behindMain": 24,
+      "aheadMain": 1,
+      "ancestorOfMain": false,
+      "mainCherry": [
+        {
+          "equivalence": "-",
+          "sha": "f9c777301b6bb9c306b942a2ecc2a66e107b3b15"
+        }
+      ],
+      "uniqueCommitCount": 0,
+      "equivalentCommitCount": 1,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [
+            "f9c777301b6bb9c306b942a2ecc2a66e107b3b15"
+          ],
+          "ancestor": false
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [
+            "f9c777301b6bb9c306b942a2ecc2a66e107b3b15"
+          ],
+          "ancestor": false
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/codex/semantic-projection",
+      "head": "d964b3e48f17e28009420e3a675fdba00a12ad7f",
+      "upstream": null,
+      "trackingStatus": null,
+      "behindMain": 31,
+      "aheadMain": 1,
+      "ancestorOfMain": false,
+      "mainCherry": [
+        {
+          "equivalence": "-",
+          "sha": "d964b3e48f17e28009420e3a675fdba00a12ad7f"
+        }
+      ],
+      "uniqueCommitCount": 0,
+      "equivalentCommitCount": 1,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [
+            "d964b3e48f17e28009420e3a675fdba00a12ad7f"
+          ],
+          "ancestor": false
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [
+            "d964b3e48f17e28009420e3a675fdba00a12ad7f"
+          ],
+          "ancestor": false
+        }
+      }
+    },
+    {
+      "ref": "refs/heads/main",
+      "head": "d58e3aada277d3210705541cce8bb13014b21399",
+      "upstream": "refs/remotes/origin/main",
+      "trackingStatus": "[ahead 1, behind 58]",
+      "behindMain": 58,
+      "aheadMain": 1,
+      "ancestorOfMain": false,
+      "mainCherry": [
+        {
+          "equivalence": "-",
+          "sha": "d58e3aada277d3210705541cce8bb13014b21399"
+        }
+      ],
+      "uniqueCommitCount": 0,
+      "equivalentCommitCount": 1,
+      "featureCustody": {
+        "codex/maze-action-recovery": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [
+            "d58e3aada277d3210705541cce8bb13014b21399"
+          ],
+          "ancestor": false
+        },
+        "codex/lab-clean-room-chat": {
+          "unmatchedCommits": [],
+          "equivalentCommits": [
+            "d58e3aada277d3210705541cce8bb13014b21399"
+          ],
+          "ancestor": false
+        }
+      }
+    }
+  ],
+  "remoteRefs": [
+    {
+      "ref": "refs/remotes/origin/codex/capability-test-suites",
+      "head": "408407aa8d99e036a0422d84b6f6babcbd9e891e"
+    },
+    {
+      "ref": "refs/remotes/origin/codex/lab-clean-room-chat",
+      "head": "785040e3a7dc2c0b3c905716f14c8fbe01143a8e"
+    },
+    {
+      "ref": "refs/remotes/origin/codex/lab-durable-handoff",
+      "head": "1e1a2df3c489d633b62b739b7bd61eba2cfa3c5d"
+    },
+    {
+      "ref": "refs/remotes/origin/codex/lab-provider-settings",
+      "head": "54831b4031b3a8fac058ab73fc2ab73f4328f8c8"
+    },
+    {
+      "ref": "refs/remotes/origin/codex/lab-web-host",
+      "head": "7e233cdf735d85c3b34a7b13730a6b720dbd2afa"
+    },
+    {
+      "ref": "refs/remotes/origin/codex/maze-action-recovery",
+      "head": "27cb2ce9717438edfe19487e3920faa183112c97"
+    },
+    {
+      "ref": "refs/remotes/origin/codex/maze-decision-adoption",
+      "head": "d65fb5b7a5d4895921f8854054215b1d6279852e"
+    },
+    {
+      "ref": "refs/remotes/origin/codex/maze-operation-stop",
+      "head": "6d8db3b68a3851c9118adb6e05010921b850138b"
+    },
+    {
+      "ref": "refs/remotes/origin/codex/maze-start-admission",
+      "head": "adb5cfecdc73888e9d9243a6b4131e50b9c9761b"
+    },
+    {
+      "ref": "refs/remotes/origin/codex/mcp-streaming-first-slice",
+      "head": "e075d932bdf13db713b1e338eaa443a093a6953e"
+    },
+    {
+      "ref": "refs/remotes/origin/main",
+      "head": "977d0cab5421fd4e09fd33f1224f241b7e425abe"
+    },
+    {
+      "ref": "refs/remotes/origin/zekenaulty-cloud-audit",
+      "head": "144ab2aa25c360e68474bfbe43a058e3abdf9273"
+    }
+  ],
+  "localOnlyNames": [
+    "codex/chessquest-replay-resume",
+    "codex/maze-adoption-tests",
+    "codex/maze-compact-outcome",
+    "codex/maze-start-sdk",
+    "codex/maze-start-store",
+    "codex/maze-stop-tests",
+    "codex/maze-wake-replay",
+    "codex/mcp-sdk-acceptance",
+    "codex/provider-reasoning-controls",
+    "codex/provider-run-continuation",
+    "codex/reasoning-effort-cli",
+    "codex/semantic-projection"
+  ],
+  "remoteOnlyNames": [
+    "zekenaulty-cloud-audit"
+  ],
+  "scanLimits": [
+    "Read-only Git ref, history, tracked/untracked filename and SHA-256 capture for registered common-repository worktrees only.",
+    "Ignored directories recorded only at Git matching level; contents are excluded from hashes and payload export.",
+    "Remote state is the fetched origin snapshot captured by root; this subtask did not fetch or mutate refs.",
+    "No builds, provider calls, checkout/reset/clean/switch/merge/archive/delete operations performed.",
+    "Reflog-only commits inspected for patch equivalence; unreachable objects with no ref or reflog were not scanned and no garbage collection performed."
+  ],
+  "remoteOnlyAnalysis": [
+    {
+      "ref": "origin/zekenaulty-cloud-audit",
+      "head": "144ab2aa25c360e68474bfbe43a058e3abdf9273",
+      "commitsNotInMain": [],
+      "ancestorOfMain": true
+    }
+  ],
+  "patchEquivalenceScannedCommitCount": 156,
+  "patchEquivalenceCapturedUtc": "2026-11-03T12:10:51.595891+00:00",
+  "otherRefs": [
+    {
+      "ref": "refs/codex/turn-diffs/captures/1793707369619/46ef8cbb-5a14-4b45-a42c-72938717270c/base",
+      "object": "3427abfce868a7a383955e5f72e644583eccac26",
+      "type": "tree"
+    },
+    {
+      "ref": "refs/codex/turn-diffs/checkpoints/b28181d377fa778f06e8215f8982d18b/e46043f90c3bd0359c2a75d2534d3769/1793705217040/357f3a2e-eadd-4680-bafd-c6f28840a6dd",
+      "object": "3427abfce868a7a383955e5f72e644583eccac26",
+      "type": "tree"
+    }
+  ],
+  "stashEntries": [],
+  "reflogOnlyCommits": [
+    {
+      "sha": "909dbfccd87650a641d6abe59e0193dc8ba04095",
+      "subject": "Add opt-in OpenAI web search and expanded chat model selection",
+      "reachablePatchEquivalentCommits": [],
+      "sameSubjectReachableCommits": [
+        "b2a0cccf0ca82878c8d4158b6e596ae4a5849355"
+      ],
+      "sameSubjectComparisons": [
+        {
+          "sha": "b2a0cccf0ca82878c8d4158b6e596ae4a5849355",
+          "diffStat": "Agentica.Lab.Web.Tests/chat-ui.test.mjs                             | 6 +++++-\n docs/implementation/lab-experimental-chat-20261102/qualification.md | 2 ++\n 2 files changed, 7 insertions(+), 1 deletion(-)",
+          "diffNames": [
+            "Agentica.Lab.Web.Tests/chat-ui.test.mjs",
+            "docs/implementation/lab-experimental-chat-20261102/qualification.md"
+          ]
+        }
+      ],
+      "disposition": "Superseded by b2a0ccc: removes synthetic credential URI literal while retaining rejection coverage and adds qualification evidence. No lost behavior to harvest; do not resurrect old fixture literal."
+    },
+    {
+      "sha": "0343e3bbc6d481dc6f1dfbce845e88da83ddc131",
+      "subject": "Qualify external planner fixtures and late host receipt recovery",
+      "reachablePatchEquivalentCommits": [],
+      "sameSubjectReachableCommits": [
+        "62c5b5a2542b235598304cfe3eca3b45230ea770"
+      ],
+      "sameSubjectComparisons": [
+        {
+          "sha": "62c5b5a2542b235598304cfe3eca3b45230ea770",
+          "diffStat": "Agentica.Lab.Web.Tests/LoopbackFixtureHostTests.cs | 12 +++++++++++-\n 1 file changed, 11 insertions(+), 1 deletion(-)",
+          "diffNames": [
+            "Agentica.Lab.Web.Tests/LoopbackFixtureHostTests.cs"
+          ]
+        }
+      ],
+      "disposition": "Superseded by 62c5b5a: replaces synthetic credential URI literal with equivalent UriBuilder test. No lost behavior to harvest."
+    },
+    {
+      "sha": "7f972a26d564234ede412c89791bf64f6c3621d7",
+      "subject": "Respect thought-summary opt-in in human stream telemetry",
+      "reachablePatchEquivalentCommits": [
+        "4755af00e46788ad1ebb8f5b23477f4715a6014d"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "73a57f6a364a70c81020660f22571ca6d4e8b67d",
+      "subject": "Emit structured live planner telemetry from Lab",
+      "reachablePatchEquivalentCommits": [
+        "2117d0f8121e2880dbcc4136ebf276b6e69e907a"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "965b34d9433f3d8171fd835e01744f20b553c3a1",
+      "subject": "Select host-authored compact planning frames under input budget",
+      "reachablePatchEquivalentCommits": [
+        "274a49face1cd7abd7a50233e3b9eee13f2304a1"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "d3543e5c537a160870aadc2a7c0b8f1c76294bba",
+      "subject": "Derive scoped child authority before orchestration dispatch",
+      "reachablePatchEquivalentCommits": [
+        "4b322a3aaa5d855984b57a6781c11630a3d37f1b"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "41307eaf1c8f2cf157e9583ea9219ea9967036e8",
+      "subject": "Carry host scope to tools and isolate stream observer faults",
+      "reachablePatchEquivalentCommits": [
+        "6c0d83e70003b9c8fbd477dde35c8ed49f274ec3"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "974fe6e58b5b20b2f6890d8922a2413baf4ffba4",
+      "subject": "Carry host scope to tools and isolate stream observer faults",
+      "reachablePatchEquivalentCommits": [],
+      "sameSubjectReachableCommits": [
+        "6c0d83e70003b9c8fbd477dde35c8ed49f274ec3"
+      ],
+      "sameSubjectComparisons": [
+        {
+          "sha": "6c0d83e70003b9c8fbd477dde35c8ed49f274ec3",
+          "diffStat": "Agentica/Tools/ToolInvocation.cs | 2 ++\n 1 file changed, 2 insertions(+)",
+          "diffNames": [
+            "Agentica/Tools/ToolInvocation.cs"
+          ]
+        }
+      ],
+      "disposition": "Superseded by 6c0d83e: adds ToolInvocation authority-resolution XML documentation, with identical executable source."
+    },
+    {
+      "sha": "194b474da4ed85dcb7321f60cec5faa3aaeb918f",
+      "subject": "Add host-declared planner context window budget",
+      "reachablePatchEquivalentCommits": [
+        "70415bd0e5e4be3544b3fb3f31374655418c3f3e"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "c0f720520563335f9b7a5f189d3345c04040857e",
+      "subject": "Align continuation follow-up list with Ollama support",
+      "reachablePatchEquivalentCommits": [
+        "544e91f078fa37ae93447d1683d13dec34140e09"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "6789f089e76cf42907af96c5717441bbd6fa075d",
+      "subject": "Record thought-testing continuation evidence boundary",
+      "reachablePatchEquivalentCommits": [
+        "d0595d5f808eb8800804f0b4b1d808fc94bebe9e"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "96f72e11c1e9adc2584a982ed4708bca3cf562db",
+      "subject": "Expose planner input ceiling in Lab run and chat",
+      "reachablePatchEquivalentCommits": [
+        "0f433010c68b54b643b66a9c4641ce11e20bf191"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "1dadbd7e7e0959fe651973bb061f1cdc319bf907",
+      "subject": "Use run log clock consistently and stabilize queued sink test",
+      "reachablePatchEquivalentCommits": [
+        "ddb7664c2efbe4317ee6e155d57f0aea97a42940"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "92104894bdebc1c38d7887af1f648fac6869b3c2",
+      "subject": "Expose complete streaming call lifecycle",
+      "reachablePatchEquivalentCommits": [
+        "9f7115ba37498e0b1841d8e74235a11e5aab31c4"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "611911d8a5053422d9209bc7160200cfec6a86a3",
+      "subject": "Replay bounded Ollama native text and thinking",
+      "reachablePatchEquivalentCommits": [
+        "e4966209aee8fc074a0b43259041b872d95fd37d"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "8bd3407280c99824da93ba05c7ebabfd0ca6e22d",
+      "subject": "Exercise MCP SDK against loopback server",
+      "reachablePatchEquivalentCommits": [
+        "7d29e88b2b4052adb1eaa81ddcd811de0085a46c"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "9aa33e0b7c38e744f387f3b001f79caecbd19064",
+      "subject": "Bound planner context with evidence decisions",
+      "reachablePatchEquivalentCommits": [
+        "a84e5ba488efa09fcd7b6f130d3b3a59ae41ccf5"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "40eada38a8faf3f03f52e7351ec7358fdceff472",
+      "subject": "Support host-bound MCP tool manifests and bearer transport",
+      "reachablePatchEquivalentCommits": [
+        "b0f47eba6e8f74989c0de5d18b9fb03f5515861e"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "be631b20385d355abb39040e6f1e106417e93f1d",
+      "subject": "Add xAI Grok streaming with encrypted reasoning replay",
+      "reachablePatchEquivalentCommits": [
+        "5feacd759a134a45851b9093c455e3a394d8a9fe"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "f47964cc0d3ac0444f67559b2f0450d5278c9786",
+      "subject": "Add Anthropic Messages streaming with signed continuation",
+      "reachablePatchEquivalentCommits": [
+        "b1f07948cbd88a409e6bb44946b7bfbfc3659802"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "22b02675a4d1fa9a9f88bd787d681a79741200d8",
+      "subject": "Add stateless OpenAI Responses streaming planner adapter",
+      "reachablePatchEquivalentCommits": [
+        "fca83cd6454d81a27ed877b6f413252f76692367"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "956527dcfa2d8ea025268457dd0edc5191189f9a",
+      "subject": "Preserve Gemini stateless thought signatures across streamed turns",
+      "reachablePatchEquivalentCommits": [
+        "3e31bb0b552c326b0144838a980440242c541441"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "8a1fac299026de8da6e1e270f42c623af7268f16",
+      "subject": "Prove bound external tool visibility to planner",
+      "reachablePatchEquivalentCommits": [
+        "e3e34c324adbfc91dc8fc591ce9e09660506fe08"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "69b90dac5e50d98fff0243956537c5f36111ec35",
+      "subject": "Honor host-bound tool authority and add native Ollama streaming",
+      "reachablePatchEquivalentCommits": [
+        "6500cfe3f83958b608f9f043102882efac20f85d"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    },
+    {
+      "sha": "e7671ea7f2e7cb2ed4ef7c212308b13fac661abf",
+      "subject": "Add opt-in Gemini Interactions streaming and trusted MCP tool adapter",
+      "reachablePatchEquivalentCommits": [
+        "fc36b97a35fe406d061aa2313c6435137bbcae43"
+      ],
+      "disposition": "already reachable by patch equivalence"
+    }
+  ],
+  "adjacentSeparateRepositoryNamesOutsideAudit": [
+    "Agentica.API",
+    "Agentica.Ficticius",
+    "Agentica.Orchestration",
+    "Agentica.TurtleQuest",
+    "Agentica.Writes"
+  ],
+  "peerCustodyRecheck": {
+    "capturedUtc": "2026-11-03T12:12:34.357392+00:00",
+    "results": [
+      {
+        "worktree": "C:/Users/Zythis/source/repos/Agentica",
+        "headUnchanged": true,
+        "capturedChangedFileHashesUnchanged": true,
+        "changedCapturedFiles": [],
+        "statusUnchanged": true
+      },
+      {
+        "worktree": "C:/Users/Zythis/.codex/worktrees/lab-clean-room-chat/Agentica",
+        "headUnchanged": true,
+        "capturedChangedFileHashesUnchanged": true,
+        "changedCapturedFiles": [],
+        "statusUnchanged": true
+      },
+      {
+        "worktree": "C:/Users/Zythis/.codex/worktrees/maze-action-recovery/Agentica",
+        "headUnchanged": true,
+        "capturedChangedFileHashesUnchanged": true,
+        "changedCapturedFiles": [],
+        "statusUnchanged": true
+      },
+      {
+        "worktree": "C:/Users/Zythis/.codex/worktrees/maze-adoption-tests/Agentica",
+        "headUnchanged": true,
+        "capturedChangedFileHashesUnchanged": true,
+        "changedCapturedFiles": [],
+        "statusUnchanged": true
+      },
+      {
+        "worktree": "C:/Users/Zythis/.codex/worktrees/maze-compact-outcome/Agentica",
+        "headUnchanged": true,
+        "capturedChangedFileHashesUnchanged": true,
+        "changedCapturedFiles": [],
+        "statusUnchanged": true
+      },
+      {
+        "worktree": "C:/Users/Zythis/.codex/worktrees/maze-operation-stop/Agentica",
+        "headUnchanged": true,
+        "capturedChangedFileHashesUnchanged": true,
+        "changedCapturedFiles": [],
+        "statusUnchanged": true
+      },
+      {
+        "worktree": "C:/Users/Zythis/.codex/worktrees/maze-start-admission/Agentica",
+        "headUnchanged": true,
+        "capturedChangedFileHashesUnchanged": true,
+        "changedCapturedFiles": [],
+        "statusUnchanged": true
+      },
+      {
+        "worktree": "C:/Users/Zythis/.codex/worktrees/maze-start-sdk/Agentica",
+        "headUnchanged": true,
+        "capturedChangedFileHashesUnchanged": true,
+        "changedCapturedFiles": [],
+        "statusUnchanged": true
+      },
+      {
+        "worktree": "C:/Users/Zythis/.codex/worktrees/maze-start-store/Agentica",
+        "headUnchanged": true,
+        "capturedChangedFileHashesUnchanged": true,
+        "changedCapturedFiles": [],
+        "statusUnchanged": true
+      },
+      {
+        "worktree": "C:/Users/Zythis/.codex/worktrees/maze-stop-tests/Agentica",
+        "headUnchanged": true,
+        "capturedChangedFileHashesUnchanged": true,
+        "changedCapturedFiles": [],
+        "statusUnchanged": true
+      },
+      {
+        "worktree": "C:/Users/Zythis/.codex/worktrees/maze-wake-replay/Agentica",
+        "headUnchanged": true,
+        "capturedChangedFileHashesUnchanged": true,
+        "changedCapturedFiles": [],
+        "statusUnchanged": true
+      },
+      {
+        "worktree": "C:/Users/Zythis/Documents/Codex/2026-09-30/files-pasted-by-the-user-you/work/agentica-lab-web",
+        "headUnchanged": true,
+        "capturedChangedFileHashesUnchanged": true,
+        "changedCapturedFiles": [],
+        "statusUnchanged": true
+      },
+      {
+        "worktree": "C:/Users/Zythis/Documents/Codex/2026-09-30/files-pasted-by-the-user-you/work/agentica-mcp-acceptance",
+        "headUnchanged": true,
+        "capturedChangedFileHashesUnchanged": true,
+        "changedCapturedFiles": [],
+        "statusUnchanged": true
+      },
+      {
+        "worktree": "C:/Users/Zythis/Documents/Codex/2026-09-30/files-pasted-by-the-user-you/work/agentica-provider-continuation",
+        "headUnchanged": true,
+        "capturedChangedFileHashesUnchanged": true,
+        "changedCapturedFiles": [],
+        "statusUnchanged": true
+      },
+      {
+        "worktree": "C:/Users/Zythis/Documents/Codex/2026-09-30/files-pasted-by-the-user-you/work/agentica-reasoning-cli",
+        "headUnchanged": true,
+        "capturedChangedFileHashesUnchanged": true,
+        "changedCapturedFiles": [],
+        "statusUnchanged": true
+      },
+      {
+        "worktree": "C:/Users/Zythis/source/repos/Agentica-projection",
+        "headUnchanged": true,
+        "capturedChangedFileHashesUnchanged": true,
+        "changedCapturedFiles": [],
+        "statusUnchanged": true
+      },
+      {
+        "worktree": "C:/Users/Zythis/source/repos/Agentica-provider-controls",
+        "headUnchanged": true,
+        "capturedChangedFileHashesUnchanged": true,
+        "changedCapturedFiles": [],
+        "statusUnchanged": true
+      },
+      {
+        "worktree": "C:/Users/Zythis/source/repos/Agentica-worktrees/capability-test-suites",
+        "headUnchanged": true,
+        "capturedChangedFileHashesUnchanged": true,
+        "changedCapturedFiles": [],
+        "statusUnchanged": true
+      }
+    ]
+  },
+  "commitEvidence": {
+    "3e3b9a45e7a0d6cbf53cd264344d679812b101cc": {
+      "subject": "Add persistent clean-room and Agentica harness chat to Lab Web",
+      "patchEquivalentCommits": []
+    },
+    "f06b4591821af92a723f39a6190f72bb81d95c67": {
+      "subject": "Use VSTest-only xUnit packages for the existing CI runner",
+      "patchEquivalentCommits": []
+    },
+    "b2a0cccf0ca82878c8d4158b6e596ae4a5849355": {
+      "subject": "Add opt-in OpenAI web search and expanded chat model selection",
+      "patchEquivalentCommits": []
+    },
+    "16ca1b8c9c1ba41509bb98411372b25bd0e12f19": {
+      "subject": "Fix context admission sizing and misleading conflict recovery",
+      "patchEquivalentCommits": []
+    },
+    "b9ddb0bed99af9be0516c1ac3efe733b9c60f33f": {
+      "subject": "feat(lab): add opt-in thread history recall",
+      "patchEquivalentCommits": []
+    },
+    "99c17f464d88b2ff430c9980a64b02d422d09b21": {
+      "subject": "fix(lab): include historical recall in turn cancellation",
+      "patchEquivalentCommits": []
+    },
+    "c2f8c815b55f9db1e2abe1b7739aa9acf872c074": {
+      "subject": "Fix Lab context admission with native OpenAI token counts",
+      "patchEquivalentCommits": []
+    },
+    "a604597311e07922ddc051d802af68b1b139d4fe": {
+      "subject": "Render Lab chat Markdown and keep live traces collapsed",
+      "patchEquivalentCommits": []
+    },
+    "785040e3a7dc2c0b3c905716f14c8fbe01143a8e": {
+      "subject": "Preserve pinned bytes only for upstream Markdown distributions",
+      "patchEquivalentCommits": []
+    },
+    "f1b32f40e3c447ab90fc5259c2a3f433f9afa625": {
+      "subject": "test: cover durable host decision stop contract",
+      "patchEquivalentCommits": [
+        {
+          "sha": "ae8d711e05c1376cb7d41dfd4d4e72aacd64f1c6",
+          "subject": "test: cover durable host decision stop contract",
+          "reachableFromMain": false,
+          "reachableFromFeatures": []
+        }
+      ]
+    },
+    "7cd9b466951e71a886580a4a4bbc7ec2c5b5b930": {
+      "subject": "fix: stop durable decisions without recreating a cognition window",
+      "patchEquivalentCommits": []
+    },
+    "90d516665eaf541a10387e7f95d6265ea8fa94f7": {
+      "subject": "test: reject stopped legacy parents with admitted children",
+      "patchEquivalentCommits": [
+        {
+          "sha": "c3ef776501dd79ba5ea2245373f8f1040e263b74",
+          "subject": "test: reject stopped legacy parents with admitted children",
+          "reachableFromMain": false,
+          "reachableFromFeatures": []
+        }
+      ]
+    },
+    "bd351cd1c61e6a68a39677e1cf7bf1d5197f314f": {
+      "subject": "test: reject child writes after claimed decision stop",
+      "patchEquivalentCommits": [
+        {
+          "sha": "1888eefe31fff65fcd3b3ac631766b6343fd9580",
+          "subject": "test: reject child writes after claimed decision stop",
+          "reachableFromMain": false,
+          "reachableFromFeatures": []
+        }
+      ]
+    },
+    "70bd26515fb664db0d2d0d0ecb532db17f1857cd": {
+      "subject": "fix: fence admitted children and late claims when stopping decisions",
+      "patchEquivalentCommits": []
+    },
+    "6d8db3b68a3851c9118adb6e05010921b850138b": {
+      "subject": "test: compare legacy fixture source values before byte-preservation checks",
+      "patchEquivalentCommits": []
+    },
+    "0606e4c927040dc82361918dada86070f5adf593": {
+      "subject": "test: cover explicit decision adoption across owner epochs",
+      "patchEquivalentCommits": [
+        {
+          "sha": "41cc2284beb9cf184c33b0907e3059f30e79b8c7",
+          "subject": "test: cover explicit decision adoption across owner epochs",
+          "reachableFromMain": false,
+          "reachableFromFeatures": []
+        }
+      ]
+    },
+    "140f606714cb98628a6e78502989f2049667bbf5": {
+      "subject": "test: expose adoption lineage and checkpoint recovery risks",
+      "patchEquivalentCommits": [
+        {
+          "sha": "3123ab904134df3d51066738c58ce787faeb5b9a",
+          "subject": "test: expose adoption lineage and checkpoint recovery risks",
+          "reachableFromMain": false,
+          "reachableFromFeatures": []
+        }
+      ]
+    },
+    "7e7ee865707051231b0a37d96a569cb0e6f26ac3": {
+      "subject": "feat: adopt pending host decisions with separate custody evidence",
+      "patchEquivalentCommits": [
+        {
+          "sha": "cf7780a676010d24d9bd67cd0e1d600025860139",
+          "subject": "local baseline: mirror parent decision adoption implementation",
+          "reachableFromMain": false,
+          "reachableFromFeatures": []
+        }
+      ]
+    },
+    "43c3a3c761d229d3b526fd426f4be63876eebe48": {
+      "subject": "fix: fence adoption lineage and checkpoint replay by host session",
+      "patchEquivalentCommits": [
+        {
+          "sha": "50d635c6f037a14694c0152159ff78662556249a",
+          "subject": "fix: fence adoption lineage and checkpoint replay by host session",
+          "reachableFromMain": false,
+          "reachableFromFeatures": []
+        }
+      ]
+    },
+    "d65fb5b7a5d4895921f8854054215b1d6279852e": {
+      "subject": "docs: describe explicit decision adoption and qualification",
+      "patchEquivalentCommits": []
+    },
+    "b3f45f630c5304cac8841b48f823dd8a5e6c4e46": {
+      "subject": "Persist initial start identity and explicit Stop tombstones",
+      "patchEquivalentCommits": [
+        {
+          "sha": "a71e8bd8541cd4fefe544ae6327ec98aa2ba69f3",
+          "subject": "Persist initial start identity and explicit Stop tombstones",
+          "reachableFromMain": false,
+          "reachableFromFeatures": []
+        }
+      ]
+    },
+    "cd5f76c5156cbd83e44d42ca3469c3faed863a46": {
+      "subject": "Bound durable start requests to 64 KiB each",
+      "patchEquivalentCommits": [
+        {
+          "sha": "875710f1c1731f459e770dff60ba57fa1b92ec5b",
+          "subject": "Bound durable start requests to 64 KiB each",
+          "reachableFromMain": false,
+          "reachableFromFeatures": []
+        }
+      ]
+    },
+    "0965c78cb537c423f941da34cde0a6baec634b24": {
+      "subject": "Add bounded durable initial-start browser SDK support",
+      "patchEquivalentCommits": [
+        {
+          "sha": "40a3e0af5c95817e04b423d81d4b10d82b6e86ac",
+          "subject": "Add bounded durable initial-start browser SDK support",
+          "reachableFromMain": false,
+          "reachableFromFeatures": []
+        }
+      ]
+    },
+    "53b513d8bd216758e49d315726fd934c15ca5050": {
+      "subject": "Match durable start bindings to typed contract serialization",
+      "patchEquivalentCommits": [
+        {
+          "sha": "5627d96f4ae58d0a41bd590cd385adee1ed8ea51",
+          "subject": "Match durable start bindings to typed contract serialization",
+          "reachableFromMain": false,
+          "reachableFromFeatures": []
+        }
+      ]
+    },
+    "7347a3bd194fa4d5392ccd854cd0dac9f865e587": {
+      "subject": "fix(sdk): constrain durable start acceptance and settlement",
+      "patchEquivalentCommits": [
+        {
+          "sha": "ea8d808912a75f26eea107a9c0bcfd0b0e5a991c",
+          "subject": "fix(sdk): constrain durable start acceptance and settlement",
+          "reachableFromMain": false,
+          "reachableFromFeatures": []
+        }
+      ]
+    },
+    "136ac5b92bbea574e58132f96617b2fcf9935bab": {
+      "subject": "Reserve durable start quota for Stop settlement",
+      "patchEquivalentCommits": [
+        {
+          "sha": "5be619a940615fb3d6fad20bfdc83f41e04f36ee",
+          "subject": "Reserve durable start quota for Stop settlement",
+          "reachableFromMain": false,
+          "reachableFromFeatures": []
+        }
+      ]
+    },
+    "ebab9e941c14807da8798fcd8fe7c505e2ec6a20": {
+      "subject": "Admit durable host starts before execution and reconcile explicit Stop",
+      "patchEquivalentCommits": []
+    },
+    "9af88010b637850b0a3fee3d6a20502fc2d84efb": {
+      "subject": "Retain durable operation admission custody across pruning",
+      "patchEquivalentCommits": [
+        {
+          "sha": "deff22970ab1dd75765a9cb683e8c85ba589d6ca",
+          "subject": "Retain durable operation admission custody across pruning",
+          "reachableFromMain": false,
+          "reachableFromFeatures": []
+        }
+      ]
+    },
+    "602f15ac24a60faee8665cb165cb2d7c761c9eed": {
+      "subject": "Document durable start proof and retained custody limits",
+      "patchEquivalentCommits": []
+    },
+    "a1f00ac142a4e38cec2ff175849c67afd6ea17f0": {
+      "subject": "Keep host terminal outcome projections compact",
+      "patchEquivalentCommits": []
+    },
+    "1e75357dfe3545b95573fe346d396a4683aa154c": {
+      "subject": "docs: clarify compact terminal display outcomes",
+      "patchEquivalentCommits": []
+    },
+    "adb5cfecdc73888e9d9243a6b4131e50b9c9761b": {
+      "subject": "Order wake bindings before actions and replay retained successors",
+      "patchEquivalentCommits": [
+        {
+          "sha": "577a214d020ba35ba3188761da6a114b978516b7",
+          "subject": "Order wake bindings before actions and replay retained successors",
+          "reachableFromMain": false,
+          "reachableFromFeatures": []
+        }
+      ]
+    },
+    "b8896bea2a6ef371e049d8f52cf2b4c265757025": {
+      "subject": "Retain funded HTTP action recovery receipts and reconcile terminal runs",
+      "patchEquivalentCommits": []
+    },
+    "90a8798ac45ee783991ccc993bd34faf573461e4": {
+      "subject": "Expose exact read-only action recovery lookup",
+      "patchEquivalentCommits": []
+    },
+    "27cb2ce9717438edfe19487e3920faa183112c97": {
+      "subject": "Add bounded retained run action recovery discovery",
+      "patchEquivalentCommits": []
+    },
+    "41cc2284beb9cf184c33b0907e3059f30e79b8c7": {
+      "subject": "test: cover explicit decision adoption across owner epochs",
+      "patchEquivalentCommits": [
+        {
+          "sha": "0606e4c927040dc82361918dada86070f5adf593",
+          "subject": "test: cover explicit decision adoption across owner epochs",
+          "reachableFromMain": false,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery"
+          ]
+        }
+      ]
+    },
+    "3123ab904134df3d51066738c58ce787faeb5b9a": {
+      "subject": "test: expose adoption lineage and checkpoint recovery risks",
+      "patchEquivalentCommits": [
+        {
+          "sha": "140f606714cb98628a6e78502989f2049667bbf5",
+          "subject": "test: expose adoption lineage and checkpoint recovery risks",
+          "reachableFromMain": false,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery"
+          ]
+        }
+      ]
+    },
+    "cf7780a676010d24d9bd67cd0e1d600025860139": {
+      "subject": "local baseline: mirror parent decision adoption implementation",
+      "patchEquivalentCommits": [
+        {
+          "sha": "7e7ee865707051231b0a37d96a569cb0e6f26ac3",
+          "subject": "feat: adopt pending host decisions with separate custody evidence",
+          "reachableFromMain": false,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery"
+          ]
+        }
+      ]
+    },
+    "50d635c6f037a14694c0152159ff78662556249a": {
+      "subject": "fix: fence adoption lineage and checkpoint replay by host session",
+      "patchEquivalentCommits": [
+        {
+          "sha": "43c3a3c761d229d3b526fd426f4be63876eebe48",
+          "subject": "fix: fence adoption lineage and checkpoint replay by host session",
+          "reachableFromMain": false,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery"
+          ]
+        }
+      ]
+    },
+    "40a3e0af5c95817e04b423d81d4b10d82b6e86ac": {
+      "subject": "Add bounded durable initial-start browser SDK support",
+      "patchEquivalentCommits": [
+        {
+          "sha": "0965c78cb537c423f941da34cde0a6baec634b24",
+          "subject": "Add bounded durable initial-start browser SDK support",
+          "reachableFromMain": false,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery"
+          ]
+        }
+      ]
+    },
+    "5627d96f4ae58d0a41bd590cd385adee1ed8ea51": {
+      "subject": "Match durable start bindings to typed contract serialization",
+      "patchEquivalentCommits": [
+        {
+          "sha": "53b513d8bd216758e49d315726fd934c15ca5050",
+          "subject": "Match durable start bindings to typed contract serialization",
+          "reachableFromMain": false,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery"
+          ]
+        }
+      ]
+    },
+    "ea8d808912a75f26eea107a9c0bcfd0b0e5a991c": {
+      "subject": "fix(sdk): constrain durable start acceptance and settlement",
+      "patchEquivalentCommits": [
+        {
+          "sha": "7347a3bd194fa4d5392ccd854cd0dac9f865e587",
+          "subject": "fix(sdk): constrain durable start acceptance and settlement",
+          "reachableFromMain": false,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery"
+          ]
+        }
+      ]
+    },
+    "a71e8bd8541cd4fefe544ae6327ec98aa2ba69f3": {
+      "subject": "Persist initial start identity and explicit Stop tombstones",
+      "patchEquivalentCommits": [
+        {
+          "sha": "b3f45f630c5304cac8841b48f823dd8a5e6c4e46",
+          "subject": "Persist initial start identity and explicit Stop tombstones",
+          "reachableFromMain": false,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery"
+          ]
+        }
+      ]
+    },
+    "875710f1c1731f459e770dff60ba57fa1b92ec5b": {
+      "subject": "Bound durable start requests to 64 KiB each",
+      "patchEquivalentCommits": [
+        {
+          "sha": "cd5f76c5156cbd83e44d42ca3469c3faed863a46",
+          "subject": "Bound durable start requests to 64 KiB each",
+          "reachableFromMain": false,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery"
+          ]
+        }
+      ]
+    },
+    "5be619a940615fb3d6fad20bfdc83f41e04f36ee": {
+      "subject": "Reserve durable start quota for Stop settlement",
+      "patchEquivalentCommits": [
+        {
+          "sha": "136ac5b92bbea574e58132f96617b2fcf9935bab",
+          "subject": "Reserve durable start quota for Stop settlement",
+          "reachableFromMain": false,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery"
+          ]
+        }
+      ]
+    },
+    "deff22970ab1dd75765a9cb683e8c85ba589d6ca": {
+      "subject": "Retain durable operation admission custody across pruning",
+      "patchEquivalentCommits": [
+        {
+          "sha": "9af88010b637850b0a3fee3d6a20502fc2d84efb",
+          "subject": "Retain durable operation admission custody across pruning",
+          "reachableFromMain": false,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery"
+          ]
+        }
+      ]
+    },
+    "ae8d711e05c1376cb7d41dfd4d4e72aacd64f1c6": {
+      "subject": "test: cover durable host decision stop contract",
+      "patchEquivalentCommits": [
+        {
+          "sha": "f1b32f40e3c447ab90fc5259c2a3f433f9afa625",
+          "subject": "test: cover durable host decision stop contract",
+          "reachableFromMain": false,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery"
+          ]
+        }
+      ]
+    },
+    "c3ef776501dd79ba5ea2245373f8f1040e263b74": {
+      "subject": "test: reject stopped legacy parents with admitted children",
+      "patchEquivalentCommits": [
+        {
+          "sha": "90d516665eaf541a10387e7f95d6265ea8fa94f7",
+          "subject": "test: reject stopped legacy parents with admitted children",
+          "reachableFromMain": false,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery"
+          ]
+        }
+      ]
+    },
+    "1888eefe31fff65fcd3b3ac631766b6343fd9580": {
+      "subject": "test: reject child writes after claimed decision stop",
+      "patchEquivalentCommits": [
+        {
+          "sha": "bd351cd1c61e6a68a39677e1cf7bf1d5197f314f",
+          "subject": "test: reject child writes after claimed decision stop",
+          "reachableFromMain": false,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery"
+          ]
+        }
+      ]
+    },
+    "577a214d020ba35ba3188761da6a114b978516b7": {
+      "subject": "Order wake bindings before actions and replay retained successors",
+      "patchEquivalentCommits": [
+        {
+          "sha": "adb5cfecdc73888e9d9243a6b4131e50b9c9761b",
+          "subject": "Order wake bindings before actions and replay retained successors",
+          "reachableFromMain": false,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery"
+          ]
+        }
+      ]
+    },
+    "6ee6224d78fb0860ab889c08499cd4639e646568": {
+      "subject": "Prove MCP runtime completion through SDK server acceptance",
+      "patchEquivalentCommits": [
+        {
+          "sha": "dfd5bf89a811e8a3a388ce876bc4f21db6bc073a",
+          "subject": "Prove MCP runtime completion through SDK server acceptance",
+          "reachableFromMain": true,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery",
+            "codex/lab-clean-room-chat"
+          ]
+        }
+      ]
+    },
+    "eedd9df27590145c085378433d6c83b9c489af1a": {
+      "subject": "Map provider reasoning effort and thinking levels explicitly",
+      "patchEquivalentCommits": [
+        {
+          "sha": "bee4acefdc2e6396cca7fc677c13dba210d6c3da",
+          "subject": "Map provider reasoning effort and thinking levels explicitly",
+          "reachableFromMain": false,
+          "reachableFromFeatures": []
+        },
+        {
+          "sha": "61b6eca1cf4e3b74045379ac52da96031b17740e",
+          "subject": "Map provider reasoning effort and thinking levels explicitly",
+          "reachableFromMain": true,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery",
+            "codex/lab-clean-room-chat"
+          ]
+        }
+      ]
+    },
+    "67bf370e6d481f43eb0183ef02ad40b5f03a3d91": {
+      "subject": "Preserve private native continuation across governed run attempts",
+      "patchEquivalentCommits": [
+        {
+          "sha": "e8b065ec47b932716acd19885f104115ff9be448",
+          "subject": "Preserve private native continuation across governed run attempts",
+          "reachableFromMain": true,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery",
+            "codex/lab-clean-room-chat"
+          ]
+        }
+      ]
+    },
+    "bee4acefdc2e6396cca7fc677c13dba210d6c3da": {
+      "subject": "Map provider reasoning effort and thinking levels explicitly",
+      "patchEquivalentCommits": [
+        {
+          "sha": "61b6eca1cf4e3b74045379ac52da96031b17740e",
+          "subject": "Map provider reasoning effort and thinking levels explicitly",
+          "reachableFromMain": true,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery",
+            "codex/lab-clean-room-chat"
+          ]
+        },
+        {
+          "sha": "eedd9df27590145c085378433d6c83b9c489af1a",
+          "subject": "Map provider reasoning effort and thinking levels explicitly",
+          "reachableFromMain": false,
+          "reachableFromFeatures": []
+        }
+      ]
+    },
+    "d418b6a40e487cbe9b749464dc28e34ff02cf62e": {
+      "subject": "Validate native stream output and merge final provider usage",
+      "patchEquivalentCommits": [
+        {
+          "sha": "8d8b8017f9e3ed0b846f4bfd8f3a3525afc74c21",
+          "subject": "Validate native stream output and merge final provider usage",
+          "reachableFromMain": true,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery",
+            "codex/lab-clean-room-chat"
+          ]
+        }
+      ]
+    },
+    "cd34431a2be1f6a5878c35666f6115d7253a7830": {
+      "subject": "Recompute planner repair input receipts after replay selection",
+      "patchEquivalentCommits": [
+        {
+          "sha": "e075d932bdf13db713b1e338eaa443a093a6953e",
+          "subject": "Recompute planner repair input receipts after replay selection",
+          "reachableFromMain": true,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery",
+            "codex/lab-clean-room-chat"
+          ]
+        }
+      ]
+    },
+    "f9c777301b6bb9c306b942a2ecc2a66e107b3b15": {
+      "subject": "Expose named reasoning effort in Lab run and chat",
+      "patchEquivalentCommits": [
+        {
+          "sha": "575bd52bcdb8b15fa8d14866861832d7210a4427",
+          "subject": "Expose named reasoning effort in Lab run and chat",
+          "reachableFromMain": true,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery",
+            "codex/lab-clean-room-chat"
+          ]
+        }
+      ]
+    },
+    "d964b3e48f17e28009420e3a675fdba00a12ad7f": {
+      "subject": "Add scoped semantic projection and governed concept adjustments",
+      "patchEquivalentCommits": [
+        {
+          "sha": "28f88312cdec37e0d000d783b409d5da8182062d",
+          "subject": "Add scoped semantic projection and governed concept adjustments",
+          "reachableFromMain": true,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery",
+            "codex/lab-clean-room-chat"
+          ]
+        }
+      ]
+    },
+    "d58e3aada277d3210705541cce8bb13014b21399": {
+      "subject": "for codex cloud",
+      "patchEquivalentCommits": [
+        {
+          "sha": "144ab2aa25c360e68474bfbe43a058e3abdf9273",
+          "subject": "Add files via upload",
+          "reachableFromMain": true,
+          "reachableFromFeatures": [
+            "codex/maze-action-recovery",
+            "codex/lab-clean-room-chat"
+          ]
+        }
+      ]
+    }
+  }
+}

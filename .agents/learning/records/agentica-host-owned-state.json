@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "id": "agentica-host-owned-state",
+  "scope": "agentica",
+  "kind": "practice",
+  "status": "accepted",
+  "title": "Reuse the bounded runtime and host boundary",
+  "trigger": "agentic harness core integration domain state planning receipts completion",
+  "guidance": "Use the existing request/planner/plan/validation/tool/observation/outcome seams for an agentic loop. Keep canonical domain state, persistence, cross-run orchestration and long-lived memory with the host. Verify outcome against host evidence; do not build a parallel executor or treat model narration as completion.",
+  "evidence": [
+    {
+      "kind": "source_review",
+      "reference": "docs/Agentica.RuntimeContracts.md",
+      "revision": "e075d932bdf13db713b1e338eaa443a093a6953e",
+      "note": "Core/host ownership and proposal/evidence distinction."
+    },
+    {
+      "kind": "source_review",
+      "reference": "Agentica/Execution/AgenticaRunner.cs",
+      "revision": "e075d932bdf13db713b1e338eaa443a093a6953e",
+      "note": "Existing create/refine, continuation and completion-evaluation paths."
+    }
+  ],
+  "recheck": "Inspect the current runtime and the consuming host before claiming that a full host workflow or live model loop is implemented.",
+  "tags": [
+    "agentic",
+    "host",
+    "loop",
+    "integration",
+    "completion"
+  ],
+  "recorded_on": "2026-10-29"
+}
