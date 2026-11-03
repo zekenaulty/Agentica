@@ -30,6 +30,7 @@
     <ProjectReference Include="..\Agentica.Clients\Agentica.Clients.csproj" />
     <ProjectReference Include="..\Agentica.Mcp\Agentica.Mcp.csproj" />
     <ProjectReference Include="..\Agentica.Lab\Agentica.Lab.csproj" Aliases="AgenticaLab" />
+    <ProjectReference Include="..\samples\Agentica.NyxLearningHost\Agentica.NyxLearningHost.csproj" />
   </ItemGroup>
 
   <ItemGroup>

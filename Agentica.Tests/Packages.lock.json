@@ -302,6 +302,12 @@
           "Agentica": "[0.1.0-research.1, )",
           "ModelContextProtocol.Core": "[2.2.0, )"
         }
+      },
+      "agentica.nyxlearninghost": {
+        "type": "Project",
+        "dependencies": {
+          "Agentica.Clients": "[0.1.0-research.1, )"
+        }
       }
     }
   }
