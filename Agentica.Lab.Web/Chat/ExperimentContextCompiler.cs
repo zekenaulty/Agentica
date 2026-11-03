@@ -1,11 +1,13 @@
 using System.Text;
+using Agentica.Lab.Web.Chat.Recall;
 
 namespace Agentica.Lab.Web.Chat;
 
 /// <summary>Only this conversation's complete visible dialogue is eligible. No memory service is bound.</summary>
 public static class ExperimentContextCompiler
 {
-    public static ExperimentPreparedContext Prepare(ExperimentConversation conversation, ExperimentTurn turn)
+    public static ExperimentPreparedContext Prepare(ExperimentConversation conversation, ExperimentTurn turn,
+        IConversationEvidenceSource? evidenceSource = null)
     {
         if (conversation.Id != turn.ConversationId) throw new ExperimentException("context.scope", "Conversation context does not match this turn.");
         var settings = turn.Settings;
@@ -14,6 +16,7 @@ public static class ExperimentContextCompiler
             .SelectMany(t => new[] { new ExperimentMessage(t.Id + ":user", "user", t.UserText, t.CreatedAt),
                 new ExperimentMessage(t.Id + ":assistant", "assistant", t.AssistantText, t.FinishedAt ?? t.CreatedAt) }).ToArray();
         var selected = eligible.ToList();
+        if (settings.ThreadRecallEnabled) return ExperimentRecallAllocator.Prepare(conversation, turn, eligible, evidenceSource);
         if (settings.Mode == "clean-room") return PrepareDirect(conversation, turn, eligible, selected);
         var allowance = settings.ContextWindowTokens - settings.MaxOutputTokens - 4096;
         int Characters() => settings.Instructions.Length + turn.UserText.Length + selected.Sum(m => m.Content.Length);

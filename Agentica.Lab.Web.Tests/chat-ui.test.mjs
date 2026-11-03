@@ -1,6 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { actionErrorMessage, catalogSelection, citationPresentation, classifyEvent, depthPresets, familyModelCatalog, instructionValue, isTerminal, knownFamilyModelIds, mergeTrace, safeHttpUrl, summarizeTrace, validateSettings } from '../Agentica.Lab.Web/wwwroot/chat.mjs';
+import { actionErrorMessage, catalogSelection, citationPresentation, classifyEvent, depthPresets, exactSourceSelection, familyModelCatalog, instructionValue, isTerminal, knownFamilyModelIds, mergeTrace, mergeTurnPages, safeHttpUrl, summarizeTrace, validateSettings } from '../Agentica.Lab.Web/wwwroot/chat.mjs';
+
+test('history pages merge chronologically without duplicates and remain bounded', () => {
+  const turns = Array.from({ length: 5000 }, (_, index) => ({ id: `turn-${index + 1}`, sequence: index + 1 }));
+  const latest = turns.slice(-20); const earlier = turns.slice(-40, -20);
+  const merged = mergeTurnPages(latest, earlier);
+  assert.equal(merged.turns.length, 40); assert.equal(merged.turns[0].sequence, 4961); assert.equal(merged.turns.at(-1).sequence, 5000);
+  assert.equal(mergeTurnPages(merged.turns, latest).turns.length, 40, 'Refreshing latest does not discard earlier loaded rows.');
+  const bounded = mergeTurnPages(turns.slice(-200), [{ id: 'turn-5001', sequence: 5001 }]);
+  assert.equal(bounded.turns.length, 200); assert.equal(bounded.omitted, 1); assert.equal(bounded.turns.at(-1).sequence, 5001);
+});
+
+test('operator selection uses exact UTF-16 source offsets without normalizing text', () => {
+  const hit = { source: { sourceId: 'source-id' }, startOffset: 120, excerpt: 'A🧭B\r\nC' };
+  assert.deepEqual(exactSourceSelection(hit, 1, 3), { sourceId: 'source-id', startOffset: 121, endOffset: 123 });
+  assert.equal(hit.excerpt.slice(1, 3), '🧭');
+  assert.throws(() => exactSourceSelection(hit, 0, 0), /nonempty/);
+  assert.throws(() => exactSourceSelection(hit, 0, 100), /nonempty/);
+});
 
 test('only a settings revision conflict receives reload guidance', () => {
   assert.equal(actionErrorMessage({ status: 409, code: 'context.limit', message: 'The draft exceeds its input allowance. No model call was made.' }), 'context.limit: The draft exceeds its input allowance. No model call was made.');
@@ -147,6 +165,8 @@ test('clean-room safety invariants cannot be changed by normal form settings', (
   assert.match(validateSettings({ ...settings, mode: 'harness', ambientWebSearch: true }), /explicit web.search/);
   assert.equal(validateSettings({ ...settings, ambientWebSearch: true, maxWebSearchCalls: 3 }), null);
   assert.match(validateSettings({ ...settings, maxWebSearchCalls: 21 }), /1–20/);
+  assert.match(validateSettings({ ...settings, threadRecallEnabled: true, threadRecallMode: 'agent' }), /Harness/);
+  assert.match(validateSettings({ ...settings, threadRecallEnabled: true, threadRecallRecentTurns: 20 }), /protected recent-turn/);
 });
 
 test('depth presets are independent of reasoning effort and stay within the service history ceiling', () => {

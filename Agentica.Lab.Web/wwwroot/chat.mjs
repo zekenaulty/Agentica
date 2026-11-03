@@ -72,6 +72,16 @@ export function actionErrorMessage(error) {
   const message = `${error.code ? `${error.code}: ` : ''}${error.message ?? 'The request failed.'}`;
   return error.code === 'settings.conflict' ? `${message} Use “Reload saved configuration” to load the current revision. Your message draft is preserved.` : message;
 }
+export function mergeTurnPages(current, incoming, limit = 200) {
+  const turns = [...new Map([...current, ...incoming].map(turn => [turn.id, turn])).values()].sort((a, b) => a.sequence - b.sequence);
+  return { turns: turns.slice(-limit), omitted: Math.max(0, turns.length - limit) };
+}
+export function exactSourceSelection(hit, start, end) {
+  const length = hit.excerpt.length;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end <= start || end > length) throw new Error('Select a nonempty passage within this source excerpt.');
+  return { sourceId: hit.source.sourceId, startOffset: hit.startOffset + start, endOffset: hit.startOffset + end };
+}
+const recallNumericDefaults = Object.freeze({ threadRecallMaxCharacters: 8000, threadRecallTopK: 5, threadRecallNeighborRadius: 1, threadRecallRecentTurns: 2, threadRecallMaxCalls: 8 });
 export function safeHttpUrl(value) {
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : null; } catch { return null; }
 }
@@ -110,6 +120,8 @@ export function validateSettings(settings) {
   if (!['clean-room', 'harness'].includes(settings.mode)) return 'Choose a valid execution mode.';
   if (settings.mode === 'clean-room' && settings.enabledTools.length) return 'Clean Room cannot offer tools.';
   if (settings.memoryEnabled) return 'Memory is disabled for this feature.';
+  if (settings.threadRecallEnabled && settings.threadRecallMode === 'agent' && settings.mode !== 'harness') return 'Agent-directed history recall requires Harness mode.';
+  if (settings.threadRecallEnabled && (settings.threadRecallRecentTurns ?? 2) * 2 > settings.maxHistoryMessages) return 'The protected recent-turn floor cannot exceed the history-message limit.';
   if (settings.mode === 'harness' && settings.ambientWebSearch) return 'Use the explicit web.search capability in Harness mode; ambient search is Clean Room only.';
   if (!Number.isSafeInteger(settings.maxWebSearchCalls ?? 3) || (settings.maxWebSearchCalls ?? 3) < 1 || (settings.maxWebSearchCalls ?? 3) > 20) return 'Web search call budget must be 1–20 calls per turn.';
   for (const name of ['maxOutputTokens', 'contextWindowTokens', 'maxInputCharacters', 'maxToolResultCharacters', 'maxToolEvidenceCharacters', 'maxSteps', 'maxProviderCalls', 'timeoutSeconds']) {
@@ -131,7 +143,7 @@ if (typeof document !== 'undefined') startChat();
 
 function startChat() {
   const $ = id => document.getElementById(id);
-  const state = { conversations: [], conversation: null, capabilities: [], models: null, dirty: false, instructionsDirty: false, busy: false, generation: 0, streams: new Map(), traces: new Map(), nodes: new Map(), pendingSend: null };
+  const state = { conversations: [], conversation: null, capabilities: [], models: null, dirty: false, instructionsDirty: false, busy: false, generation: 0, streams: new Map(), traces: new Map(), nodes: new Map(), pendingSend: null, recallSelections: [], recallStatus: null, recallStatusLoading: false, recallRebuilding: false, source: null, historyPage: null, historyLoading: false, historyWindowOmitted: 0 };
   const json = value => JSON.stringify(value ?? null, null, 2);
   const node = (tag, className, text) => { const value = document.createElement(tag); if (className) value.className = className; if (text !== undefined) value.textContent = text; return value; };
   const label = value => String(value ?? 'unknown').replaceAll('_', ' ').replaceAll('.', ' ');
@@ -156,7 +168,8 @@ function startChat() {
   const numericFields = {
     maxOutputTokens: 'max-output', contextWindowTokens: 'context-window', maxInputCharacters: 'max-input', maxHistoryMessages: 'max-history',
     maxToolResultCharacters: 'max-tool-result', maxToolEvidenceCharacters: 'max-tool-evidence', maxSteps: 'max-steps', maxContinuations: 'max-continuations',
-    maxProviderCalls: 'max-provider-calls', timeoutSeconds: 'timeout-seconds', maxWebSearchCalls: 'max-web-search-calls'
+    maxProviderCalls: 'max-provider-calls', timeoutSeconds: 'timeout-seconds', maxWebSearchCalls: 'max-web-search-calls',
+    threadRecallMaxCharacters: 'thread-recall-max-characters', threadRecallTopK: 'thread-recall-top-k', threadRecallNeighborRadius: 'thread-recall-neighbor-radius', threadRecallRecentTurns: 'thread-recall-recent-turns', threadRecallMaxCalls: 'thread-recall-max-calls'
   };
   function settingsFromForm() {
     return {
@@ -164,6 +177,8 @@ function startChat() {
       mode: $('mode').value, model: $('model').value.trim(), reasoningEffort: $('reasoning-effort').value || null,
       instructions: instructionValue(state.conversation.settings.instructions, $('instructions').value, state.instructionsDirty), reasoningSummary: $('reasoning-summary').checked,
       ambientWebSearch: $('mode').value === 'clean-room' && $('ambient-web-search').checked,
+      threadRecallEnabled: $('thread-recall-enabled').checked, threadRecallMode: $('thread-recall-mode').value, threadRecallQuery: $('thread-recall-query').value,
+      threadRecallSelections: state.recallSelections.map(({ sourceId, startOffset, endOffset }) => ({ sourceId, startOffset, endOffset })),
       historyPolicy: $('history-policy').value, contextDepth: $('context-depth').value,
       ...Object.fromEntries(Object.entries(numericFields).map(([key, id]) => [key, Number($(id).value)])),
       enabledTools: $('mode').value === 'harness' ? [...$('capability-list').querySelectorAll('input:checked')].map(input => input.value) : [],
@@ -178,8 +193,10 @@ function startChat() {
     $('reasoning-effort').value = settings.reasoningEffort ?? ''; $('instructions').value = settings.instructions ?? '';
     $('reasoning-summary').checked = settings.reasoningSummary; $('history-policy').value = settings.historyPolicy;
     $('ambient-web-search').checked = Boolean(settings.ambientWebSearch);
+    $('thread-recall-enabled').checked = Boolean(settings.threadRecallEnabled); $('thread-recall-mode').value = settings.threadRecallMode ?? 'auto'; $('thread-recall-query').value = settings.threadRecallQuery ?? '';
+    state.recallSelections = (settings.threadRecallSelections ?? []).map(selection => ({ ...selection }));
     $('context-depth').value = settings.contextDepth;
-    for (const [key, id] of Object.entries(numericFields)) $(id).value = settings[key] ?? (key === 'maxWebSearchCalls' ? 3 : '');
+    for (const [key, id] of Object.entries(numericFields)) $(id).value = settings[key] ?? recallNumericDefaults[key] ?? (key === 'maxWebSearchCalls' ? 3 : '');
     for (const input of $('capability-list').querySelectorAll('input')) input.checked = settings.enabledTools?.includes(input.value) ?? false;
     state.dirty = false; state.instructionsDirty = false; updateMode(); updateControls();
   }
@@ -193,6 +210,9 @@ function startChat() {
       ? 'Uses the real Agentica planner, bounded execution and tool evidence. Application planning instructions are an explicit experimental variable.'
       : $('ambient-web-search').checked ? "Only this conversation's context is sent. Provider-native web search is enabled; no application planner or memory is added." : "Only this conversation's history and your exact instructions are sent. No application planner or tools.";
     $('instruction-state').textContent = $('instructions').value.length ? `${$('instructions').value.length.toLocaleString()} characters · saved exactly as entered.` : 'Blank means the instructions field is omitted.';
+    $('thread-recall-agent-option').disabled = !harness;
+    if (!harness && $('thread-recall-mode').value === 'agent') $('thread-recall-mode').value = 'auto';
+    updateRecallUI();
   }
   function updateControls() {
     const selected = Boolean(state.conversation); const running = Boolean(activeTurn());
@@ -207,7 +227,9 @@ function startChat() {
     $('transcript').setAttribute('aria-busy', String(running));
     $('save-status').textContent = selected ? state.dirty ? 'Unsaved changes · saved before sending or switching.' : `Saved · revision ${state.conversation.settingsRevision}` : 'No conversation selected.';
     $('composer-status').textContent = running ? 'Turn running · settings are frozen for this invocation.' : selected ? state.dirty ? 'The next turn will use your edited configuration.' : 'Saved conversation · only its own context is eligible.' : 'Select or create a conversation.';
-    if (selected) $('conversation-subtitle').textContent = `${state.conversation.settings.mode === 'harness' ? 'Agentica Harness' : 'Clean Room'} · ${state.conversation.settings.model} · ${state.conversation.settings.reasoningEffort ?? 'model default'} effort · memory off`;
+    if (selected) $('conversation-subtitle').textContent = `${state.conversation.settings.mode === 'harness' ? 'Agentica Harness' : 'Clean Room'} · ${state.conversation.settings.model} · ${state.conversation.settings.reasoningEffort ?? 'model default'} effort · ${state.conversation.settings.threadRecallEnabled ? `thread recall ${state.conversation.settings.threadRecallMode} · conditioned` : 'thread recall off'} · personal memory off`;
+    $('pin-history-source').disabled = !selected || running || state.busy || !$('thread-recall-enabled').checked;
+    renderHistoryPaging();
   }
   async function saveSettings() {
     if (!state.dirty || !state.conversation) return;
@@ -215,7 +237,7 @@ function startChat() {
     if (!$('settings-form').reportValidity()) throw new Error('Check the highlighted configuration fields.');
     const updated = await api(`${base()}/settings`, 'PUT', { expectedRevision: state.conversation.settingsRevision, settings });
     // Keep the durable transcript, which may have advanced while the settings saved.
-    state.conversation = updated; fillSettings(); upsertConversation(updated);
+    state.conversation = { ...updated, turns: state.conversation.turns }; fillSettings(); upsertConversation(updated);
   }
   function upsertConversation(conversation) {
     const index = state.conversations.findIndex(item => item.id === conversation.id);
@@ -236,9 +258,13 @@ function startChat() {
   async function selectConversation(id, skipSave = false) {
     if (!skipSave) await saveSettings();
     const generation = ++state.generation;
-    const conversation = await api(`/api/chats/${encodeURIComponent(id)}`);
+    const conversation = await api(`/api/chats/${encodeURIComponent(id)}?limit=20`);
     if (generation !== state.generation) return;
     stopStreams(); state.conversation = conversation; state.traces.clear(); state.nodes.clear(); state.pendingSend = null;
+    state.historyPage = conversation.historyPage ?? null; state.historyWindowOmitted = 0; state.recallStatus = null; state.recallStatusLoading = false; state.source = null;
+    state.recallRebuilding = false; $('rebuild-recall-index').disabled = false; $('cancel-recall-rebuild').hidden = true; capabilityPreviewSignature = ''; capabilityPreviewGeneration++;
+    if ($('history-source-dialog').open) $('history-source-dialog').close();
+    $('thread-history-results').replaceChildren(); $('thread-history-search-status').textContent = '';
     $('message').value = ''; $('conversation-title').textContent = conversation.title;
     history.replaceState(null, '', `${location.pathname}?chat=${encodeURIComponent(id)}`);
     fillSettings(); renderTranscript(); upsertConversation(conversation); notice(null);
@@ -273,7 +299,7 @@ function startChat() {
     const summary = node('section', 'trace-summary'); summary.append(node('h4', '', 'Provider reasoning summary')); const summaryText = node('pre'); summary.append(summaryText);
     const absence = node('p', 'trace-absence'); const coverage = node('p', 'trace-coverage');
     const requestInspector = makeInspector('Effective provider request'); const contextInspector = makeInspector('Context manifest'); const nativeInspector = makeInspector('Native output items · sanitized'); const settingsInspector = makeInspector('Invocation settings snapshot');
-    const searchInspector = makeInspector('Web search & sources');
+    const searchInspector = makeInspector('Web search & sources'); const recallInspector = makeInspector('Thread recall evidence manifest'); recallInspector.links = node('div', 'recall-results'); recallInspector.section.append(recallInspector.links);
     const sourceInspector = makeInspector('Provider source records'); sourceInspector.body.remove();
     sourceInspector.section.append(node('p', 'trace-coverage', 'Allowed provider source events, with sensitive fields redacted. Private reasoning and opaque continuation carriers are not exposed. These records are separate from the normalized timeline and are not a replay carrier.'));
     sourceInspector.records = node('ol', 'typed-timeline'); sourceInspector.section.append(sourceInspector.records);
@@ -282,11 +308,11 @@ function startChat() {
     const pageControls = node('div', 'trace-page-controls'); const load = node('button', 'button secondary', 'Load retained trace'); load.type = 'button';
     const restart = node('button', 'button secondary', 'Read from start'); restart.type = 'button'; restart.title = 'Reset only the browser trace window and reread retained pages. Makes no provider call.';
     const pageInfo = node('span'); pageControls.append(load, restart, pageInfo);
-    traceContent.append(activity, summary, absence, coverage, requestInspector.section, contextInspector.section, searchInspector.section, nativeInspector.section, sourceInspector.section, settingsInspector.section, timelineSection, pageControls); trace.append(traceContent); article.append(trace);
-    const entry = { article, content, placeholder, answerSources, meta, error, continuity, trace, traceLabel, activity, summary, summaryText, absence, coverage, timeline, timelineSection, timelineLabel, requestInspector, contextInspector, nativeInspector, sourceInspector, searchInspector, load, pageInfo };
+    traceContent.append(activity, summary, absence, coverage, requestInspector.section, contextInspector.section, recallInspector.section, searchInspector.section, nativeInspector.section, sourceInspector.section, settingsInspector.section, timelineSection, pageControls); trace.append(traceContent); article.append(trace);
+    const entry = { article, content, placeholder, answerSources, meta, error, continuity, trace, traceLabel, activity, summary, summaryText, absence, coverage, timeline, timelineSection, timelineLabel, requestInspector, contextInspector, nativeInspector, sourceInspector, searchInspector, recallInspector, load, pageInfo };
     state.nodes.set(turn.id, entry); state.traces.set(turn.id, newTrace(turn));
     trace.addEventListener('toggle', () => { if (trace.open && !state.traces.get(turn.id)?.loaded) loadTrace(turn.id); });
-    for (const inspector of [timelineSection, requestInspector.section, contextInspector.section, nativeInspector.section, sourceInspector.section, searchInspector.section]) inspector.addEventListener('toggle', () => { if (inspector.open) renderTrace(turn.id); });
+    for (const inspector of [timelineSection, requestInspector.section, contextInspector.section, nativeInspector.section, sourceInspector.section, searchInspector.section, recallInspector.section]) inspector.addEventListener('toggle', () => { if (inspector.open) renderTrace(turn.id); });
     load.addEventListener('click', () => loadTrace(turn.id));
     restart.addEventListener('click', () => {
       const retained = state.traces.get(turn.id); if (!retained || retained.loading) return;
@@ -330,6 +356,7 @@ function startChat() {
     renderAnswer(turn, elements);
     elements.placeholder.hidden = Boolean(turn.assistantText); elements.placeholder.textContent = isTerminal(turn.status) ? 'No assistant text emitted.' : 'Waiting for provider output…';
     elements.meta.replaceChildren(badge(turn.status), node('span', '', `${turn.settings?.model ?? 'OpenAI'} · ${turn.settings?.reasoningEffort ?? 'default'} effort`), node('span', '', `Configuration r${turn.settingsRevision}`));
+    if (turn.settings?.threadRecallEnabled) elements.meta.append(node('span', 'recall-treatment', `Conditioned · thread recall ${turn.settings.threadRecallMode}`));
     if (turn.finishedAt) elements.meta.append(node('span', '', `${Math.max(0, (new Date(turn.finishedAt) - new Date(turn.createdAt)) / 1000).toFixed(1)}s`));
     if (turn.usage) { const usage = node('span', '', usageLabel(turn.usage)); usage.title = json(turn.usage); elements.meta.append(usage); }
     elements.error.textContent = turn.errorMessage ? `${turn.errorCode ? `${turn.errorCode}: ` : ''}${turn.errorMessage}` : '';
@@ -346,6 +373,14 @@ function startChat() {
     const merged = mergeTrace(trace.events, events); trace.events = merged.events; trace.windowOmitted += merged.omitted;
     if (!trace.renderPending) { trace.renderPending = true; requestAnimationFrame(() => { if (!state.traces.has(id)) return; trace.renderPending = false; renderTrace(id); }); }
   }
+  async function retainedPayload(id, event) {
+    const retained = state.traces.get(id); if (!retained) return undefined;
+    if (retained.payloads.has(event.sequence)) return retained.payloads.get(event.sequence);
+    const generation = state.generation; const data = await api(`${turnBase(id)}/events/${event.sequence}/payload`);
+    if (generation !== state.generation) return undefined;
+    retained.payloads.set(event.sequence, data); if (retained.payloads.size > 8) retained.payloads.delete(retained.payloads.keys().next().value);
+    return data;
+  }
   function eventElement(id, event, open, sourceRecord = false) {
     const li = node('li'); const detail = node('details', `typed-event ${classifyEvent(event)}`); detail.dataset.sequence = String(event.sequence); detail.open = open.has(String(event.sequence));
     const title = node('summary'); title.append(node('span', 'event-kind'), node('time', 'event-time', timestamp(event.time)), node('span', 'event-type', sourceRecord ? event.data?.providerType ?? 'Provider source event' : event.type), node('span', 'event-seq', `#${event.sequence}`)); detail.append(title);
@@ -357,12 +392,10 @@ function startChat() {
         full.disabled = true;
         const generation = state.generation;
         try {
-          const data = await api(`${turnBase(id)}/events/${event.sequence}/payload`);
+          const data = await retainedPayload(id, event);
           if (generation !== state.generation) return;
           // Explicit inspection is bounded independently of the event window.
           // Evicted payloads can be read again from the durable service record.
-          retained.payloads.set(event.sequence, data);
-          if (retained.payloads.size > 8) retained.payloads.delete(retained.payloads.keys().next().value);
           payload.textContent = json(data); full.remove();
         } catch (error) { if (generation === state.generation) { notice(`Cannot load retained record: ${error.message}`); full.disabled = false; } }
       }); detail.append(full);
@@ -393,6 +426,14 @@ function startChat() {
     if (elements.searchInspector.section.open) {
       const searches = [...new Map([...trace.events, ...trace.citationEvents].filter(event => event.type === 'provider.citations' || /web.search|web_search/.test(event.type)).map(event => [event.sequence, event])).values()].sort((a, b) => a.sequence - b.sequence);
       elements.searchInspector.body.textContent = searches.length ? json(searches.map(event => ({ sequence: event.sequence, callId: event.callId, itemId: event.itemId, type: event.type, data: event.data }))) : 'No search/source events loaded. Search may be disabled or unused; inspect retained coverage before inferring absence.';
+    }
+    if (elements.recallInspector.section.open) {
+      const recalls = trace.events.filter(event => event.type === 'context.recall' || /^recall\./.test(event.type)).map(event => ({ ...event, data: trace.payloads.get(event.sequence) ?? event.data }));
+      elements.recallInspector.body.textContent = recalls.length ? json(recalls.map(event => ({ sequence: event.sequence, type: event.type, callId: event.callId, data: event.data }))) : 'No recall manifest loaded. Thread recall may be off; inspect trace coverage before inferring absence.';
+      elements.recallInspector.links.replaceChildren(...recalls.flatMap(event => {
+        if (event.data?.payloadRef) { const load = node('button', 'button secondary', 'Load retained recall manifest'); load.type = 'button'; load.addEventListener('click', async () => { load.disabled = true; try { await retainedPayload(id, event); renderTrace(id); } catch (error) { load.disabled = false; notice(`Cannot load recall manifest: ${error.message}`); } }); return [load]; }
+        return (event.data?.selected ?? event.data?.hits ?? []).filter(evidence => evidence.sourceId).map(evidence => sourceButton(evidence.sourceId, evidence.startOffset, evidence.endOffset, `Open original · turn ${evidence.turnSequence} ${evidence.role} · UTF-16 [${evidence.startOffset}, ${evidence.endOffset})`));
+      }));
     }
     if (elements.sourceInspector.section.open) {
       const records = trace.events.filter(event => event.type === 'provider.record');
@@ -478,7 +519,7 @@ function startChat() {
     };
   }
   async function reconcileConversation(generation = state.generation) {
-    const conversation = await api(base()); if (generation !== state.generation) return;
+    const conversation = await api(`${base()}?limit=20`); if (generation !== state.generation) return;
     for (const fresh of conversation.turns ?? []) {
       const turn = turnById(fresh.id);
       if (!turn) { state.conversation.turns.push(fresh); renderTurn(fresh); if (!isTerminal(fresh.status)) connectTurn(fresh); }
@@ -492,7 +533,9 @@ function startChat() {
         updateTurn(turn); renderTrace(turn.id);
       }
     }
-    state.conversation.updatedAt = conversation.updatedAt; upsertConversation(state.conversation); updateControls();
+    state.conversation.updatedAt = conversation.updatedAt;
+    if (conversation.historyPage) state.historyPage = { ...conversation.historyPage, nextBeforeSequence: state.historyPage ? state.historyPage.nextBeforeSequence : conversation.historyPage.nextBeforeSequence };
+    reorderLoadedTurns(); upsertConversation(state.conversation); updateControls();
   }
   async function sendMessage() {
     if (!state.conversation || activeTurn()) return;
@@ -504,10 +547,11 @@ function startChat() {
     state.pendingSend = null; $('message').value = ''; $('message').style.height = '';
     if (!state.conversation.turns.length) $('transcript').replaceChildren();
     const existing = turnById(turn.id);
+    if (state.historyPage && turn.sequence > state.historyPage.latestSequence) state.historyPage = { ...state.historyPage, totalTurns: state.historyPage.totalTurns + 1, latestSequence: turn.sequence };
     if (!existing) { state.conversation.turns.push(turn); renderTurn(turn); }
     else Object.assign(existing, turn);
     if (!isTerminal(turn.status)) connectTurn(existing ?? turn);
-    updateControls(); scrollLatest(true); notice(null);
+    reorderLoadedTurns(); updateControls(); scrollLatest(true); notice(null);
   }
   async function runAction(action) {
     if (state.busy) return;
@@ -523,6 +567,127 @@ function startChat() {
       const description = node('div'); const name = node('strong', '', capability.name); name.append(node('span', 'badge neutral', capability.effect)); description.append(name, node('p', '', capability.description), node('small', '', `${capability.id} · ${capability.source} · v${capability.version}`));
       labelNode.append(input, description); wrapper.append(labelNode); return wrapper;
     }) : [node('p', 'micro', 'No reusable capabilities are registered.')]));
+  }
+  function updateRecallUI() {
+    const enabled = $('thread-recall-enabled').checked;
+    $('thread-recall-controls').hidden = !enabled; $('thread-recall-summary').textContent = enabled ? `${$('thread-recall-mode').value} · ${state.recallSelections.length} pins · this conversation only` : 'off';
+    $('thread-recall-condition').textContent = !enabled ? 'Off is the baseline. Enabling recall is a conditioned experiment using only this saved conversation. Personal/governed memory stays disabled.' : $('thread-recall-mode').value === 'agent' ? 'Conditioned Harness experiment. Bind conversation.read/search explicitly below for model-directed recall; this switch does not select tools. Personal/governed memory stays disabled.' : $('thread-recall-mode').value === 'manual' ? 'Conditioned experiment using operator-pinned exact passages. Search/read actions below are local diagnostics and make no model call.' : 'Conditioned experiment using deterministic local lookup. A blank override uses the current user message; selection and omissions are receipted.';
+    $('memory-recall-status').textContent = enabled ? 'Thread recall is on for this conversation only. Personal/governed memory remains disabled.' : 'Thread recall is off. Saved history remains within this conversation.';
+    $('thread-recall-pins').replaceChildren(...(state.recallSelections.length ? state.recallSelections.map((selection, index) => {
+      const card = node('div', 'recall-hit'); card.append(sourceButton(selection.sourceId, selection.startOffset, selection.endOffset, `${selection.sourceId} · UTF-16 [${selection.startOffset}, ${selection.endOffset})`));
+      const remove = node('button', 'button secondary', 'Remove pin'); remove.type = 'button'; remove.addEventListener('click', () => { state.recallSelections.splice(index, 1); state.dirty = true; updateRecallUI(); updateControls(); }); card.append(remove); return card;
+    }) : [node('p', 'field-help', 'No exact passages selected. Search and open an original source to pin a range.')]));
+    if (enabled && $('thread-recall-section').open && state.conversation && !state.recallStatus && !state.recallStatusLoading) checkRecallCoverage();
+    refreshRecallCapabilityPreview();
+  }
+  let capabilityPreviewSignature = ''; let capabilityPreviewGeneration = 0;
+  async function refreshRecallCapabilityPreview() {
+    if (!state.conversation) return;
+    const enabled = $('thread-recall-enabled').checked;
+    const query = new URLSearchParams({ threadRecallEnabled: String(enabled), threadRecallMode: $('thread-recall-mode').value, mode: $('mode').value }); const signature = query.toString();
+    if (signature === capabilityPreviewSignature) return;
+    capabilityPreviewSignature = signature; const revision = ++capabilityPreviewGeneration; const generation = state.generation;
+    try {
+      const capabilities = await api(`/api/chats/capabilities?${query}`); if (generation !== state.generation || revision !== capabilityPreviewGeneration) return;
+      const selected = new Set([...$('capability-list').querySelectorAll('input:checked')].map(input => input.value));
+      state.capabilities = capabilities; renderCapabilities(); for (const input of $('capability-list').querySelectorAll('input')) input.checked = selected.has(input.value);
+    } catch { if (generation === state.generation) $('thread-recall-readiness').textContent = 'Effective capability metadata is unavailable; retry coverage before running this condition.'; }
+  }
+  function coverageText(value) {
+    if (!value) return 'Coverage unavailable; absence of a result is not proof of no match.';
+    return `${value.status ?? 'unknown'} · ${value.indexedSourceCount ?? 0}/${value.eligibleSourceCount ?? 0} eligible sources indexed · as of turn ${value.asOfSequence ?? '?'} · last indexed ${value.lastIndexedSequence ?? '?'}${value.reason ? ` · ${value.reason}` : ''}`;
+  }
+  async function checkRecallCoverage() {
+    if (!state.conversation || !$('thread-recall-enabled').checked || state.recallStatusLoading) return;
+    const generation = state.generation; state.recallStatusLoading = true; $('thread-recall-readiness').textContent = 'Checking local index coverage…';
+    try { const result = await api(`${base()}/history/status`); if (generation !== state.generation) return; state.recallStatus = result; $('thread-recall-readiness').textContent = `${coverageText(result.coverage)}${result.maintenance ? ` · maintenance ${result.maintenance.status}${result.maintenance.error ? `: ${result.maintenance.error}` : ''}` : ''}`; $('cancel-recall-rebuild').hidden = result.maintenance?.status?.toUpperCase() !== 'INDEXING'; }
+    catch (error) { if (generation === state.generation) { state.recallStatus = { unavailable: true }; $('thread-recall-readiness').textContent = `Coverage unavailable: ${error.message}`; } }
+    finally { if (generation === state.generation) state.recallStatusLoading = false; }
+  }
+  async function rebuildRecallIndex() {
+    if (!state.conversation || !$('thread-recall-enabled').checked || state.recallRebuilding) return;
+    const generation = state.generation; state.recallRebuilding = true; $('rebuild-recall-index').disabled = true; $('cancel-recall-rebuild').hidden = false; $('thread-recall-readiness').textContent = 'Rebuilding this conversation’s local lexical index. No model or embedding call.';
+    try {
+      const result = await api(`${base()}/history/rebuild`, 'POST', {}); if (generation !== state.generation) return;
+      $('thread-recall-readiness').textContent = `${result.status}: ${result.indexedSources}/${result.eligibleSources} sources · last indexed ${result.lastIndexedSequence}`;
+      state.recallStatus = null; await checkRecallCoverage();
+      for (let poll = 0; poll < 120 && generation === state.generation && state.recallStatus?.maintenance?.status?.toUpperCase() === 'INDEXING'; poll++) { await new Promise(resolve => setTimeout(resolve, 500)); await checkRecallCoverage(); }
+    }
+    catch (error) { if (generation === state.generation) $('thread-recall-readiness').textContent = `Index rebuild did not complete: ${error.message}. Source history remains available.`; }
+    finally { if (generation === state.generation) { state.recallRebuilding = false; $('rebuild-recall-index').disabled = false; $('cancel-recall-rebuild').hidden = true; } }
+  }
+  function sourceButton(sourceId, startOffset = 0, endOffset = null, title = null) {
+    const button = node('button', 'button secondary source-reference', title ?? `Open original ${sourceId}`); button.type = 'button';
+    button.addEventListener('click', () => runAction(() => openHistorySource(sourceId, startOffset, endOffset))); return button;
+  }
+  async function searchThreadHistory(offset = 0) {
+    if (!state.conversation || !$('thread-recall-enabled').checked) return;
+    const query = $('thread-history-query').value; if (!query.trim()) throw new Error('Enter a local history query.');
+    const generation = state.generation; $('thread-history-results').replaceChildren(); $('thread-history-search-status').textContent = 'Searching this conversation’s canonical history…';
+    const result = await api(`${base()}/history/search`, 'POST', { query, topK: Number($('thread-recall-top-k').value), maxCharacters: Number($('thread-recall-max-characters').value), neighborRadius: Number($('thread-recall-neighbor-radius').value), offset });
+    if (generation !== state.generation) return;
+    if (result.scopeRef !== state.conversation.id) throw new Error('The historical result does not belong to this conversation.');
+    $('thread-history-search-status').textContent = `${result.status} · ${result.hits.length} returned · ${result.candidateCount} candidates · ${result.inspectedCount} inspected · ${coverageText(result.coverage)}${result.truncated ? ' · results truncated' : ''}${result.reasons?.length ? ` · ${result.reasons.join('; ')}` : ''}`;
+    $('thread-history-results').replaceChildren(...result.hits.map(hit => {
+      const card = node('div', 'recall-hit'); card.append(node('strong', '', `Turn ${hit.source.turnSequence} · ${hit.source.role}`), node('pre', 'recall-excerpt', hit.excerpt), sourceButton(hit.source.sourceId, hit.startOffset, hit.endOffset, `Read original · UTF-16 [${hit.startOffset}, ${hit.endOffset})`)); return card;
+    }));
+    if (result.nextOffset !== null && result.nextOffset !== undefined) { const more = node('button', 'button secondary', 'Next result page'); more.type = 'button'; more.addEventListener('click', () => runAction(() => searchThreadHistory(result.nextOffset))); $('thread-history-results').append(more); }
+  }
+  async function openHistorySource(sourceId, startOffset = 0, endOffset = null) {
+    if (!state.conversation || typeof sourceId !== 'string' || !/^[a-f0-9]{32}:(user|assistant)$/i.test(sourceId)) throw new Error('Invalid canonical source reference.');
+    const generation = state.generation; const conversationId = state.conversation.id;
+    const length = endOffset === null ? 4000 : Math.max(1, Math.min(32000, endOffset - startOffset));
+    const query = new URLSearchParams({ startOffset: String(startOffset), maxCharacters: String(length), neighborRadius: String(Number($('thread-recall-neighbor-radius').value) || 0) });
+    const result = await api(`${base()}/history/messages/${encodeURIComponent(sourceId)}?${query}`);
+    if (generation !== state.generation) return;
+    if (result.scopeRef !== conversationId) throw new Error('The original source does not belong to this conversation.');
+    const hit = result.hits.find(value => value.source.sourceId === sourceId);
+    if (!hit) throw new Error(`Original source is ${result.status}. ${result.reasons?.join('; ') ?? ''}`);
+    if (hit.startOffset !== startOffset) throw new Error('The original read did not preserve the requested source offset. No passage was pinned.');
+    state.source = { conversationId, hit }; $('history-source-title').textContent = `Original turn ${hit.source.turnSequence} · ${hit.source.role}`;
+    $('history-source-metadata').textContent = `${hit.source.createdAt} · ${hit.source.sourceId} · ${hit.source.contentHash} · ${hit.source.characterCount} UTF-16 code units`;
+    $('history-source-start').value = hit.startOffset; $('history-source-length').value = Math.max(1, hit.endOffset - hit.startOffset); $('history-source-text').value = hit.excerpt;
+    $('history-source-range').textContent = `Exact range [${hit.startOffset}, ${hit.endOffset}) · ${coverageText(result.coverage)}${result.truncated ? ' · read truncated' : ''}`;
+    $('history-source-neighbors').replaceChildren(...result.hits.filter(value => value.source.sourceId !== sourceId).map(value => sourceButton(value.source.sourceId, value.startOffset, value.endOffset, `Turn ${value.source.turnSequence} · ${value.source.role}`)), ...(hit.neighborRefs ?? []).filter(id => !result.hits.some(value => value.source.sourceId === id)).map(id => sourceButton(id)));
+    if (!$('history-source-dialog').open) $('history-source-dialog').showModal(); updateControls();
+  }
+  function pinHistorySource() {
+    if (!state.source || state.source.conversationId !== state.conversation?.id || !$('thread-recall-enabled').checked || activeTurn()) throw new Error('Enable recall in this conversation and finish its active turn before changing source selections.');
+    const selection = exactSourceSelection(state.source.hit, $('history-source-text').selectionStart, $('history-source-text').selectionEnd);
+    if (selection.endOffset <= selection.startOffset) throw new Error('Select a nonempty source passage.');
+    if (!state.recallSelections.some(value => value.sourceId === selection.sourceId && value.startOffset === selection.startOffset && value.endOffset === selection.endOffset)) { if (state.recallSelections.length >= 20) throw new Error('At most 20 exact passages can be pinned. Remove a pin first.'); state.recallSelections.push(selection); }
+    state.dirty = true; updateRecallUI(); updateControls(); $('history-source-range').textContent = `Pinned exact UTF-16 range [${selection.startOffset}, ${selection.endOffset}). Save configuration to use it.`;
+  }
+  function renderHistoryPaging() {
+    const page = state.historyPage; const turns = state.conversation?.turns ?? []; $('history-paging').hidden = !page;
+    if (!page) return;
+    $('load-earlier-turns').disabled = state.busy || state.historyLoading || page.nextBeforeSequence === null || page.nextBeforeSequence === undefined || turns.length >= 200;
+    $('history-page-status').textContent = `${turns.length} of ${page.totalTurns} stored turns loaded${turns.length ? ` · turns ${turns[0].sequence}–${turns.at(-1).sequence}` : ''}${turns.length >= 200 ? ' · 200-turn display ceiling; search or jump to another source window' : ''}${state.historyWindowOmitted ? ' · some turns lie outside this display window' : ''}`;
+    $('return-latest-turns').hidden = !turns.length || (turns.at(-1).sequence >= page.latestSequence && !state.historyWindowOmitted);
+  }
+  function reorderLoadedTurns() {
+    const merged = mergeTurnPages([], state.conversation.turns); state.conversation.turns = merged.turns; state.historyWindowOmitted += merged.omitted;
+    const keep = new Set(merged.turns.map(turn => turn.id));
+    for (const [id] of state.nodes) if (!keep.has(id)) { state.nodes.delete(id); state.traces.delete(id); state.streams.get(id)?.source.close(); state.streams.delete(id); }
+    for (const turn of merged.turns) if (!state.nodes.has(turn.id)) renderTurn(turn);
+    if (merged.turns.length) $('transcript').replaceChildren(...merged.turns.map(turn => state.nodes.get(turn.id).article));
+    renderHistoryPaging();
+  }
+  async function loadEarlierTurns() {
+    if (!state.conversation || state.historyLoading || state.historyPage?.nextBeforeSequence == null || state.conversation.turns.length >= 200) return;
+    const generation = state.generation; const beforeHeight = $('transcript').scrollHeight; const beforeTop = $('transcript').scrollTop; state.historyLoading = true;
+    try {
+      const page = await api(`${base()}?limit=20&beforeSequence=${state.historyPage.nextBeforeSequence}`); if (generation !== state.generation) return;
+      state.conversation.turns = mergeTurnPages(page.turns, state.conversation.turns).turns; state.historyPage = page.historyPage ?? state.historyPage;
+      reorderLoadedTurns(); $('transcript').scrollTop = beforeTop + ($('transcript').scrollHeight - beforeHeight);
+    } finally { state.historyLoading = false; renderHistoryPaging(); }
+  }
+  async function openHistoryWindow(turnSequence = null, turnId = null) {
+    const page = await api(`${base()}?limit=20${turnSequence === null ? '' : `&beforeSequence=${turnSequence + 1}`}`); const active = activeTurn();
+    ++state.generation; stopStreams(); state.traces.clear(); state.nodes.clear(); state.recallStatusLoading = false; state.recallRebuilding = false; $('rebuild-recall-index').disabled = false; $('cancel-recall-rebuild').hidden = true;
+    state.conversation.turns = mergeTurnPages(page.turns, active ? [active] : []).turns; state.historyPage = page.historyPage ?? null; state.historyWindowOmitted = turnSequence === null ? 0 : 1;
+    renderTranscript(); renderHistoryPaging(); if (active && !isTerminal(active.status)) connectTurn(active);
+    if (turnId && state.nodes.has(turnId)) state.nodes.get(turnId).article.scrollIntoView({ block: 'start' }); else scrollLatest(true);
   }
   function syncModelSelection() {
     const groups = state.models?.configured === true && !state.models.issue ? familyModelCatalog(state.models.models ?? []) : familyModelCatalog(knownFamilyModelIds);
@@ -559,6 +724,7 @@ function startChat() {
     const capabilities = api('/api/chats/capabilities').then(value => {
       state.capabilities = Array.isArray(value) ? value : value.capabilities ?? []; renderCapabilities();
       for (const input of $('capability-list').querySelectorAll('input')) input.checked = state.conversation?.settings.enabledTools?.includes(input.value) ?? false;
+      capabilityPreviewSignature = ''; refreshRecallCapabilityPreview();
     }).catch(() => $('capability-list').replaceChildren(node('p', 'micro', 'Capability catalog unavailable. Refresh before enabling tools.')));
     const credentials = api('/api/providers/openai/settings').then(config => {
       const configured = config?.configured ?? config?.hasApiKey ?? config?.credentialConfigured;
@@ -577,14 +743,26 @@ function startChat() {
   }
   $('new-chat').addEventListener('click', () => runAction(newConversation));
   $('refresh-chats').addEventListener('click', () => runAction(async () => { await refreshList(); if (state.conversation && !state.dirty) await reconcileConversation(); }));
-  $('settings-form').addEventListener('input', event => { if (state.conversation) { state.dirty = true; if (event.target === $('instructions')) state.instructionsDirty = true; updateMode(); updateControls(); } });
+  $('settings-form').addEventListener('input', event => { if (state.conversation && event.target !== $('thread-history-query')) { state.dirty = true; if (event.target === $('instructions')) state.instructionsDirty = true; updateMode(); updateControls(); } });
   $('settings-form').addEventListener('submit', event => { event.preventDefault(); runAction(saveSettings); });
   $('reload-settings').addEventListener('click', () => runAction(async () => {
-    const saved = await api(base());
+    const saved = await api(`${base()}?limit=20`);
     state.conversation.settings = saved.settings; state.conversation.settingsRevision = saved.settingsRevision;
     fillSettings(); notice(null);
   }));
   $('mode').addEventListener('change', updateMode);
+  $('thread-recall-section').addEventListener('toggle', () => { if ($('thread-recall-section').open) updateRecallUI(); });
+  $('refresh-recall-index').addEventListener('click', checkRecallCoverage);
+  $('rebuild-recall-index').addEventListener('click', rebuildRecallIndex);
+  $('cancel-recall-rebuild').addEventListener('click', () => { api(`${base()}/history/rebuild/cancel`, 'POST', {}).then(() => { $('thread-recall-readiness').textContent = 'Cancellation requested. Completed index work and canonical history are retained.'; return checkRecallCoverage(); }).catch(error => notice(error.message)); });
+  $('search-thread-history').addEventListener('click', () => runAction(() => searchThreadHistory()));
+  $('thread-history-query').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); runAction(() => searchThreadHistory()); } });
+  $('close-history-source').addEventListener('click', () => $('history-source-dialog').close());
+  $('read-history-source-range').addEventListener('click', () => runAction(() => { if (!state.source || state.source.conversationId !== state.conversation.id) throw new Error('Open a source in this conversation first.'); const start = Number($('history-source-start').value); const length = Number($('history-source-length').value); if (!Number.isSafeInteger(start) || start < 0 || !Number.isSafeInteger(length) || length < 1 || length > 32000) throw new Error('Use a valid UTF-16 start and a read length of 1–32000.'); return openHistorySource(state.source.hit.source.sourceId, start, start + length); }));
+  $('pin-history-source').addEventListener('click', () => runAction(pinHistorySource));
+  $('jump-history-source').addEventListener('click', () => runAction(async () => { if (!state.source || state.source.conversationId !== state.conversation.id) throw new Error('Open a source in this conversation first.'); const source = state.source.hit.source; $('history-source-dialog').close(); await openHistoryWindow(source.turnSequence, source.turnId); }));
+  $('load-earlier-turns').addEventListener('click', () => runAction(loadEarlierTurns));
+  $('return-latest-turns').addEventListener('click', () => runAction(() => openHistoryWindow()));
   $('model-catalog').addEventListener('change', () => {
     if ($('model-catalog').value) { $('model').value = $('model-catalog').value; state.dirty = true; updateControls(); }
     else $('model').focus();
@@ -601,7 +779,7 @@ function startChat() {
   const setSettingsVisible = visible => { document.body.classList.toggle('settings-collapsed', !visible); $('toggle-settings').setAttribute('aria-expanded', String(visible)); if (visible && innerWidth <= 1000) $('close-settings').focus(); };
   $('toggle-settings').addEventListener('click', () => setSettingsVisible(document.body.classList.contains('settings-collapsed')));
   $('close-settings').addEventListener('click', () => { setSettingsVisible(false); $('toggle-settings').focus(); });
-  document.addEventListener('keydown', event => { if (event.key === 'Escape' && !document.body.classList.contains('settings-collapsed')) { setSettingsVisible(false); $('toggle-settings').focus(); } });
+  document.addEventListener('keydown', event => { if ($('history-source-dialog').open || $('rename-dialog').open) return; if (event.key === 'Escape' && !document.body.classList.contains('settings-collapsed')) { setSettingsVisible(false); $('toggle-settings').focus(); } });
   $('jump-latest').addEventListener('click', () => { scrollLatest(true); $('jump-container').hidden = true; });
   $('transcript').addEventListener('scroll', () => { if (nearBottom()) $('jump-container').hidden = true; }, { passive: true });
   window.addEventListener('beforeunload', event => { if (state.dirty) { event.preventDefault(); event.returnValue = ''; } });

@@ -4,7 +4,7 @@ The Lab owns this experiment surface. Agentica core has no conversation database
 
 ## Two explicit conditions
 
-- **Clean Room**, the default: direct OpenAI Responses with `store:false`, only this conversation's selected complete user/assistant transcript and the current message. A zero-length instruction editor omits `instructions`; nonempty text is sent exactly. No planner schema, persona, tool manifest, memory lookup or cross-conversation context is injected.
+- **Clean Room**, the default with thread recall off: direct OpenAI Responses with `store:false`, only this conversation's selected complete user/assistant transcript and the current message. A zero-length instruction editor omits `instructions`; nonempty text is sent exactly. No planner schema, persona, tool manifest, memory lookup or cross-conversation context is injected.
 - **Harness**, opt-in: the existing `AgenticaRunner`, `LabPlannerFactory`, planning frames, schema/validation, tools, observations, refinements, continuation and evidence-based response completion. The injected planning condition and effective requests are inspectable. A response artifact establishes completion of this chat turn, not an arbitrary external objective.
 
 Open `/chat.html` from the Lab dashboard. Create, rename and revisit saved conversations. Model, reasoning effort, summary request, exact instructions, context controls and tool bindings are saved per conversation and snapshotted per turn. A new conversation always starts with clean defaults; another conversation's Harness configuration is not inherited.
@@ -24,6 +24,22 @@ Ambient search initially applies to direct Clean Room responses; Harness uses th
 
 The trace retains native search actions, call identities, citations, sources and reported usage. Assistant citations with unambiguous ASCII offsets are clickable inline; Unicode or invalid offsets retain source links without guessing placement. Explicit tool citations stay with their tool source evidence because their character offsets refer to the search answer. URLs are limited to HTTP(S). Referenced web content is untrusted external evidence, and a citation establishes attribution rather than truth. Search is provider-assisted retrieval, not a background browsing service.
 
+## Thread history recall
+
+Enable **Thread history recall** in Configure, save, and run a new turn. It defaults off independently of web search and personal memory. Enabled turns are labeled **conditioned**. The source is exclusively this conversation's completed user/assistant text before the current turn, with a frozen inclusive sequence cutoff. Reasoning, traces, tool results and other conversations are excluded.
+
+- **Auto local lookup** derives a bounded lexical query from the current user message, or uses an operator query override. It selects exact quotations without another model call.
+- **Operator-pinned passages** uses saved source IDs and UTF-16 end-exclusive ranges. Search, inspect the original, then pin a passage. Optional neighbors preserve chronology and attribution.
+- **Agent-directed** requires Harness mode and explicit `conversation.search` / `conversation.read` bindings. The actual Agentica loop searches, reads returned source IDs, refines and answers. These same capability IDs advertise historical scope as version 2; recall off retains version 1's supplied-context scope.
+
+Controls bound cumulative quotation characters per turn (prefetch plus delivered tool quotations), hits, neighbor radius, source calls and the protected recent-turn floor. Current input, exact custom instructions and that floor take precedence over optional recall. Selected spans shrink against the existing complete-request admission gate, with explicit omissions; there is no automatic summary or model downgrade. In Direct mode, quotations are attributed historical data in a separate input text part alongside the unchanged current message. They are not replayed as new dialogue or injected system instructions.
+
+The recall inspector records scope/cutoff, source head, index coverage/version, query method, candidate/inspection counts, exact selected ranges/hashes, omissions and the consumer. It measures presentation, not model attention or accepted truth. Source buttons open bounded original readback and allow jumping to the saved turn. Missing/restricted sources are unavailable; partial search coverage does not establish absence.
+
+Search and indexing are local and disposable. Opening a default recall-off chat does not query or build its historical index. Operator search, automatic enabled lookup, or explicit rebuild can create it. Rebuild runs in the background with cancellation and resumes valid completed projections after restart; status exposes coverage. No embedding service, vector database, paid retrieval call or personal/governed memory is mounted.
+
+Opening a conversation fetches its newest 20 turns. Load earlier pages or jump to a source without downloading the entire history; the browser retains a bounded display window. Turn execution also loads only its configured recent window. The compatibility `GET /api/chats/{id}` without paging arguments still returns the full transcript for existing API clients.
+
 ## Ownership and reuse map
 
 | Owner | Responsibility |
@@ -39,7 +55,7 @@ Source cuts: Agentica base `977d0cab5421fd4e09fd33f1224f241b7e425abe`; Bridge do
 
 ## Persistence and continuation
 
-Data lives under `<Agentica:StorageDirectory>/chat/experiments.sqlite3`, with conversation scratch files under `chat/workspaces/<conversation-id>/`. SQLite schema version 1 uses WAL. Turn admission and its conversation update commit together; settings use revision conflict checks. A per-store exclusive service lease prevents two processes from dispatching the same chat store concurrently.
+Data lives under `<Agentica:StorageDirectory>/chat/experiments.sqlite3`, with conversation scratch files under `chat/workspaces/<conversation-id>/`. SQLite schema version 2 uses WAL. The additive version-1 upgrade preserves canonical JSON and adds bounded-read metadata plus disposable lexical projections. Metadata backfill is local; it does not index conversation text. Back up the database with a consistent SQLite backup before upgrading; older Lab versions refuse the newer schema. Turn admission and its conversation update commit together; settings use revision conflict checks. A per-store exclusive service lease prevents two processes from dispatching the same chat store concurrently.
 
 Repeated turn POSTs with the same request ID/content return the original turn and do not invoke the provider again. A different body under the same identity is refused. On process restart, a running turn becomes interrupted with partial output/evidence retained and usage explicitly unknown where not returned. It is never automatically retried.
 
@@ -66,7 +82,7 @@ Context estimates are conservative UTF-8 request proxies, not measured provider 
 
 Direct Clean Room history selection and dispatch size the same complete serialized Responses envelope, including optional instructions, reasoning and search metadata. Recent-history omission removes complete older pairs until that actual envelope fits. If the current input alone cannot fit, `context.limit` reports the failed gate, request size, output/safety reservations and omissions; it does not imply a settings revision conflict. A rejected send retains its draft and request identity for an explicit retry after configuration changes.
 
-Memory is disabled in settings validation, context compilation and offered capabilities. History is durable chat data; it is not admitted memory. No future memory adapter is mounted by this release.
+Personal/governed memory is disabled in settings validation, context compilation and offered capabilities. Thread recall is a separate opt-in over durable chat data; history is not admitted personal memory. No future memory adapter is mounted by this release.
 
 ## Opt-in capability palette
 
@@ -75,7 +91,7 @@ All tools require Harness mode and an explicit conversation binding. The same co
 - `utility.clock` — UTC or selected time zone.
 - `utility.calculate` — bounded decimal arithmetic, no code evaluation.
 - `utility.text.inspect`, `utility.json.inspect` — explicit supplied values with paging and precise size reporting.
-- `conversation.read`, `conversation.search` — only the current turn's supplied transcript; omitted stored history is not secretly retrieved.
+- `conversation.read`, `conversation.search` — version 1 reads only the current turn's supplied transcript; version 2 requires enabled thread recall and reads the host-bound historical scope. Tool bindings remain explicit in either case.
 - `scratch.list`, `scratch.read`, `scratch.write` — this conversation's isolated text scratch namespace. Writes create new files; no overwrite, shell, active checkout or other-conversation access.
 - `web.search` — query-only OpenAI web research through the observed provider path, with citations, sources and explicit external-call accounting.
 
@@ -91,6 +107,9 @@ Nyx has no generic portable shell/files/calculator/fetch collection to copy. Its
 - `GET .../turns/{turnId}`, `/events`, `/trace`, `/events/{sequence}/payload`; `POST .../cancel`.
 - `GET .../turns/{turnId}/citations` pages retained citation events for replay without loading native trace records; payload references remain conversation-scoped.
 - `GET /api/chats/capabilities`, `/api/chats/models`.
+- `GET /api/chats/{id}?limit=20&beforeSequence=<exclusive-sequence>` pages transcript turns.
+- `GET .../history/status`, `/history/messages`, `/history/messages/{sourceId}` expose coverage, bounded source headers and exact canonical readback, with an optional narrower `asOfSequence`.
+- `POST .../history/search` performs bounded local retrieval; `POST .../history/rebuild` and `/history/rebuild/cancel` control explicit local maintenance.
 
 Chat APIs reject browser requests from an unrelated Origin; the existing external-host CORS contract remains unchanged. This is a loopback operator Lab, not a multi-user authenticated service. The model list uses the account's available IDs when configured, with manual IDs still supported. Effort availability is provider/model-specific; unsupported combinations return a bounded, redacted provider error with no hidden downgrade.
 

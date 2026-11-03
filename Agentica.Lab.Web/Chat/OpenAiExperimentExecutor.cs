@@ -112,7 +112,8 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IDisposable
         var snapshot = _configuration.Capture();
         if (snapshot.ApiKey is null)
             throw new ExperimentException("provider.not_configured", "Configure the existing OpenAI provider credential before sending a turn.");
-        var envelope = ExperimentDirectRequest.Build(settings, context.History, context.Turn.UserText);
+        var envelope = ExperimentDirectRequest.Build(settings, context.History, context.Turn.UserText,
+            settings.ThreadRecallEnabled ? context.Recall : null);
         using var request = new HttpRequestMessage(HttpMethod.Post, OpenAiResponsesClientOptions.DefaultEndpoint)
         {
             Content = new ByteArrayContent(envelope.Utf8)
@@ -194,15 +195,17 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IDisposable
                     ExternalPlannerAllowedBoundaries: [ToolDataBoundary.UserContent, ToolDataBoundary.ConversationContent,
                         ToolDataBoundary.HostState, ToolDataBoundary.WorkspaceContent, ToolDataBoundary.Public, ToolDataBoundary.ExternalUntrusted])),
             EvidenceCompletionEvaluator.ForArtifactKind(ResponseArtifactKind), new ExperimentFrameProjector());
-        var envelope = await runner.RunAsync(new RunRequest(context.Turn.UserText, RequestOrigin.User,
-            new Dictionary<string, object?>
-            {
-                ["conversationId"] = context.ConversationId,
-                ["transcript"] = context.History.Select(message => new { message.Id, message.Role, message.Content }).ToArray(),
-                ["customInstructions"] = settings.Instructions,
-                ["experimentCondition"] = "Harness mode: Agentica planning, tool schemas, goal spine and execution policy are enabled.",
-                ["completionContract"] = "Answer the current user turn. Use bound utilities as needed, then call " + ResponseToolId + " with the final answer."
-            }), cancellationToken).ConfigureAwait(false);
+        var runContext = new Dictionary<string, object?>
+        {
+            ["conversationId"] = context.ConversationId,
+            ["transcript"] = context.History.Select(message => new { message.Id, message.Role, message.Content }).ToArray(),
+            ["customInstructions"] = settings.Instructions,
+            ["experimentCondition"] = "Harness mode: Agentica planning, tool schemas, goal spine and execution policy are enabled.",
+            ["completionContract"] = "Answer the current user turn. Use bound utilities as needed, then call " + ResponseToolId + " with the final answer."
+        };
+        if (settings.ThreadRecallEnabled && context.Recall is { Evidence.Count: > 0 } recall)
+            runContext["historicalThreadEvidence"] = ExperimentDirectRequest.FormatEvidence(recall);
+        var envelope = await runner.RunAsync(new RunRequest(context.Turn.UserText, RequestOrigin.User, runContext), cancellationToken).ConfigureAwait(false);
         await context.Trace(new("harness.outcome", new
         {
             status = envelope.Outcome.Status.ToString(),

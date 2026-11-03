@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Agentica.Lab.Web.Chat.Recall;
 
 namespace Agentica.Lab.Web.Chat;
 
@@ -11,6 +12,15 @@ public sealed record ExperimentSettings
     public bool ReasoningSummary { get; init; }
     public bool AmbientWebSearch { get; init; }
     public int MaxWebSearchCalls { get; init; } = 3;
+    public bool ThreadRecallEnabled { get; init; }
+    public string ThreadRecallMode { get; init; } = "auto";
+    public string ThreadRecallQuery { get; init; } = "";
+    public IReadOnlyList<ExperimentRecallSelection> ThreadRecallSelections { get; init; } = [];
+    public int ThreadRecallMaxCharacters { get; init; } = 8000;
+    public int ThreadRecallTopK { get; init; } = 5;
+    public int ThreadRecallNeighborRadius { get; init; } = 1;
+    public int ThreadRecallRecentTurns { get; init; } = 2;
+    public int ThreadRecallMaxCalls { get; init; } = 8;
     public int MaxOutputTokens { get; init; } = 4096;
     public int ContextWindowTokens { get; init; } = 131072;
     public int MaxInputCharacters { get; init; } = 80000;
@@ -30,7 +40,13 @@ public sealed record ExperimentSettings
 public sealed record ExperimentMessage(string Id, string Role, string Content, DateTimeOffset CreatedAt);
 public sealed record ExperimentConversation(string Id, string Title, DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt, int SettingsRevision, ExperimentSettings Settings,
-    IReadOnlyList<ExperimentTurn> Turns);
+    IReadOnlyList<ExperimentTurn> Turns)
+{
+    public ExperimentHistoryPage? HistoryPage { get; init; }
+}
+public sealed record ExperimentHistoryPage(int? NextBeforeSequence, int TotalTurns, int LatestSequence,
+    int CompletedTurns = 0, int EarlierCompletedTurns = 0);
+public sealed record ExperimentRecallSelection(string SourceId, int StartOffset, int EndOffset);
 public sealed record ExperimentTurn(string Id, string ConversationId, int Sequence, string UserText,
     string AssistantText, string Status, DateTimeOffset CreatedAt, DateTimeOffset? FinishedAt,
     int SettingsRevision, ExperimentSettings Settings, string Continuity,
@@ -42,7 +58,11 @@ public sealed record ExperimentTraceInput(string Type, object? Data = null,
     string? CallId = null, string? ItemId = null);
 public sealed record ExperimentExecutionContext(string ConversationId, ExperimentTurn Turn,
     IReadOnlyList<ExperimentMessage> History, string WorkspaceDirectory,
-    Func<ExperimentTraceInput, Task> Trace, Func<string, Task> Output);
+    Func<ExperimentTraceInput, Task> Trace, Func<string, Task> Output)
+{
+    public IConversationEvidenceSource? EvidenceSource { get; init; }
+    public ExperimentRecallContext? Recall { get; init; }
+}
 public sealed record ExperimentExecutionResult(string Status, string? AssistantText = null,
     object? Usage = null, string? ErrorCode = null, string? ErrorMessage = null);
 public interface IExperimentExecutor
@@ -54,9 +74,15 @@ public sealed record ExperimentCapability(string Id, string Name, string Descrip
 public sealed record ExperimentContextManifest(string ConversationId, string TurnId,
     IReadOnlyList<string> SelectedMessageIds, IReadOnlyList<string> OmittedMessageIds,
     int SelectedCharacters, int EstimatedInputUnits, int InputAllowance, string Estimator,
-    string HistoryPolicy, string Continuity, bool MemoryEnabled = false);
+    string HistoryPolicy, string Continuity, bool MemoryEnabled = false)
+{
+    public ExperimentHistoryPage? HistoryPage { get; init; }
+}
 public sealed record ExperimentPreparedContext(IReadOnlyList<ExperimentMessage> Messages,
-    ExperimentContextManifest Manifest);
+    ExperimentContextManifest Manifest)
+{
+    public ExperimentRecallContext? Recall { get; init; }
+}
 public sealed record ExperimentCreateRequest(string? Title = null);
 public sealed record ExperimentRenameRequest(string Title);
 public sealed record ExperimentSettingsUpdate(int ExpectedRevision, ExperimentSettings Settings);

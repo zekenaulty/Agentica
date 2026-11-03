@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Agentica.Lab.Web.Contracts;
 using Agentica.Lab.Web.Providers;
+using Agentica.Lab.Web.Chat.Recall;
 
 namespace Agentica.Lab.Web.Chat;
 
@@ -23,7 +24,17 @@ public static class ExperimentEndpoints
         });
         group.MapGet("", (ExperimentStore store) => store.List());
         group.MapPost("", (ExperimentCreateRequest request, ExperimentService service) => service.Create(request.Title));
-        group.MapGet("/capabilities", () => ExperimentTools.Capabilities);
+        group.MapGet("/capabilities", (bool? threadRecallEnabled, string? threadRecallMode, string? mode) =>
+        {
+            var settings = new ExperimentSettings
+            {
+                ThreadRecallEnabled = threadRecallEnabled ?? false,
+                ThreadRecallMode = threadRecallMode ?? "auto",
+                Mode = mode ?? "clean-room"
+            };
+            ExperimentStore.ValidateSettings(settings);
+            return ExperimentTools.CapabilitiesFor(settings);
+        });
         group.MapGet("/models", async (IExperimentExecutor executor, OpenAiProviderConfiguration configuration, CancellationToken cancellationToken) =>
         {
             var current = configuration.GetSettings();
@@ -45,7 +56,17 @@ public static class ExperimentEndpoints
                 issue
             };
         });
-        group.MapGet("/{id}", (string id, ExperimentStore store) => store.Get(id));
+        group.MapGet("/{id}", (string id, int? limit, int? beforeSequence, ExperimentStore store) =>
+        {
+            if (limit is null && beforeSequence is null) return store.Get(id);
+            var head = store.GetHead(id);
+            var page = store.GetTurnsPage(id, beforeSequence, Math.Clamp(limit ?? 20, 1, 100));
+            return head.Conversation with
+            {
+                Turns = page.Turns,
+                HistoryPage = new(page.NextBeforeSequence, page.TotalTurns, page.LatestSequence, head.CompletedTurns)
+            };
+        });
         group.MapPatch("/{id}", (string id, ExperimentRenameRequest request, ExperimentStore store) => store.Rename(id, request.Title));
         group.MapPut("/{id}/settings", (string id, ExperimentSettingsUpdate request, ExperimentStore store) => store.UpdateSettings(id, request));
         group.MapPost("/{id}/turns", (string id, ExperimentSendRequest request, ExperimentService service) => service.Send(id, request));
@@ -66,6 +87,59 @@ public static class ExperimentEndpoints
             return new { events, next, hasMore = store.ReadCitationEvents(id, turnId, next, 1).Count > 0 };
         });
         group.MapGet("/{id}/turns/{turnId}/events", StreamAsync);
+        group.MapGet("/{id}/history/status", (string id, int? asOfSequence, ExperimentStore store, ExperimentHistoryMaintenance maintenance) =>
+        {
+            var source = HistorySource(store, id, asOfSequence);
+            return new { head = source.GetHead(), coverage = source.GetCoverage(), maintenance = maintenance.Status(id) };
+        });
+        group.MapGet("/{id}/history/messages", (string id, int? asOfSequence, int? beforeOrder, int? limit, ExperimentStore store) =>
+            HistorySource(store, id, asOfSequence).ListMessageHeadersPage(beforeOrder, Math.Clamp(limit ?? 40, 1, 100)));
+        group.MapGet("/{id}/history/messages/{sourceId}", (string id, string sourceId, int? asOfSequence, int? startOffset,
+            int? maxCharacters, int? neighborRadius, ExperimentStore store, CancellationToken cancellationToken) =>
+        {
+            var source = HistorySource(store, id, asOfSequence);
+            var maximum = Math.Clamp(maxCharacters ?? 4000, 1, 32000);
+            var exact = source.ReadExact(sourceId, startOffset ?? 0, maximum, cancellationToken);
+            if (neighborRadius is not > 0 || exact.Hits.Count == 0) return exact;
+            var remaining = maximum - exact.Hits.Sum(hit => hit.Excerpt.Length);
+            if (remaining < 2) return exact with
+            {
+                Truncated = true,
+                Reasons = exact.Reasons.Append("The exact requested source extent consumed the character ceiling; optional neighbors were omitted.").ToArray()
+            };
+            var neighbors = source.ReadNeighbors(sourceId, Math.Clamp(neighborRadius.Value, 0, 2), maximum, cancellationToken);
+            var hits = exact.Hits.ToList();
+            foreach (var hit in neighbors.Hits.Where(hit => hit.Source.SourceId != sourceId))
+            {
+                var length = Math.Min(remaining, hit.Excerpt.Length);
+                if (length > 0 && char.IsHighSurrogate(hit.Excerpt[length - 1])) length--;
+                if (length == 0) continue;
+                hits.Add(hit with { EndOffset = hit.StartOffset + length, Excerpt = hit.Excerpt[..length] });
+                remaining -= length;
+            }
+            var refs = hits.Select(hit => hit.Source.SourceId).ToArray();
+            return exact with
+            {
+                QueryMethod = "canonical-exact+neighbors",
+                Hits = hits.Select(hit => hit with { NeighborRefs = refs.Where(reference => reference != hit.Source.SourceId).ToArray() }).ToArray(),
+                InspectedCount = exact.InspectedCount + neighbors.InspectedCount,
+                Truncated = exact.Truncated || neighbors.Truncated || hits.Count < neighbors.Hits.Count
+            };
+        });
+        group.MapPost("/{id}/history/search", (string id, ConversationEvidenceSearch request, int? asOfSequence,
+            ExperimentStore store, CancellationToken cancellationToken) =>
+            HistorySource(store, id, asOfSequence).Search(request, cancellationToken));
+        group.MapPost("/{id}/history/rebuild", (string id, ExperimentHistoryMaintenance maintenance) => maintenance.Start(id));
+        group.MapPost("/{id}/history/rebuild/cancel", (string id, ExperimentHistoryMaintenance maintenance) => maintenance.Cancel(id));
+    }
+
+    private static IConversationEvidenceSource HistorySource(ExperimentStore store, string conversationId, int? asOf)
+    {
+        var head = store.GetHead(conversationId);
+        var cut = asOf ?? head.LatestSequence;
+        if (cut < 0 || cut > head.LatestSequence)
+            throw new ExperimentException("history.as_of", "Historical reads must use a sequence at or before this conversation's current head.");
+        return store.BindEvidenceSource(conversationId, cut);
     }
 
     private static async Task StreamAsync(HttpContext context, string id, string turnId, ExperimentStore store)

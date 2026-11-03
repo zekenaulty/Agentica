@@ -7,7 +7,7 @@ using Microsoft.Data.Sqlite;
 namespace Agentica.Lab.Web.Chat;
 
 /// <summary>Lab-owned transcript/configuration and diagnostic evidence. Never a participant memory store.</summary>
-public sealed class ExperimentStore : IDisposable
+public sealed partial class ExperimentStore : IDisposable
 {
     private readonly object _gate = new();
     private readonly string _connectionString;
@@ -30,33 +30,14 @@ public sealed class ExperimentStore : IDisposable
                 Pooling = false
             }.ToString();
             using var connection = Open();
-            using var command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version;";
-            if (Convert.ToInt32(command.ExecuteScalar()) > 1)
-                throw new InvalidDataException("This chat database requires a newer Lab version.");
-            command.CommandText = """
-            PRAGMA journal_mode=WAL;
-            CREATE TABLE IF NOT EXISTS conversations (
-                id TEXT PRIMARY KEY, body_json TEXT NOT NULL, updated_at TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS turns (
-                id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id),
-                sequence INTEGER NOT NULL, request_key TEXT NOT NULL, body_json TEXT NOT NULL,
-                UNIQUE(conversation_id, sequence), UNIQUE(conversation_id, request_key));
-            CREATE TABLE IF NOT EXISTS trace_events (
-                turn_id TEXT NOT NULL REFERENCES turns(id), sequence INTEGER NOT NULL,
-                body_json TEXT NOT NULL, payload_json TEXT,
-                PRIMARY KEY(turn_id, sequence));
-            PRAGMA user_version=1;
-            """;
-            command.ExecuteNonQuery();
+            InitializeHistorySchema(connection);
             // No replay after a process died around dispatch. Preserve partial output and unknown usage.
-            foreach (var conversation in List())
-                foreach (var turn in Get(conversation.Id).Turns.Where(t => t.Status == "running"))
-                {
-                    Complete(conversation.Id, turn.Id, new("interrupted", ErrorCode: "service.restarted",
-                        ErrorMessage: "The service restarted during this turn. Partial evidence is retained; provider usage may be unknown. Send a new turn deliberately."));
-                    Append(conversation.Id, turn.Id, new("turn.interrupted", GetTurn(conversation.Id, turn.Id)), true);
-                }
+            foreach (var (conversationId, turnId) in RunningTurnIdentities())
+            {
+                Complete(conversationId, turnId, new("interrupted", ErrorCode: "service.restarted",
+                    ErrorMessage: "The service restarted during this turn. Partial evidence is retained; provider usage may be unknown. Send a new turn deliberately."));
+                Append(conversationId, turnId, new("turn.interrupted", GetTurn(conversationId, turnId)), true);
+            }
         }
         catch
         {
@@ -98,7 +79,7 @@ public sealed class ExperimentStore : IDisposable
         lock (_gate)
         {
             ValidateSettings(defaults);
-            if (List().Count >= 1000) throw new ExperimentException("chat.quota", "This Lab store has reached its 1000-conversation quota.", 409);
+            if (ConversationCount() >= 1000) throw new ExperimentException("chat.quota", "This Lab store has reached its 1000-conversation quota.", 409);
             var now = DateTimeOffset.UtcNow;
             var conversation = new ExperimentConversation(Guid.NewGuid().ToString("N"), ValidateTitle(title ?? "New experiment"), now, now, 1, defaults, []);
             using var connection = Open();
@@ -130,7 +111,7 @@ public sealed class ExperimentStore : IDisposable
     {
         lock (_gate)
         {
-            var conversation = Get(id) with { Title = ValidateTitle(title), UpdatedAt = DateTimeOffset.UtcNow };
+            var conversation = GetHeader(id) with { Title = ValidateTitle(title), UpdatedAt = DateTimeOffset.UtcNow };
             SaveConversation(conversation);
             return conversation;
         }
@@ -141,10 +122,10 @@ public sealed class ExperimentStore : IDisposable
         lock (_gate)
         {
             ValidateSettings(update.Settings);
-            var conversation = Get(id);
+            var conversation = GetHeader(id);
             if (conversation.SettingsRevision != update.ExpectedRevision)
                 throw new ExperimentException("settings.conflict", "Settings changed elsewhere. Reload before saving.", 409);
-            if (conversation.Turns.Any(t => t.Status == "running"))
+            if (GetHead(id).ActiveSequence is not null)
                 throw new ExperimentException("chat.busy", "Finish or cancel the active turn before changing settings.", 409);
             conversation = conversation with { Settings = update.Settings, SettingsRevision = conversation.SettingsRevision + 1, UpdatedAt = DateTimeOffset.UtcNow };
             SaveConversation(conversation);
@@ -156,15 +137,17 @@ public sealed class ExperimentStore : IDisposable
     {
         using var connection = Open();
         using var command = Command(connection, "UPDATE conversations SET body_json=$body,updated_at=$updated WHERE id=$id",
-            ("$id", conversation.Id), ("$body", Serialize(conversation with { Turns = [] })), ("$updated", conversation.UpdatedAt.ToString("O")));
+            ("$id", conversation.Id), ("$body", Serialize(conversation with { Turns = [], HistoryPage = null })), ("$updated", conversation.UpdatedAt.ToString("O")));
         command.ExecuteNonQuery();
     }
 
-    public (ExperimentTurn Turn, bool Created) Begin(string id, ExperimentSendRequest request)
+    public (ExperimentTurn Turn, bool Created) Begin(string id, ExperimentSendRequest request,
+        int? expectedSettingsRevision = null, int? expectedLatestSequence = null)
     {
         lock (_gate)
         {
-            var conversation = Get(id);
+            var conversation = GetHeader(id);
+            var head = GetHead(id);
             if (string.IsNullOrWhiteSpace(request.Content) || request.Content.Length > 128000)
                 throw new ExperimentException("turn.content", "Supply a nonempty message of at most 128000 characters.");
             var requestKey = request.RequestId ?? Guid.NewGuid().ToString("N");
@@ -180,10 +163,14 @@ public sealed class ExperimentStore : IDisposable
                     return (old, false);
                 }
             }
-            if (conversation.Turns.Any(t => t.Status == "running"))
+            if (head.ActiveSequence is not null)
                 throw new ExperimentException("chat.busy", "This conversation already has an active turn.", 409);
-            if (conversation.Turns.Count >= 5000) throw new ExperimentException("chat.turn_quota", "This conversation has reached its 5000-turn quota.", 409);
-            var turn = new ExperimentTurn(Guid.NewGuid().ToString("N"), id, conversation.Turns.Count + 1, request.Content, "", "running",
+            if (expectedSettingsRevision is not null && conversation.SettingsRevision != expectedSettingsRevision)
+                throw new ExperimentException("settings.conflict", "The saved configuration changed during context admission. Reload settings before retrying; the message was not admitted.", 409);
+            if (expectedLatestSequence is not null && head.LatestSequence != expectedLatestSequence)
+                throw new ExperimentException("chat.history_changed", "The conversation changed during context admission. Refresh its history before retrying; the message was not admitted.", 409);
+            if (head.TotalTurns >= 5000) throw new ExperimentException("chat.turn_quota", "This conversation has reached its 5000-turn quota.", 409);
+            var turn = new ExperimentTurn(Guid.NewGuid().ToString("N"), id, head.LatestSequence + 1, request.Content, "", "running",
                 DateTimeOffset.UtcNow, null, conversation.SettingsRevision, conversation.Settings, "transcript-only; native reasoning state is not persisted");
             using var transaction = connection.BeginTransaction();
             using var insert = Command(connection, "INSERT INTO turns(id,conversation_id,sequence,request_key,body_json) VALUES($id,$chat,$sequence,$key,$body)",
@@ -191,7 +178,7 @@ public sealed class ExperimentStore : IDisposable
             insert.Transaction = transaction;
             insert.ExecuteNonQuery();
             using var update = Command(connection, "UPDATE conversations SET body_json=$body,updated_at=$updated WHERE id=$id",
-                ("$id", id), ("$body", Serialize(conversation with { Turns = [], UpdatedAt = turn.CreatedAt })), ("$updated", turn.CreatedAt.ToString("O")));
+                ("$id", id), ("$body", Serialize(conversation with { Turns = [], HistoryPage = null, UpdatedAt = turn.CreatedAt })), ("$updated", turn.CreatedAt.ToString("O")));
             update.Transaction = transaction;
             update.ExecuteNonQuery();
             transaction.Commit();
@@ -203,7 +190,7 @@ public sealed class ExperimentStore : IDisposable
     {
         lock (_gate)
         {
-            _ = Get(conversationId);
+            _ = GetHeader(conversationId);
             using var connection = Open();
             using var command = Command(connection, "SELECT body_json FROM turns WHERE conversation_id=$id AND request_key=$key", ("$id", conversationId), ("$key", requestKey));
             if (command.ExecuteScalar() is not string body) return null;
@@ -227,9 +214,25 @@ public sealed class ExperimentStore : IDisposable
     private void SaveTurn(ExperimentTurn turn)
     {
         using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        var body = Serialize(turn);
+        using (var changed = Command(connection, """
+            SELECT 1 FROM turns WHERE id=$id AND conversation_id=$chat AND (
+              json_extract(body_json,'$.userText') IS NOT json_extract($body,'$.userText') OR
+              json_extract(body_json,'$.assistantText') IS NOT json_extract($body,'$.assistantText') OR
+              json_extract(body_json,'$.status') IS NOT json_extract($body,'$.status') OR
+              json_extract(body_json,'$.createdAt') IS NOT json_extract($body,'$.createdAt') OR
+              json_extract(body_json,'$.finishedAt') IS NOT json_extract($body,'$.finishedAt'));
+            """, ("$id", turn.Id), ("$chat", turn.ConversationId), ("$body", body)))
+        {
+            changed.Transaction = transaction;
+            if (changed.ExecuteScalar() is not null) PurgeTurnProjection(connection, transaction, turn.ConversationId, turn.Id);
+        }
         using var command = Command(connection, "UPDATE turns SET body_json=$body WHERE id=$id AND conversation_id=$chat",
-            ("$id", turn.Id), ("$chat", turn.ConversationId), ("$body", Serialize(turn)));
+            ("$id", turn.Id), ("$chat", turn.ConversationId), ("$body", body));
+        command.Transaction = transaction;
         if (command.ExecuteNonQuery() != 1) throw Missing();
+        transaction.Commit();
     }
 
     public void Output(string conversationId, string turnId, string delta)
@@ -269,7 +272,18 @@ public sealed class ExperimentStore : IDisposable
                 ErrorMessage = result.ErrorMessage
             };
             SaveTurn(turn);
+            using (var metadata = Open()) RefreshMetadata(metadata, null, conversationId, turnId);
             return turn;
+        }
+    }
+
+    public ExperimentTurn CompleteAndTrace(string conversationId, string turnId, ExperimentExecutionResult result)
+    {
+        lock (_gate)
+        {
+            var final = Complete(conversationId, turnId, result);
+            Append(conversationId, turnId, new("turn." + final.Status, final), true);
+            return final;
         }
     }
 
@@ -391,6 +405,18 @@ public sealed class ExperimentStore : IDisposable
         if (settings.Mode == "harness" && settings.AmbientWebSearch) Invalid("Ambient web search is available in Clean Room mode. Bind web.search for Harness mode.");
         if (settings.MaxWebSearchCalls is < 1 or > 20) Invalid("Web search call budget must be 1–20 calls per turn.");
         if (settings.MemoryEnabled) Invalid("Memory is disabled for these isolated experiments.");
+        if (settings.ThreadRecallMode is not ("manual" or "auto" or "agent")) Invalid("Select manual, auto or agent thread recall.");
+        if (settings.ThreadRecallEnabled && settings.ThreadRecallMode == "agent" && settings.Mode != "harness") Invalid("Agent-directed thread recall requires Harness mode and explicitly bound conversation tools.");
+        if (settings.ThreadRecallQuery is null || settings.ThreadRecallQuery.Length > 2000) Invalid("Thread recall query must be at most 2000 characters.");
+        if (settings.ThreadRecallSelections is null || settings.ThreadRecallSelections.Count > 20 || settings.ThreadRecallSelections.Any(selection =>
+                selection is null || string.IsNullOrWhiteSpace(selection.SourceId) || selection.SourceId.Length > 256 || selection.SourceId.Any(char.IsControl) ||
+                selection.StartOffset < 0 || selection.EndOffset <= selection.StartOffset || selection.EndOffset > 1048576))
+            Invalid("Choose at most 20 exact thread passages with valid source IDs and UTF-16 ranges.");
+        if (settings.ThreadRecallMaxCharacters is < 256 or > 32000 || settings.ThreadRecallTopK is < 1 or > 20 ||
+            settings.ThreadRecallNeighborRadius is < 0 or > 2 || settings.ThreadRecallRecentTurns is < 0 or > 25 ||
+            settings.ThreadRecallMaxCalls is < 1 or > 32) Invalid("Thread recall limits exceed their supported ranges.");
+        if (settings.ThreadRecallEnabled && settings.ThreadRecallRecentTurns * 2 > settings.MaxHistoryMessages)
+            Invalid("The protected recent-turn floor cannot exceed the history-message limit.");
         if (settings.MaxOutputTokens is < 256 or > 65536 || settings.ContextWindowTokens is < 8192 or > 1048576 || settings.ContextWindowTokens <= settings.MaxOutputTokens + 4096)
             Invalid("Context must leave input headroom after the selected output budget and 4096-unit safety reserve.");
         if (settings.MaxInputCharacters is < 1024 or > 262144 || settings.MaxHistoryMessages is < 0 or > 500 || settings.HistoryPolicy is not ("stop" or "recent")) Invalid("Invalid history budget or policy.");

@@ -18,12 +18,15 @@ public sealed class ExperimentService(ExperimentStore store, IExperimentExecutor
     public ExperimentTurn Send(string conversationId, ExperimentSendRequest request)
     {
         if (request.RequestId is not null && store.FindRequest(conversationId, request.RequestId, request.Content) is { } existing) return existing;
-        var conversation = store.Get(conversationId);
+        var head = store.GetHead(conversationId);
+        var conversation = head.Conversation;
         // Compile before creating an active turn so an over-budget request leaves no uncertain dispatch.
-        var preview = new ExperimentTurn("preview", conversationId, conversation.Turns.Count + 1, request.Content ?? "", "", "running",
+        var preview = new ExperimentTurn("preview", conversationId, head.LatestSequence + 1, request.Content ?? "", "", "running",
             DateTimeOffset.UtcNow, null, conversation.SettingsRevision, conversation.Settings, "transcript-only; native reasoning state is not persisted");
-        _ = ExperimentContextCompiler.Prepare(conversation, preview);
-        var (turn, created) = store.Begin(conversationId, request);
+        // Preflight only mandatory input and its recent floor. Historical selection runs
+        // once against the admitted turn's frozen source cut, never twice per send.
+        _ = ExperimentContextCompiler.Prepare(Window(head, preview), preview);
+        var (turn, created) = store.Begin(conversationId, request, conversation.SettingsRevision, head.LatestSequence);
         if (!created) return turn;
         var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
         // The executor owns its deadline so explicit cancellation and timeout remain distinguishable.
@@ -39,8 +42,12 @@ public sealed class ExperimentService(ExperimentStore store, IExperimentExecutor
         {
             await Task.Yield();
             store.Append(conversationId, turn.Id, new("turn.started", turn));
-            var context = ExperimentContextCompiler.Prepare(store.Get(conversationId), turn);
-            store.Append(conversationId, turn.Id, new("context.manifest", context.Manifest));
+            var head = store.GetHead(conversationId);
+            var window = Window(head, turn);
+            var source = turn.Settings.ThreadRecallEnabled ? store.BindEvidenceSource(conversationId, turn.Sequence - 1) : null;
+            var context = ExperimentContextCompiler.Prepare(window, turn, source);
+            store.Append(conversationId, turn.Id, new("context.manifest", context.Manifest with { HistoryPage = window.HistoryPage }));
+            if (context.Recall is not null) store.Append(conversationId, turn.Id, new("context.recall", context.Recall.Manifest));
             store.Append(conversationId, turn.Id, new("context.isolation", new
             {
                 conversationId,
@@ -52,7 +59,8 @@ public sealed class ExperimentService(ExperimentStore store, IExperimentExecutor
                 mode = turn.Settings.Mode,
                 enabledTools = turn.Settings.EnabledTools,
                 ambientWebSearch = turn.Settings.AmbientWebSearch,
-                maxWebSearchCalls = turn.Settings.MaxWebSearchCalls
+                maxWebSearchCalls = turn.Settings.MaxWebSearchCalls,
+                threadRecall = turn.Settings.ThreadRecallEnabled ? turn.Settings.ThreadRecallMode : "off"
             }));
             var workspace = Path.Combine(store.WorkspaceRoot, conversationId);
             Directory.CreateDirectory(workspace);
@@ -62,7 +70,8 @@ public sealed class ExperimentService(ExperimentStore store, IExperimentExecutor
                 {
                     store.OutputAndTrace(conversationId, turn.Id, delta);
                     return Task.CompletedTask;
-                });
+                })
+            { EvidenceSource = source, Recall = context.Recall };
             var result = await executor.ExecuteAsync(execution, cancellation.Token).ConfigureAwait(false);
             Finish(conversationId, turn.Id, result);
         }
@@ -89,10 +98,23 @@ public sealed class ExperimentService(ExperimentStore store, IExperimentExecutor
         }
     }
 
+    private ExperimentConversation Window(Recall.ExperimentConversationHead head, ExperimentTurn turn)
+    {
+        var settings = turn.Settings;
+        var count = settings.ThreadRecallEnabled ? settings.ThreadRecallRecentTurns : settings.MaxHistoryMessages / 2 + 1;
+        IReadOnlyList<ExperimentTurn> turns = count == 0 ? [] : store.GetRecentCommittedTurns(turn.ConversationId, turn.Sequence, count);
+        var earlier = Math.Max(0, head.CompletedTurns - turns.Count);
+        return head.Conversation with
+        {
+            Turns = turns,
+            HistoryPage = new(earlier > 0 && turns.Count > 0 ? turns[0].Sequence : null,
+                head.TotalTurns, head.LatestSequence, head.CompletedTurns, earlier)
+        };
+    }
+
     private void Finish(string conversationId, string turnId, ExperimentExecutionResult result)
     {
-        var final = store.Complete(conversationId, turnId, result);
-        store.Append(conversationId, turnId, new("turn." + final.Status, final), true);
+        store.CompleteAndTrace(conversationId, turnId, result);
     }
 
     public void Cancel(string conversationId, string turnId)

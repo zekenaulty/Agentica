@@ -141,7 +141,7 @@ public sealed class ExperimentPersistenceTests
         { DataSource = System.IO.Path.Combine(fixture.Path, "experiments.sqlite3"), Pooling = false }.ToString());
         connection.Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "PRAGMA user_version=2"; command.ExecuteNonQuery();
+        command.CommandText = "PRAGMA user_version=3"; command.ExecuteNonQuery();
         Assert.Throws<InvalidDataException>(() => new ExperimentStore(fixture.Path));
         command.CommandText = "PRAGMA user_version=1"; command.ExecuteNonQuery();
         using var repaired = new ExperimentStore(fixture.Path);
@@ -174,6 +174,41 @@ public sealed class ExperimentPersistenceTests
         command.ExecuteNonQuery();
         Assert.Throws<SqliteException>(() => store.Begin(conversation.Id, new("must roll back")));
         Assert.Empty(store.Get(conversation.Id).Turns);
+    }
+
+    [Fact]
+    public void Admission_requires_the_same_saved_configuration_and_history_as_preflight_but_preserves_request_replay()
+    {
+        using var fixture = new StoreFixture(); using var store = new ExperimentStore(fixture.Path);
+        var chat = store.Create(new(), null); var preflight = store.GetHead(chat.Id);
+        chat = store.UpdateSettings(chat.Id, new(1, chat.Settings with { MaxHistoryMessages = 0 }));
+        Assert.Equal("settings.conflict", Assert.Throws<ExperimentException>(() =>
+            store.Begin(chat.Id, new("retain my draft"), preflight.Conversation.SettingsRevision, preflight.LatestSequence)).Code);
+        Assert.Empty(store.GetTurnsPage(chat.Id).Turns);
+        var accepted = store.Begin(chat.Id, new("first", "stable-request"), chat.SettingsRevision, 0).Turn;
+        store.CompleteAndTrace(chat.Id, accepted.Id, new("completed", "answer"));
+        Assert.Equal("chat.history_changed", Assert.Throws<ExperimentException>(() =>
+            store.Begin(chat.Id, new("second"), chat.SettingsRevision, 0)).Code);
+        var replay = store.Begin(chat.Id, new("first", "stable-request"), 1, 0);
+        Assert.False(replay.Created); Assert.Equal(accepted.Id, replay.Turn.Id);
+        Assert.Single(store.GetTurnsPage(chat.Id).Turns);
+    }
+
+    [Fact]
+    public async Task Completed_publication_always_exposes_its_terminal_event_to_concurrent_readers()
+    {
+        using var fixture = new StoreFixture(); using var store = new ExperimentStore(fixture.Path);
+        var chat = store.Create(new(), null); var turn = store.Begin(chat.Id, new("terminal publication")).Turn;
+        var writer = Task.Run(() => store.CompleteAndTrace(chat.Id, turn.Id, new("completed", "answer")), TestContext.Current.CancellationToken);
+        while (!writer.IsCompleted)
+        {
+            var snapshot = store.GetTurn(chat.Id, turn.Id);
+            if (snapshot.Status == "completed")
+                Assert.Contains(store.ReadEvents(chat.Id, turn.Id, 0, 100), item => item.Type == "turn.completed");
+            await Task.Yield();
+        }
+        await writer;
+        Assert.Equal("turn.completed", store.ReadEvents(chat.Id, turn.Id, 0, 100)[^1].Type);
     }
 
     [Fact]

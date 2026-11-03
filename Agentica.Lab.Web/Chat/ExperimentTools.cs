@@ -5,6 +5,7 @@ using Agentica;
 using Agentica.Artifacts;
 using Agentica.Observations;
 using Agentica.Tools;
+using Agentica.Lab.Web.Chat.Recall;
 
 namespace Agentica.Lab.Web.Chat;
 
@@ -72,6 +73,10 @@ public static class ExperimentTools
     public static IReadOnlyList<ExperimentCapability> Capabilities { get; } =
         Array.AsReadOnly(Definitions.Select(definition => definition.Capability).Append(ExperimentWebSearch.Capability).ToArray());
 
+    public static IReadOnlyList<ExperimentCapability> CapabilitiesFor(ExperimentSettings settings) =>
+        settings.ThreadRecallEnabled ? Capabilities.Select(capability =>
+            ExperimentRecallTools.Capabilities.FirstOrDefault(historical => historical.Id == capability.Id) ?? capability).ToArray() : Capabilities;
+
     public static ToolCatalog CreateCatalog(ExperimentExecutionContext context) =>
         ToolCatalog.Create(CreateRegistrations(context).ToArray());
 
@@ -91,7 +96,9 @@ public static class ExperimentTools
             History = Array.AsReadOnly(context.History.ToArray()),
             Turn = context.Turn with { Settings = context.Turn.Settings with { EnabledTools = Array.AsReadOnly(enabled.Order(StringComparer.Ordinal).ToArray()) } }
         };
-        return Definitions.Where(definition => enabled.Contains(definition.Capability.Id)).Select(definition =>
+        var historical = context.Turn.Settings.ThreadRecallEnabled;
+        var registrations = Definitions.Where(definition => enabled.Contains(definition.Capability.Id) &&
+            !(historical && (definition.Capability.Id is ExperimentToolIds.ConversationRead or ExperimentToolIds.ConversationSearch))).Select(definition =>
         {
             var effect = Enum.Parse<ToolEffect>(definition.Capability.Effect);
             var retrySafety = effect == ToolEffect.ReadOnly ? ToolRetrySafety.Idempotent : ToolRetrySafety.MutationUnsafe;
@@ -103,7 +110,9 @@ public static class ExperimentTools
                 new ToolSecurityDeclaration(effect, definition.Boundaries, definition.Boundaries,
                     ToolExternalOutputClassification.None, ToolApprovalRequirement.None, retrySafety,
                     new ToolProvenance(ToolProvenanceKind.HostAuthored, Source, Version)));
-        }).ToArray();
+        }).ToList();
+        if (historical) registrations.AddRange(ExperimentRecallTools.CreateRegistrations(snapshot));
+        return registrations;
     }
 
     private static Definition Define(string id, string name, string description, ToolEffect effect,
@@ -160,11 +169,11 @@ public static class ExperimentTools
     }
 
     internal static ToolResult Result(ToolInvocation invocation, string summary, object result, int maximumCharacters,
-        ReceiptStatus status = ReceiptStatus.Succeeded)
+        ReceiptStatus status = ReceiptStatus.Succeeded, string schemaVersion = Version)
     {
         var data = new Dictionary<string, object?>
         {
-            ["schemaVersion"] = Version,
+            ["schemaVersion"] = schemaVersion,
             ["toolId"] = invocation.ToolId,
             ["status"] = status.ToString(),
             ["truncated"] = false,
