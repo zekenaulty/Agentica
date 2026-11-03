@@ -320,7 +320,7 @@ public sealed class ChatWorkspaceResourceLimitTests
         await File.WriteAllTextAsync(Path.Combine(fixture.WorkspaceRoot, "note.txt"), "fallback-needle");
         var tool = new LabWorkspaceFileSearchTool(
             fixture.WorkspaceRoot,
-            ErrorFloodProcess(),
+            ErrorFloodProcess(fixture),
             TestLimits() with
             {
                 MaxSearchErrorChars = 64,
@@ -339,6 +339,11 @@ public sealed class ChatWorkspaceResourceLimitTests
             CancellationToken.None);
 
         stopwatch.Stop();
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Equal("started", File.ReadAllText(Path.Combine(fixture.Root, "stderr-producer.started")).Trim());
+            Assert.False(File.Exists(Path.Combine(fixture.Root, "stderr-producer.completed")));
+        }
         Assert.Equal(ReceiptStatus.Succeeded, result.Receipt.Status);
         Assert.True(Assert.IsType<bool>(result.Receipt.Data["usedFallback"]));
         Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<string>>(result.Receipt.Data["matches"]));
@@ -527,14 +532,28 @@ public sealed class ChatWorkspaceResourceLimitTests
             : Shell(
                 "i=0; while [ \"$i\" -lt 10000 ]; do printf 'fake:%s:1:needle\\n' \"$i\"; i=$((i+1)); done; sleep 30");
 
-    private static LabWorkspaceSearchProcessSpec ErrorFloodProcess() =>
-        OperatingSystem.IsWindows()
-            ? PowerShell(
-                "$b=[Text.Encoding]::UTF8.GetBytes(('x' * 4096)); " +
-                "$s=[Console]::OpenStandardError(); " +
-                "$s.Write($b,0,$b.Length); $s.Flush(); " +
-                "Start-Sleep -Seconds 30")
-            : Shell("head -c 4096 /dev/zero | tr '\\0' x >&2; sleep 30");
+    private static LabWorkspaceSearchProcessSpec ErrorFloodProcess(WorkspaceFixture fixture)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return Shell("head -c 4096 /dev/zero | tr '\\0' x >&2; sleep 30");
+        }
+
+        // Keep script/markers outside searched sources. Batch syntax belongs in
+        // a file: ArgumentList's Win32 quote escaping is not cmd command syntax.
+        // This avoids PowerShell startup inside the unchanged 15s operation.
+        var script = Path.Combine(fixture.Root, "stderr-producer.cmd");
+        File.WriteAllText(script,
+            "@echo off\r\n" +
+            ">\"%~dp0stderr-producer.started\" echo started\r\n" +
+            "for /l %%i in (1,1,256) do @echo xxxxxxxxxxxxxxxx 1>&2\r\n" +
+            "ping.exe -n 31 127.0.0.1 >nul\r\n" +
+            ">\"%~dp0stderr-producer.completed\" echo completed\r\n", Encoding.ASCII);
+        // 256 lines exceed the 4096-char reader request. If emission finishes,
+        // loopback ping prevents natural exit during the assertion window;
+        // production termination may arrive before that child starts.
+        return new("cmd.exe", ["/d", "/q", "/c", "call", script], AppendRipgrepArguments: false);
+    }
 
     private static LabWorkspaceSearchProcessSpec OutputFloodWithTerminationFailureProcess()
     {

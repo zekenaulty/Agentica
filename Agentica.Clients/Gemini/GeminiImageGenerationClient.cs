@@ -163,7 +163,8 @@ public sealed class GeminiImageGenerationClient : IImageGenerationClient
                     ThinkingTokens: response.UsageMetadata.ThoughtsTokenCount,
                     TotalTokens: response.UsageMetadata.TotalTokenCount,
                     CachedPromptTokens: response.UsageMetadata.CachedContentTokenCount,
-                    ToolUsePromptTokens: response.UsageMetadata.ToolUsePromptTokenCount),
+                    ToolUsePromptTokens: response.UsageMetadata.ToolUsePromptTokenCount)
+                { OutputTokenSemantics = LlmOutputTokenSemantics.ExcludesThinking },
             Metadata: response.ResponseId is null
                 ? null
                 : new Dictionary<string, string>

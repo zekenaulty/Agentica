@@ -81,6 +81,10 @@ public sealed class AnthropicMessagesLlmClientTests
         Assert.Equal("four", first.Text);
         Assert.Equal(8, first.Usage?.PromptTokens);
         Assert.Equal(11, first.Usage?.OutputTokens);
+        Assert.Equal(LlmOutputTokenSemantics.IncludesThinking, first.Usage?.OutputTokenSemantics);
+        Assert.Null(first.Usage?.ThinkingTokens);
+        Assert.Null(first.Usage?.NonThinkingOutputTokens);
+        Assert.Equal(11, first.Usage?.GeneratedOutputTokens);
         Assert.Equal(2, first.Usage?.CachedPromptTokens);
         Assert.Equal([LlmStreamEventKind.Activity, LlmStreamEventKind.ThoughtSummaryDelta,
             LlmStreamEventKind.TextDelta, LlmStreamEventKind.Completed],
@@ -209,6 +213,42 @@ public sealed class AnthropicMessagesLlmClientTests
             client.GenerateAsync(request));
         Assert.Equal("invalid_thinking_budget", budgetError.ErrorClass);
         Assert.Equal(0, handler.CallCount);
+    }
+
+    [Theory]
+    [InlineData(int.MaxValue, 1)]
+    [InlineData(-1, 7)]
+    [InlineData(8, -1)]
+    [InlineData(null, 7)]
+    [InlineData(8, null)]
+    public async Task Invalid_or_incomplete_source_counters_do_not_become_wrapped_or_partial_synthesized_totals(int? input, int? output)
+    {
+        var nativeUsage = JsonSerializer.Serialize(new { input_tokens = input, output_tokens = output });
+        var client = CreateClient(new StubHandler(_ => Task.FromResult(StreamResponse($$$$"""
+            event: message_start
+            data: {"type":"message_start","message":{"usage":{{{{nativeUsage}}}}}}
+
+            event: content_block_start
+            data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"ok"}}
+
+            event: content_block_stop
+            data: {"type":"content_block_stop","index":0}
+
+            event: message_delta
+            data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}
+
+            event: message_stop
+            data: {"type":"message_stop"}
+
+            """))));
+        var response = await client.GenerateAsync(TextRequest());
+        using var continuation = response.NativeContinuation;
+        Assert.Equal("ok", response.Text);
+        Assert.Equal(input, response.Usage?.PromptTokens);
+        Assert.Equal(output, response.Usage?.OutputTokens);
+        Assert.Null(response.Usage?.TotalTokens);
+        Assert.Null(response.Usage?.NonThinkingOutputTokens);
+        Assert.Equal(input is < 0 || output is < 0 ? null : output, response.Usage?.GeneratedOutputTokens);
     }
 
     private static LlmRequest TextRequest() =>
