@@ -273,8 +273,11 @@ internal sealed class ExperimentHost : ICompletionEvaluator
                         new("primary-passage", new("document", _options.MirrorExact ? "synthetic.primary" : "synthetic.secondary"),
                             _options.MirrorExact ? "4" : "1", 0, ExactText, "speaker.author")
                     ];
-                    _coverage = _coverage with { Status = _options.MirrorExact
-                        ? ObligationCoverageStatus.Complete : ObligationCoverageStatus.Partial };
+                    _coverage = _coverage with
+                    {
+                        Status = _options.MirrorExact
+                            ? ObligationCoverageStatus.Complete : ObligationCoverageStatus.Partial
+                    };
                     data["sourceId"] = _presented[0].Source.RefId;
                     data["sourceRevision"] = _presented[0].SourceRevision;
                     data["text"] = _presented[0].Text;
