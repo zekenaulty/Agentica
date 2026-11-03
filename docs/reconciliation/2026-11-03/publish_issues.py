@@ -28,6 +28,10 @@ def bullets(items):
     return "\n".join(f"- {item}" for item in items)
 
 
+def normalized_body(body):
+    return body.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--publish", action="store_true", help="Explicitly create/update issues and plan labels")
@@ -62,28 +66,38 @@ def main():
             gh("label", "create", name, "--repo", REPO, "--color", color, "--description", description)
     state = {"date": PLAN["date"], "repository": REPO, "source_main": PLAN["source_pins"]["main"], "issues": {}}
     links = {item["id"]: item["issue_url"] for item in PLAN["candidates"] if item.get("issue_url")}
-    created_this_run = set()
+    expandable_skeletons = {}
 
     def publish(key, title, body, issue_labels, update=False):
         matches = [item for item in existing if marker(key) in item.get("body", "")]
         if len(matches) > 1:
             raise RuntimeError(f"Duplicate publication markers: {key}")
         path = BODIES / f"{key}.md"
-        path.write_text(marker(key) + "\n\n" + body + "\n", encoding="utf-8")
+        generated_body = marker(key) + "\n\n" + body + "\n"
+        path.write_text(generated_body, encoding="utf-8")
         if matches:
             item = matches[0]
-            # Recovery reruns must not erase later claims, acceptance evidence or
-            # closure notes. Only expand skeletons created in this invocation.
-            if update and key in created_this_run:
-                gh("issue", "edit", str(item["number"]), "--repo", REPO, "--body-file", str(path))
+            # First-phase exact recognition recovers interrupted publication without
+            # treating an expanded, edited or closed workflow body as a skeleton.
+            if not update and item["state"].upper() == "OPEN" and normalized_body(item["body"]) == normalized_body(generated_body):
+                expandable_skeletons[key] = normalized_body(generated_body)
+            if update and key in expandable_skeletons:
+                # A human may have edited or closed it since the initial listing.
+                current = json.loads(gh("issue", "view", str(item["number"]), "--repo", REPO, "--json", "body,state"))
+                item.update(current)
+                if item["state"].upper() == "OPEN" and normalized_body(item["body"]) == expandable_skeletons[key]:
+                    gh("issue", "edit", str(item["number"]), "--repo", REPO, "--body-file", str(path))
+                    item["body"] = generated_body
+                del expandable_skeletons[key]
         else:
             url = gh("issue", "create", "--repo", REPO, "--title", title, "--body-file", str(path), "--label", ",".join(issue_labels))
             match = re.fullmatch(r"https://github\.com/zekenaulty/Agentica/issues/(\d+)", url)
             if not match:
                 raise RuntimeError("Unknown issue-create outcome; rerun to reconcile the publication marker")
-            item = dict(number=int(match[1]), url=url, title=title, body=marker(key), state="OPEN")
+            item = dict(number=int(match[1]), url=url, title=title, body=generated_body, state="OPEN")
             existing.append(item)
-            created_this_run.add(key)
+            if not update:
+                expandable_skeletons[key] = normalized_body(generated_body)
         links[key] = item["url"]
         state["issues"][key] = {name: item[name] for name in ["number", "url", "title", "state"]}
         STATE.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
