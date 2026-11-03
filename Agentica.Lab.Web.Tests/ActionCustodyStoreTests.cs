@@ -5,7 +5,7 @@ using Agentica.Tools;
 
 namespace Agentica.Lab.Web.Tests;
 
-public sealed class ActionCustodyStoreTests : IDisposable
+public sealed partial class ActionCustodyStoreTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "agentica-custody-tests", Guid.NewGuid().ToString("N"));
 

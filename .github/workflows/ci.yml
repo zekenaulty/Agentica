@@ -17,7 +17,9 @@ jobs:
   windows-proof:
     name: Windows locked build and filesystem proof
     runs-on: windows-2022
-    timeout-minutes: 20
+    # The integrated host/chat suite now has over 570 cases. Retain every
+    # per-operation deadline while allowing the complete Windows gate to finish.
+    timeout-minutes: 30
     env:
       CI: true
       DOTNET_CLI_TELEMETRY_OPTOUT: 1
@@ -85,7 +87,9 @@ jobs:
         run: dotnet test Agentica.Lab.Web.Tests/Agentica.Lab.Web.Tests.csproj --configuration Release --no-build --no-restore
 
       - name: Qualify the browser host SDK
-        run: node --test browser-tests/host-sdk.test.mjs browser-tests/host-recovery.test.mjs browser-tests/host-result-validation.test.mjs browser-tests/host-operations.test.mjs Agentica.Lab.Web.Tests/chat-ui.test.mjs
+        env:
+          AGENTICA_TEST_START_SERIALIZATION: '1'
+        run: node --test browser-tests/host-sdk.test.mjs browser-tests/host-recovery.test.mjs browser-tests/host-result-validation.test.mjs browser-tests/host-operations.test.mjs browser-tests/host-decision-stop.test.mjs browser-tests/host-decision-adoption.test.mjs browser-tests/host-starts.test.mjs Agentica.Lab.Web.Tests/chat-ui.test.mjs
 
   quality:
     name: Locked build, proof tests, and package validation
@@ -175,7 +179,9 @@ jobs:
         run: dotnet test Agentica.Lab.Web.Tests/Agentica.Lab.Web.Tests.csproj --configuration Release --no-build --no-restore
 
       - name: Qualify the browser host SDK
-        run: node --test browser-tests/host-sdk.test.mjs browser-tests/host-recovery.test.mjs browser-tests/host-result-validation.test.mjs browser-tests/host-operations.test.mjs Agentica.Lab.Web.Tests/chat-ui.test.mjs
+        env:
+          AGENTICA_TEST_START_SERIALIZATION: '1'
+        run: node --test browser-tests/host-sdk.test.mjs browser-tests/host-recovery.test.mjs browser-tests/host-result-validation.test.mjs browser-tests/host-operations.test.mjs browser-tests/host-decision-stop.test.mjs browser-tests/host-decision-adoption.test.mjs browser-tests/host-starts.test.mjs Agentica.Lab.Web.Tests/chat-ui.test.mjs
 
       - name: Run tests with coverage
         run: >-

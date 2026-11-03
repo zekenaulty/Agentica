@@ -4,8 +4,8 @@ using Agentica.Lab.Web.Providers;
 
 namespace Agentica.Lab.Web.Runtime;
 
-public sealed class HostRunRegistry(HostContextStore contexts, ILabPlannerFactory planners, ActionCustodyStore custody,
-    HostOperationStore? operations = null) : IDisposable
+public sealed partial class HostRunRegistry(HostContextStore contexts, ILabPlannerFactory planners, ActionCustodyStore custody,
+    HostOperationStore? operations = null, HostStartStore? starts = null) : IDisposable
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, HostRun> _runs = new(StringComparer.Ordinal);
@@ -15,23 +15,8 @@ public sealed class HostRunRegistry(HostContextStore contexts, ILabPlannerFactor
         ProtocolValidation.Validate(request);
         lock (_gate)
         {
-            if (operations?.HasOpen(request.HostId, request.SessionId) == true)
-                throw new HostProtocolException("session.parked", "Continue or cancel the retained host operation before starting a new objective.");
-            if (operations?.List(request.HostId, request.SessionId).Any(entry => entry.Admission is not null &&
-                entry.Request.ObjectiveId == request.ObjectiveId) == true)
-                throw new HostProtocolException("objective.retained", "This objective already has durable lineage. Use its operation handoff or a new objective identity.");
-            if (custody.HasUnresolved(request.HostId, request.SessionId))
-                throw new HostProtocolException("session.unresolved", "Reconcile the original dispatched actions before starting another run for this session.");
-            if (_runs.Values.Any(run => run.Request.HostId == request.HostId && run.Request.SessionId == request.SessionId &&
-                (!run.Terminal || run.HasUnresolvedActions)))
-                throw new HostProtocolException("session.busy", "Finish or reconcile the existing run for this host session first.");
-            if (_runs.Count >= 64)
-            {
-                var removable = _runs.Values.Where(r => r.Terminal && !r.HasUnresolvedActions).OrderBy(r => r.CreatedAt).FirstOrDefault();
-                if (removable is null) throw new HostProtocolException("runs.limit", "Run capacity reached; reconcile outstanding runs.");
-                _runs.Remove(removable.RunId);
-                removable.Dispose();
-            }
+            CheckNewObjective(request);
+            MakeRunCapacity();
             request = FreezeProvider(request);
             var run = new HostRun(request, contexts.Open(request), planners, custody, operations);
             _runs.Add(run.RunId, run);
@@ -61,16 +46,20 @@ public sealed class HostRunRegistry(HostContextStore contexts, ILabPlannerFactor
         }
     }
 
-    public HostRun Wake(HostOperationEvent item)
+    public HostRun Wake(HostOperationEvent item, HostDecisionAdoption? adoption = null)
     {
         if (item.Kind != "decision") throw new HostProtocolException("operation.wake_kind", "Only a decision event activates cognition.");
         lock (_gate)
         {
             var store = RequiredOperations();
             var entry = store.Get(item.HostId, item.SessionId, item.ActionId);
+            if (starts?.IsStopRequested(item.HostId, item.SessionId, entry.Request.ObjectiveId) == true)
+                throw new HostProtocolException("start.stopped", "This objective's initial admission was explicitly stopped. Reconcile its retained evidence without waking cognition.");
+            if (entry.StopDecision is not null)
+                throw new HostProtocolException("operation.stopped", "This original decision was explicitly stopped and cannot activate cognition.");
             if (entry.LatestEvent?.EventId == item.EventId && entry.WakeRunId is not null)
             {
-                store.Apply(item, entry.WakeRunId); // Exact replay still validates the entire immutable signal.
+                store.Apply(item, entry.WakeRunId, adoption); // Exact replay includes any separately granted custody.
                 return _runs.TryGetValue(entry.WakeRunId, out var retained) ? retained :
                     throw new HostProtocolException("operation.wake_interrupted", "This wake was already claimed by a prior process. Reconcile its original custody; it is not automatically replayed.");
             }
@@ -81,21 +70,33 @@ public sealed class HostRunRegistry(HostContextStore contexts, ILabPlannerFactor
             if (entry.Usage.Steps >= limits.MaxSteps || entry.Usage.Refinements > limits.MaxRefinements ||
                 entry.Usage.Continuations >= limits.MaxPlanContinuations)
                 throw new HostProtocolException("operation.budget", "The objective's cumulative execution allowance is exhausted. Progress and terminal evidence remain admissible.");
-            if (_runs.Count >= 64)
-            {
-                var removable = _runs.Values.Where(run => run.Terminal && !run.HasUnresolvedActions).OrderBy(run => run.CreatedAt).FirstOrDefault();
-                if (removable is null) throw new HostProtocolException("runs.limit", "Run capacity reached; reconcile outstanding runs.");
-                _runs.Remove(removable.RunId);
-                removable.Dispose();
-            }
+            var removable = FindCapacityCandidate();
             var runId = "labrun_" + Guid.NewGuid().ToString("N");
             ValidateOperationObservation(entry, item);
-            var claimed = store.Apply(item, runId); // Persist the activation identity before creating a planner.
-            var request = entry.Request with { SessionEpoch = claimed.ActiveEpoch, Observation = item.Observation };
+            if (adoption is not null) ValidateOperationObservation(entry,
+                item with { SessionEpoch = adoption.NextSessionEpoch, Observation = adoption.Observation });
+            var claimed = store.Apply(item, runId, adoption); // Persist both sources before creating a planner.
+            var request = entry.Request with { SessionEpoch = claimed.ActiveEpoch, Observation = adoption?.Observation ?? item.Observation };
             var usage = entry.Usage with { Continuations = checked(entry.Usage.Continuations + 1) };
             var run = new HostRun(request, contexts.Open(request), planners, custody, store, usage, runId, claimed);
+            ReleaseRunCapacity(removable);
             _runs.Add(run.RunId, run);
             return run;
+        }
+    }
+
+    public HostOperationEntry StopDecision(HostOperationEvent item)
+    {
+        lock (_gate)
+        {
+            var store = RequiredOperations();
+            var entry = store.Get(item.HostId, item.SessionId, item.ActionId);
+            CheckAdmission(entry);
+            if (entry.WakeRunId is { } runId && _runs.TryGetValue(runId, out var active) && (!active.Terminal || !active.Completion.IsCompleted))
+                throw new HostProtocolException("session.busy", "Stop and reconcile the claimed execution window before suppressing its decision.");
+            if (entry.StopDecision is null && item.Sequence > (entry.LatestEvent?.Sequence ?? 0))
+                ValidateOperationObservation(entry, item);
+            return store.StopDecision(item);
         }
     }
 
@@ -187,15 +188,19 @@ public sealed class HostRunRegistry(HostContextStore contexts, ILabPlannerFactor
         lock (_gate)
         {
             var entry = custody.Get(hostId, sessionId, result.ActionId);
-            if (_runs.ContainsKey(entry.RunId))
-                throw new HostProtocolException("recovery.live_run", "Resume the retained run and send action.result through its host connection.");
+            if (_runs.TryGetValue(entry.RunId, out var run))
+            {
+                if (!run.Terminal)
+                    throw new HostProtocolException("recovery.live_run", "Resume the active run and send action.result through its host connection.");
+                return run.AcceptRecoveredResult(result);
+            }
             if (result.Operation is not null)
             {
                 custody.PrevalidateResolution(hostId, sessionId, result.ActionId, result);
                 var retained = RequiredOperations().Admit(hostId, sessionId, result);
                 contexts.Open(retained.Request with { Observation = result.Observation! }).RecordActionResult(retained.Action, result);
             }
-            return custody.Resolve(hostId, sessionId, result.ActionId, result);
+            return custody.ResolveRecovered(hostId, sessionId, result.ActionId, result);
         }
     }
 

@@ -63,25 +63,31 @@ this partial execution outcome from objective completion and retain local work.
 
 ## Inventory and event transport
 
-The browser SDK exposes three explicit methods. They never start a background
+The browser SDK exposes explicit methods. They never start a background
 polling loop and never retry uncertain delivery automatically.
 
 ```js
 const entries = await host.listOperations({ hostId, sessionId });
 await host.signalOperation(progressEvent);
 const started = await host.wakeOperation(decisionEvent);
+// New host custody requires an explicit, separately persisted checkpoint:
+const adopted = await host.adoptDecision(decisionEvent, { adoptionId, nextSessionEpoch, observation });
+// An explicit alternative to waking, not a synthetic cancellation event:
+await host.stopDecision(decisionEvent);
 ```
 
-Both HTTP methods accept an optional `fetchImpl` for a host transport or fixture:
+HTTP methods accept an optional `fetchImpl` for a host transport or fixture:
 `listOperations({ hostId, sessionId, fetchImpl })` and
-`signalOperation(event, { fetchImpl })`. Their HTTP origin is derived from the
-configured WebSocket URL. `wakeOperation` uses that WebSocket connection.
+`signalOperation(event, { fetchImpl })` and `stopDecision(event, { fetchImpl })`. Their HTTP origin is derived from the
+configured WebSocket URL. `wakeOperation` and `adoptDecision` use that WebSocket connection.
 
 | Boundary | Contract |
 | --- | --- |
 | `GET /api/operations?hostId=…&sessionId=…` | Explicit durable inventory. Each entry includes original `request`, original `action`, Agentica `usage` at admission, nullable final `settledUsage`, nullable `admission`, `activeEpoch`, `latestEvent`, `wakeRunId`, `state`, `createdAt`, and `updatedAt`. |
 | `POST /api/operations/events` | `progress`, `transfer`, `completed`, `blocked`, or `cancelled`. No cognition activation. |
+| `POST /api/operations/stop-decision` | Explicitly suppress an original `decision`, retaining it as `stopDecision` and `latestEvent` with state `cancelled`. No cognition activation or replacement event. |
 | WebSocket `operation.wake` | A `decision` event. Returns correlated `started` with the new bounded run identity. |
+| WebSocket `operation.adopt` | `{ decision, adoption: { adoptionId, nextSessionEpoch, observation } }`. Atomically claims an unclaimed original decision under explicit new host custody. Returns correlated `started`. |
 | WebSocket `operation.parked` | Reliable admission handoff notification, before the original run outcome. |
 
 Inventory states are `reserved`, `parked`, `waking`, `continued`, `completed`,
@@ -89,6 +95,24 @@ Inventory states are `reserved`, `parked`, `waking`, `continued`, `completed`,
 admits another operation. A reservation without an admission is not proof that
 a host effect is absent; inspect original action custody before attempting
 anything else.
+
+### Stop a pending decision
+
+After host work has stopped, `stopDecision` accepts the original next decision or
+the exact latest claimed decision. It preserves original admission, event history,
+usage and any claimed `wakeRunId`. An undelivered decision is retained as the
+cancellation source without reserving a successor. The optional `stopDecision`
+field is omitted from older records; their hashes and reload behavior are unchanged.
+Duplicate Stop returns the same durable result, including after a lost reply or
+process restart. A stopped decision can never wake again.
+
+This is not arbitrary run cancellation. The service refuses live claimed windows,
+unresolved action custody, completed work and a continued parent whose child
+must be reconciled separately. Stop/reconcile a live window first. The host still
+owns local cancellation and must compare the returned original evidence before
+acknowledging its outbox. This endpoint neither renews host custody nor transfers
+an old decision to a new epoch. It is a Lab protocol extension, not a paid-provider
+qualification or a replacement for the host's own authority checks.
 
 ### Event shape
 
@@ -162,6 +186,30 @@ not arbitrary serialization and resumption of the in-process runner stack.
 The SDK's operation cache supports current-client validation only; call
 `listOperations` explicitly after creating a replacement client.
 
+### Adopt an unclaimed decision
+
+An ownership change must not rewrite an old decision's epoch, observation or
+event identity. The host may instead persist `HostDecisionAdoption` alongside
+that exact decision and call `adoptDecision`. The service atomically retains both
+sources before creating one successor. Inventory exposes optional `wakeAdoption`;
+`latestEvent` remains the original decision. The successor receives the new epoch
+and scoped observation, but keeps the original objective, capabilities, provider
+configuration and remaining cumulative limits. Host-local grants are not renewed.
+
+Adoption requires an unclaimed next decision, distinct nonretired custody and a
+nonrewound checkpoint. Retired-epoch checks include ancestor operations. An
+adoption ID is unique within a host/session; separate sessions are independent.
+The same checks apply on ledger reload. Subsequent evidence cannot rewind the
+adopted checkpoint or reuse its observation identity with changed content.
+
+An exact replay returns only the originally claimed live run. Changed/missing
+adoption, an already claimed different decision, or a lost process claim never
+creates another planner. A retained live claim can be inspected and reattached
+through inventory plus `resume`; this is reconciliation, not renewed effect
+authority. The host must still validate current custody before granting effects.
+Stop retains its original-decision semantics even when adoption changed the
+active epoch. Older records omit adoption fields, preserving their wire hashes.
+
 ## Accounting and host adoption
 
 Agentica records cumulative `steps` (actual tool invocations), `refinements`,
@@ -227,3 +275,21 @@ usage, and exact observation/context evidence.
 Maze Battle adoption and exact-head paired cross-runtime proof remain separate
 acceptance work. These service results do not qualify the ordinary game, long
 travel with reload/takeover, paid-model performance, or complete NS-6 behavior.
+
+### Decision adoption qualification: 12 October 2026
+
+- Candidate implementation `43c3a3c`: Lab Web .NET suite **212 passed**, including
+  53 adoption cases and the earlier Stop regressions. SDK suites **97 passed**.
+- The independent review reproduced and repaired ancestor-epoch revival,
+  post-adoption observation rewind and inconsistent adoption-ID scope. Tests
+  exercise ordinary writes, exact replay, corrupt history, reordered ledger
+  entries, independent sessions, early actions and interrupted claims.
+- Maze's isolated actual-game browser/real-service cohort **10 passed**, including
+  explicit continuation of an undelivered decision after browser/service restart.
+  The host record preserves original admission/evidence, while the successor uses
+  separately observed new-epoch context. No movement or planner activation occurs
+  merely from reconnecting. No paid provider calls were used.
+- SDK `10.0.401` was used from outside the checkout because the unchanged global
+  pin is `10.0.302`. This is not qualification under that pinned SDK, nor general
+  live-provider or complete host-application qualification. Maze owns its broader
+  acceptance ledger and remaining exploration/quest tests.

@@ -10,7 +10,7 @@ using Agentica.Lab.Web.Chat.Recall;
 
 namespace Agentica.Lab.Web;
 
-public static class LabWebApplication
+public static partial class LabWebApplication
 {
     public static WebApplication Create(string[] args, ILabPlannerFactory? plannerFactory = null, string? storageDirectory = null,
         OpenAiProviderConfiguration? openAiConfiguration = null, IExperimentExecutor? experimentExecutor = null)
@@ -38,6 +38,7 @@ public static class LabWebApplication
         builder.Services.AddSingleton(new HostContextStore(Path.Combine(storageRoot, "context")));
         builder.Services.AddSingleton(new ActionCustodyStore(Path.Combine(storageRoot, "custody")));
         builder.Services.AddSingleton(new HostOperationStore(Path.Combine(storageRoot, "operations")));
+        builder.Services.AddSingleton(new HostStartStore(Path.Combine(storageRoot, "starts")));
         builder.Services.AddSingleton<HostRunRegistry>();
         builder.Services.AddSingleton(_ => new ExperimentStore(Path.Combine(storageRoot, "chat")));
         if (experimentExecutor is null) builder.Services.AddSingleton<IExperimentExecutor>(services =>
@@ -54,7 +55,7 @@ public static class LabWebApplication
             try { await next(context).ConfigureAwait(false); }
             catch (HostProtocolException exception) when (!context.Response.HasStarted)
             {
-                context.Response.StatusCode = exception.Code == "run.not_found" ? 404 : 409;
+                context.Response.StatusCode = exception.Code is "run.not_found" or "start.not_found" ? 404 : 409;
                 await context.Response.WriteAsJsonAsync(new { code = exception.Code, message = exception.Message }).ConfigureAwait(false);
             }
             catch (Exception exception) when (!context.Response.HasStarted && exception is InvalidDataException or IOException)
@@ -77,13 +78,24 @@ public static class LabWebApplication
         });
         app.MapPut("/api/providers/openai/settings", UpdateOpenAiSettingsAsync);
         app.MapGet("/api/runs", (HostRunRegistry registry) => registry.List());
+        MapStartRoutes(app);
         app.MapGet("/api/operations", (string hostId, string sessionId, HostRunRegistry registry) => registry.ListOperations(hostId, sessionId));
         app.MapPost("/api/operations/events", (HostOperationEvent item, HostRunRegistry registry) => registry.ApplyOperationEvent(item));
+        app.MapPost("/api/operations/stop-decision", (HostOperationEvent item, HostRunRegistry registry) => registry.StopDecision(item));
         app.MapGet("/api/recovery", (string hostId, string sessionId, ActionCustodyStore custody) =>
         {
             ProtocolValidation.Identifier(hostId);
             ProtocolValidation.Identifier(sessionId);
             return custody.ListUnresolved(hostId, sessionId);
+        });
+        app.MapGet("/api/recovery/run", GetRunRecovery);
+        app.MapGet("/api/recovery/action", (string hostId, string sessionId, string actionId, HttpContext context, ActionCustodyStore custody) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            ProtocolValidation.Identifier(hostId);
+            ProtocolValidation.Identifier(sessionId);
+            ProtocolValidation.Identifier(actionId);
+            return custody.Get(hostId, sessionId, actionId);
         });
         app.MapPost("/api/recovery", (HostRecoveryRequest request, HostRunRegistry registry) =>
         {
@@ -166,6 +178,26 @@ public static class LabWebApplication
                     if (message.ProtocolVersion != HostProtocol.Version) ProtocolValidation.Fail("protocol.version", "Unsupported protocol version.");
                     switch (message.Type)
                     {
+                        case "start.durable":
+                            var submission = message.Payload.Deserialize<HostStartSubmission>(HostProtocol.Json)
+                                ?? throw new HostProtocolException("start.invalid", "A durable start submission is required.");
+                            if (attached is not null && (!attached.Terminal || attached.HasUnresolvedActions) &&
+                                !registry.IsStartReplay(submission, attached.RunId))
+                                ProtocolValidation.Fail("connection.busy", "Finish or reconcile this connection's run first.");
+                            var admitted = registry.CreateDurable(submission);
+                            try
+                            {
+                                await connection.SendAttachedAsync(new ServiceMessage("started", StartPayload(admitted.Run, admitted.Admission), admitted.Run.RunId, message.RequestId), () =>
+                                {
+                                    admitted.Run.Attach(connection);
+                                    if (attached != admitted.Run) attached?.Detach(connection);
+                                    attached = admitted.Run;
+                                }, context.RequestAborted).ConfigureAwait(false);
+                                // Exact start retries reattach retained custody, including replies lost before disconnect.
+                                await admitted.Run.ReplayPendingAsync(context.RequestAborted).ConfigureAwait(false);
+                            }
+                            finally { if (attached == admitted.Run) attached.Start(); }
+                            break;
                         case "start":
                             if (attached is not null && (!attached.Terminal || attached.HasUnresolvedActions))
                                 ProtocolValidation.Fail("connection.busy", "Finish or reconcile this connection's run first.");
@@ -178,17 +210,29 @@ public static class LabWebApplication
                             finally { attached.Start(); }
                             break;
                         case "operation.wake":
-                            var signal = message.Payload.Deserialize<HostOperationEvent>(HostProtocol.Json)
+                        case "operation.adopt":
+                            var adopted = message.Type == "operation.adopt"
+                                ? message.Payload.Deserialize<HostDecisionWake>(HostProtocol.Json) : null;
+                            if (message.Type == "operation.adopt" && (adopted?.Decision is null || adopted.Adoption is null))
+                                ProtocolValidation.Fail("operation.adoption", "An original decision and explicit adoption are required.");
+                            var signal = adopted?.Decision ?? message.Payload.Deserialize<HostOperationEvent>(HostProtocol.Json)
                                 ?? throw new HostProtocolException("operation.event", "A semantic decision event is required.");
                             if (attached is not null && (!attached.Terminal || attached.HasUnresolvedActions) &&
                                 !registry.IsWakeReplay(signal, attached.RunId))
                                 ProtocolValidation.Fail("connection.busy", "Finish or reconcile the retained execution window first.");
-                            var awakened = registry.Wake(signal);
-                            awakened.Attach(connection);
-                            if (attached != awakened) attached?.Detach(connection);
-                            attached = awakened;
-                            try { await connection.SendAsync(new ServiceMessage("started", attached.Snapshot(false), attached.RunId, message.RequestId), context.RequestAborted).ConfigureAwait(false); }
-                            finally { attached.Start(); }
+                            var awakened = registry.Wake(signal, adopted?.Adoption);
+                            try
+                            {
+                                await connection.SendAttachedSnapshotAsync(() => new ServiceMessage("started", awakened.Snapshot(false), awakened.RunId, message.RequestId), () =>
+                                {
+                                    awakened.Attach(connection);
+                                    if (attached != awakened) attached?.Detach(connection);
+                                    attached = awakened;
+                                }, context.RequestAborted).ConfigureAwait(false);
+                                // A retry can attach a running or terminal successor after its reply was lost.
+                                await awakened.ReplayPendingAsync(context.RequestAborted).ConfigureAwait(false);
+                            }
+                            finally { if (attached == awakened) awakened.Start(); }
                             break;
                         case "resume":
                             var resume = message.Payload.Deserialize<ResumeRequest>(HostProtocol.Json)
