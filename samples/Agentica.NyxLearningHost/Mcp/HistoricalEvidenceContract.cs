@@ -86,9 +86,12 @@ public static class HistoricalEvidenceContract
     public static IReadOnlyDictionary<string, object?> Arguments(HistoricalEvidenceRequest request) =>
         new Dictionary<string, object?>(StringComparer.Ordinal)
         {
-            ["segmentId"] = request.SegmentId, ["sourceId"] = request.SourceId,
-            ["sourceRevision"] = request.SourceRevision, ["scopeId"] = request.ScopeId,
-            ["perspectiveId"] = request.PerspectiveId, ["startUtf16"] = request.StartUtf16,
+            ["segmentId"] = request.SegmentId,
+            ["sourceId"] = request.SourceId,
+            ["sourceRevision"] = request.SourceRevision,
+            ["scopeId"] = request.ScopeId,
+            ["perspectiveId"] = request.PerspectiveId,
+            ["startUtf16"] = request.StartUtf16,
             ["lengthUtf16"] = request.LengthUtf16
         };
 }
