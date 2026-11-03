@@ -1,0 +1,3 @@
+# Preserve upstream distribution bytes and integrity pins on every platform.
+marked-18.1.3/** -text
+entities-9.0.0/** -text

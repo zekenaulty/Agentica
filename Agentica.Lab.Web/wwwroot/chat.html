@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Experimental chat · Agentica Lab</title>
+  <link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/chat.css">
+</head>
+<body class="chat-page">
+  <div class="chat-shell">
+    <aside class="chat-sidebar" aria-label="Conversations">
+      <a class="brand" href="/"><span class="brand-mark">A</span><span>Agentica<span class="brand-sub">LAB / EXPERIMENTAL CHAT</span></span></a>
+      <nav class="chat-nav"><a href="/">Runs</a><a class="active" href="/chat.html" aria-current="page">Chat</a><a href="/#providers">Providers</a></nav>
+      <button id="new-chat" class="button primary" type="button">＋ New clean room</button>
+      <div class="conversation-heading"><span class="eyebrow">SAVED CONVERSATIONS</span><button id="refresh-chats" class="icon-button" type="button" aria-label="Refresh conversations">↻</button></div>
+      <div id="conversation-list" class="conversation-list"><p class="micro">Loading conversations…</p></div>
+      <div class="isolation-note"><span class="status-dot live"></span>Conversation isolation<p>No cross-chat retrieval. Personal/governed memory is disabled.<br>History is saved in this Lab.</p><a href="/#providers">Manage service API key ↗</a></div>
+    </aside>
+    <main class="chat-main">
+      <header class="chat-header">
+        <div class="chat-title-block"><span class="eyebrow">OPENAI / STATELESS RESPONSES</span><div class="chat-title-line"><h1 id="conversation-title">Experimental chat</h1><button id="rename-chat" class="icon-button" aria-label="Rename conversation" type="button" disabled>✎</button></div><p id="conversation-subtitle">A fresh context. Your instructions. Observable evidence.</p></div>
+        <button id="toggle-settings" class="button secondary" type="button" aria-expanded="true" aria-controls="settings-panel">Configure <span aria-hidden="true">☷</span></button>
+      </header>
+      <div id="chat-notice" class="notice" role="alert" hidden></div>
+      <div id="credential-status" class="credential-status" role="status">Checking existing OpenAI configuration…</div>
+      <div id="history-paging" class="history-paging" hidden><button id="load-earlier-turns" class="button secondary" type="button">Load earlier 20 turns</button><span id="history-page-status" class="micro"></span><button id="return-latest-turns" class="button secondary" type="button" hidden>Latest window</button></div>
+      <section id="transcript" class="transcript" aria-label="Conversation transcript" aria-busy="false"><div class="chat-empty"><span class="empty-symbol">◇</span><h2>A clear starting point</h2><p>Start a new conversation or reopen an experiment.</p><p class="micro">New chats have blank instructions, no tools and no memory. Every conversation remains saved.</p></div></section>
+      <div id="jump-container" class="jump-container" hidden><button id="jump-latest" class="button secondary" type="button">↓ Latest activity</button></div>
+      <form id="composer" class="composer">
+        <label class="sr-only" for="message">Message</label><textarea id="message" rows="2" placeholder="Ask something. Start an experiment." aria-describedby="composer-help" disabled></textarea>
+        <div class="composer-bottom"><span id="composer-help" class="micro">Enter to send · Shift+Enter for a new line</span><div><button id="check-context" class="button secondary" type="button" title="Count provider input tokens for the saved configuration. Does not create a turn or generate a response." disabled>Check context</button><button id="cancel-turn" class="button danger" type="button" hidden>Stop</button><button id="send-message" class="button primary" type="submit" disabled>Send ↑</button></div></div>
+        <p id="composer-status" class="micro" role="status">Select or create a conversation.</p>
+        <p id="context-check-result" class="context-check-result" role="status" hidden></p>
+      </form>
+    </main>
+    <aside id="settings-panel" class="settings-panel" aria-label="Experiment configuration">
+      <div class="settings-heading"><div><span class="eyebrow">EXPERIMENT VARIABLES</span><h2>Configuration</h2></div><button id="close-settings" type="button" class="icon-button" aria-label="Close configuration">×</button></div>
+      <form id="settings-form">
+        <fieldset id="settings-fields" disabled>
+          <label for="mode">Execution mode</label><select id="mode"><option value="clean-room">Clean Room · direct conversation</option><option value="harness">Harness · Agentica planning loop</option></select>
+          <p id="mode-description" class="field-help">Only this conversation's history and your exact instructions are sent. No application planner or tools.</p>
+          <label for="model-catalog">Choose a model <span class="micro">GPT 5.6 onward</span></label><select id="model-catalog" aria-describedby="model-source"><option value="">Custom / exact model ID below</option></select>
+          <div class="field-row"><div><label for="model">Exact model ID</label><input id="model" list="model-options" maxlength="200" autocomplete="off" spellcheck="false" required><datalist id="model-options"></datalist></div><div><label for="reasoning-effort">Reasoning effort</label><select id="reasoning-effort"><option value="">Model default</option><option>none</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></div></div>
+          <p id="model-source" class="field-help">Manual model IDs are supported. Unsupported combinations return the provider's error.</p>
+          <label class="check"><input id="reasoning-summary" type="checkbox"> Request provider reasoning summary</label>
+          <p class="field-help">Opt in to summaries when supported. Private reasoning is not exposed.</p>
+          <details class="settings-section" open><summary>Web search <span class="micro">off by default</span></summary><label class="check"><input id="ambient-web-search" type="checkbox"> Allow provider-native web search</label><p id="web-search-help" class="field-help">Optional in Clean Room. When enabled, the provider may search the public web. This changes the no-tools baseline.</p><label for="max-web-search-calls">Max web search calls per turn</label><input id="max-web-search-calls" type="number" min="1" max="20" value="3" required><p class="field-help">Also bounds the explicit web.search capability in Harness mode. Search calls may have provider charges.</p></details>
+          <label for="instructions">System instructions <span class="micro">blank by default</span></label><textarea id="instructions" rows="7" spellcheck="false" placeholder="No application instructions"></textarea><p id="instruction-state" class="field-help">Blank means the instructions field is omitted.</p>
+          <details id="thread-recall-section" class="settings-section"><summary>Thread history recall <span id="thread-recall-summary" class="micro">off</span></summary>
+            <label class="check"><input id="thread-recall-enabled" type="checkbox"> Enable this conversation's historical evidence</label><p id="thread-recall-condition" class="field-help">Off is the baseline. Enabling recall is a conditioned experiment using only this saved conversation. Personal/governed memory stays disabled.</p>
+            <div id="thread-recall-controls" hidden><label for="thread-recall-mode">Recall policy</label><select id="thread-recall-mode"><option value="manual">Operator-selected exact passages</option><option value="auto">Auto local lookup</option><option id="thread-recall-agent-option" value="agent">Agent-directed · Harness only</option></select>
+              <label for="thread-recall-query">Local lookup query <span class="micro">optional override</span></label><input id="thread-recall-query" maxlength="2000" autocomplete="off" placeholder="Blank Auto query uses the current message"><p class="field-help">Historical quotations are source data, not new instructions or newly admitted memory.</p>
+              <div class="field-row"><div><label for="thread-recall-max-characters">Evidence characters per turn</label><input id="thread-recall-max-characters" type="number" min="256" max="32000" value="8000" required></div><div><label for="thread-recall-top-k">Top matches</label><input id="thread-recall-top-k" type="number" min="1" max="20" value="5" required></div></div>
+              <div class="field-row"><div><label for="thread-recall-neighbor-radius">Neighbor radius</label><input id="thread-recall-neighbor-radius" type="number" min="0" max="2" value="1" required></div><div><label for="thread-recall-recent-turns">Recent turns</label><input id="thread-recall-recent-turns" type="number" min="0" max="25" value="2" required></div></div>
+              <label for="thread-recall-max-calls">Max history-source calls per turn</label><input id="thread-recall-max-calls" type="number" min="1" max="32" value="8" required>
+              <div class="recall-readiness"><p id="thread-recall-readiness" class="field-help" role="status">Index readiness is checked only after recall is enabled.</p><div class="recall-actions"><button id="refresh-recall-index" class="button secondary" type="button">Check coverage</button><button id="rebuild-recall-index" class="button secondary" type="button">Rebuild local index</button><button id="cancel-recall-rebuild" class="button danger" type="button" hidden>Cancel rebuild</button></div></div>
+              <label for="thread-history-query">Inspect saved history <span class="micro">operator only</span></label><input id="thread-history-query" maxlength="512" autocomplete="off" placeholder="Search within this conversation"><div class="recall-actions"><button id="search-thread-history" class="button secondary" type="button">Search local history</button></div><p id="thread-history-search-status" class="field-help" role="status"></p><div id="thread-history-results" class="recall-results"></div>
+              <h3 class="tools-heading">Pinned exact passages</h3><p class="field-help">Pins select source ranges for this experiment. They never rewrite or summarize the original messages.</p><div id="thread-recall-pins" class="recall-pins"></div>
+            </div>
+          </details>
+          <details class="settings-section" open><summary>Context & output</summary>
+            <label for="context-depth">Context depth preset</label><select id="context-depth"><option value="minimal">Minimal</option><option value="focused">Focused</option><option value="normal" selected>Normal</option><option value="deep">Deep</option><option value="exhaustive">Exhaustive</option></select><p class="field-help">Presets set the history and character ceilings below. Model effort is separate.</p>
+            <div class="field-row"><div><label for="max-output">Max output tokens</label><input id="max-output" type="number" min="256" max="65536" required></div><div><label for="context-window">Context window tokens</label><input id="context-window" type="number" min="8192" max="1048576" required></div></div>
+            <div class="field-row"><div><label for="max-input">Max input characters</label><input id="max-input" type="number" min="1024" max="262144" required></div><div><label for="max-history">History message limit</label><input id="max-history" type="number" min="0" max="500" required></div></div>
+            <label for="history-policy">When history exceeds a limit</label><select id="history-policy"><option value="stop">Stop with an explicit limit</option><option value="recent">Omit oldest complete turns</option></select><p class="field-help">No automatic summarization. Inspect the manifest for selected and omitted history. Token estimates are not measured usage.</p>
+          </details>
+          <details id="harness-settings" class="settings-section" hidden open><summary>Agentica loop & capabilities</summary><p class="field-help harness-warning">Harness mode adds Agentica's planning instructions, workflow schema and selected capabilities. Inspect each request to see the effective overlay.</p>
+            <div class="field-row"><div><label for="max-steps">Max steps</label><input id="max-steps" type="number" min="1" max="100" required></div><div><label for="max-continuations">Max continuations</label><input id="max-continuations" type="number" min="0" max="32" required></div></div>
+            <div class="field-row"><div><label for="max-provider-calls">Max provider calls</label><input id="max-provider-calls" type="number" min="1" max="100" required></div><div><label for="timeout-seconds">Timeout seconds</label><input id="timeout-seconds" type="number" min="10" max="1800" required></div></div>
+            <div class="field-row"><div><label for="max-tool-result">Tool result characters</label><input id="max-tool-result" type="number" min="256" max="12000" required></div><div><label for="max-tool-evidence">Tool evidence characters</label><input id="max-tool-evidence" type="number" min="256" max="262144" required></div></div>
+            <h3 class="tools-heading">Bound capabilities</h3><p class="field-help">Enable only what this experiment needs. Each tool's effect and source are shown.</p><div id="capability-list" class="capability-list"><p class="micro">Loading capability catalog…</p></div>
+          </details>
+          <div class="memory-disabled"><span aria-hidden="true">◌</span><div><strong>Personal/governed memory disabled</strong><p id="memory-recall-status">Thread recall is off. Saved history remains within this conversation.</p></div></div>
+        </fieldset>
+        <div class="settings-save"><button id="save-settings" class="button primary" type="submit" disabled>Save configuration</button><button id="reload-settings" class="button secondary" type="button" disabled>Reload saved configuration</button><p id="save-status" class="micro" role="status">No conversation selected.</p></div>
+      </form>
+    </aside>
+  </div>
+  <dialog id="rename-dialog"><form id="rename-form"><h2>Rename conversation</h2><label for="rename-title">Title</label><input id="rename-title" maxlength="160" required><div class="dialog-buttons"><button id="rename-cancel" class="button secondary" type="button">Cancel</button><button class="button primary" type="submit">Save title</button></div></form></dialog>
+  <dialog id="history-source-dialog" class="history-source-dialog"><div class="source-dialog-heading"><h2 id="history-source-title">Original historical source</h2><button id="close-history-source" class="icon-button" type="button" aria-label="Close original source">×</button></div><p id="history-source-metadata" class="micro"></p><p class="field-help">Exact source text, shown as data. Offsets use UTF-16 code units and an exclusive end.</p><div class="field-row"><div><label for="history-source-start">Start offset</label><input id="history-source-start" type="number" min="0" value="0"></div><div><label for="history-source-length">Read characters</label><input id="history-source-length" type="number" min="1" max="32000" value="4000"></div></div><div class="recall-actions"><button id="read-history-source-range" class="button secondary" type="button">Read exact range</button><button id="jump-history-source" class="button secondary" type="button">Jump to original turn</button></div><label for="history-source-text">Select text to pin an exact passage</label><textarea id="history-source-text" rows="12" readonly spellcheck="false"></textarea><p id="history-source-range" class="micro" role="status"></p><div class="recall-actions"><button id="pin-history-source" class="button primary" type="button">Pin selected passage</button></div><h3 class="tools-heading">Neighboring sources</h3><div id="history-source-neighbors" class="recall-results"></div></dialog>
+  <script type="module" src="/chat.mjs"></script>
+</body>
+</html>

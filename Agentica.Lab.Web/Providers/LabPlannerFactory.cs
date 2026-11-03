@@ -21,15 +21,22 @@ public sealed class LabPlannerFactory : ILabPlannerFactory, IDisposable
     private readonly Func<string, string?> _environment;
     private readonly OpenAiProviderConfiguration _openAiConfiguration;
     private readonly bool _ownsHttpClient;
+    private readonly bool _useStatelessPlanRepair;
+    private readonly bool _inputBudgetOwnedByChatTransport;
+    private readonly int? _compiledInputCharacterLimit;
     private bool _disposed;
 
     public LabPlannerFactory(HttpClient? httpClient = null, Func<string, string?>? environment = null,
-        OpenAiProviderConfiguration? openAiConfiguration = null)
+        OpenAiProviderConfiguration? openAiConfiguration = null, bool useStatelessPlanRepair = false,
+        bool inputBudgetOwnedByChatTransport = false, int? compiledInputCharacterLimit = null)
     {
         _ownsHttpClient = httpClient is null;
         _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
         _environment = environment ?? Environment.GetEnvironmentVariable;
         _openAiConfiguration = openAiConfiguration ?? new OpenAiProviderConfiguration(_environment);
+        _useStatelessPlanRepair = useStatelessPlanRepair;
+        _inputBudgetOwnedByChatTransport = inputBudgetOwnedByChatTransport;
+        _compiledInputCharacterLimit = compiledInputCharacterLimit;
     }
 
     public IWorkflowPlanner Create(ProviderSettings settings, Action<LlmStreamEvent> onStreamEvent)
@@ -71,9 +78,13 @@ public sealed class LabPlannerFactory : ILabPlannerFactory, IDisposable
         return new LlmWorkflowPlanner(client, new LlmPlannerOptions(
             ModelId: model,
             GenerationOptions: new LlmGenerationOptions(MaxOutputTokens: settings.MaxOutputTokens, Thinking: thinking),
-            InvalidJsonRepairAttempts: 1)
+            InvalidJsonRepairAttempts: 1,
+            StatelessRepair: _useStatelessPlanRepair,
+            MaxInputCharacters: _compiledInputCharacterLimit ?? LlmPlannerOptions.DefaultMaxInputCharacters)
         {
-            ContextWindowBudget = new LlmContextWindowBudget(settings.ContextWindowTokens, settings.MaxOutputTokens)
+            // Experimental chat admits the complete provider request using native model counts.
+            // Other host planners retain their existing independent byte-proxy policy.
+            ContextWindowBudget = _inputBudgetOwnedByChatTransport ? null : new LlmContextWindowBudget(settings.ContextWindowTokens, settings.MaxOutputTokens)
         }, onStreamEvent);
     }
 
