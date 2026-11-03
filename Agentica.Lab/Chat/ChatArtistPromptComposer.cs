@@ -1,6 +1,9 @@
 using System.Text.Json;
 using Agentica.Clients.Gemini;
 using Agentica.Clients.Llm;
+using Agentica.Clients.Anthropic;
+using Agentica.Clients.OpenAI;
+using Agentica.Clients.Xai;
 
 internal sealed class ChatArtistPromptComposer
 {
@@ -11,16 +14,31 @@ internal sealed class ChatArtistPromptComposer
     private const int MaxPromptChars = 2500;
 
     private readonly ILlmClient _llmClient;
+    private readonly ChatArtistPromptProfile _profile;
 
-    public ChatArtistPromptComposer(ILlmClient llmClient)
+    public ChatArtistPromptComposer(ILlmClient llmClient, ChatArtistPromptProfile? profile = null)
     {
+        ArgumentNullException.ThrowIfNull(llmClient);
         _llmClient = llmClient;
+        _profile = profile ?? ChatArtistPromptProfile.GeminiDefault;
+        if (_profile.DefaultModelId is { } model &&
+            (string.IsNullOrWhiteSpace(model) || model.Length > 200 || model.Any(char.IsControl)))
+            throw new ArgumentException("The artist model must be a bounded model identifier.", nameof(profile));
+        if (_profile.Temperature is { } temperature &&
+            (!double.IsFinite(temperature) || temperature is < 0 or > 2))
+            throw new ArgumentException("The artist temperature must be between zero and two.", nameof(profile));
     }
+
+    public string? DefaultModelId => _profile.DefaultModelId;
 
     public async Task<ChatArtistPromptComposition> ComposeAsync(
         ChatArtistPromptCompositionRequest request,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(request);
+        var composerModelId = string.IsNullOrWhiteSpace(request.ComposerModelId)
+            ? DefaultModelId : request.ComposerModelId;
+        ArgumentException.ThrowIfNullOrWhiteSpace(composerModelId);
         var messages = request.RecentMessages.TakeLast(RecentMessageLimit).ToArray();
         var contextItems = request.ContextItems.Take(ContextItemLimit).ToArray();
         var styleRecipe = string.IsNullOrWhiteSpace(request.StyleRecipe)
@@ -29,7 +47,7 @@ internal sealed class ChatArtistPromptComposer
 
         var providerResponse = await _llmClient.GenerateAsync(
                 new LlmRequest(
-                    request.ComposerModelId,
+                    composerModelId,
                     [
                         new LlmMessage(LlmMessageRole.System, ComposerSystemPrompt),
                         new LlmMessage(
@@ -37,9 +55,13 @@ internal sealed class ChatArtistPromptComposer
                             BuildUserPrompt(request, styleRecipe, messages, contextItems))
                     ],
                     new LlmGenerationOptions(
-                        Temperature: 0.55,
+                        Temperature: _profile.Temperature,
                         MaxOutputTokens: 1800),
-                    new LlmStructuredOutputOptions(JsonSchema: PromptPlanJsonSchema),
+                    new LlmStructuredOutputOptions(JsonSchema: PromptPlanJsonSchema)
+                    {
+                        // Optional artist fields and open layer objects keep their existing meaning.
+                        SchemaEnforcement = LlmJsonSchemaEnforcement.BestEffort
+                    },
                     new Dictionary<string, string>
                     {
                         ["tool"] = ChatToolIds.WorkspaceImageCreate
@@ -264,9 +286,26 @@ internal sealed class ChatArtistPromptComposer
         """;
 }
 
+/// <summary>Host-owned text-provider settings; image generation remains a separate capability.</summary>
+internal sealed record ChatArtistPromptProfile(string? DefaultModelId, double? Temperature)
+{
+    public static ChatArtistPromptProfile GeminiDefault { get; } = new(GeminiModelId.Flash25, 0.55);
+
+    public static ChatArtistPromptProfile ForPlanner(PlannerKind planner, string? modelId) => planner switch
+    {
+        PlannerKind.OpenAI => new(modelId ?? new OpenAiResponsesClientOptions().DefaultModelId, null),
+        PlannerKind.Anthropic => new(modelId ?? new AnthropicMessagesClientOptions().DefaultModelId, null),
+        PlannerKind.Grok => new(modelId ?? new XaiResponsesClientOptions().DefaultModelId, null),
+        PlannerKind.Ollama => new(modelId, 0.55),
+        PlannerKind.Gemini => new(modelId ?? GeminiModelId.Flash25, 0.55),
+        PlannerKind.Deterministic => GeminiDefault,
+        _ => throw new ArgumentOutOfRangeException(nameof(planner))
+    };
+}
+
 internal sealed record ChatArtistPromptCompositionRequest(
     string UserRequest,
-    string ComposerModelId,
+    string? ComposerModelId,
     string? StyleRecipe,
     string? AspectRatio,
     ChatConversation Conversation,

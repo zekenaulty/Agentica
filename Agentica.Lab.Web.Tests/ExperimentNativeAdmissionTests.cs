@@ -15,17 +15,17 @@ public sealed class ExperimentNativeAdmissionTests
     [Fact]
     public async Task Real_HTTP_chat_preserves_large_input_four_turn_floor_and_recall_using_native_token_counts()
     {
-        await using var fixture = await Fixture.Start();
+        await using var fixture = await Fixture.Start(arrangeBeforeExercise: true);
         var chat = fixture.Store.Create(Settings(), "Measured synthetic chat");
         for (var i = 1; i <= 22; i++)
         {
-            var turn = fixture.Store.Begin(chat.Id, new(i == 1 ? "needle exact historical source" : new string('u', i == 22 ? 28338 : 500))).Turn;
-            fixture.Store.Complete(chat.Id, turn.Id, new("completed", new string('a', i == 21 ? 4509 : 1400)));
+            fixture.Complete(chat.Id, i == 1 ? "needle exact historical source" : new string('u', i == 22 ? 28338 : 500),
+                new string('a', i == 21 ? 4509 : 1400));
         }
         var other = fixture.Store.Create(new(), "Other");
-        var foreign = fixture.Store.Begin(other.Id, new("needle foreign-owned source")).Turn;
-        fixture.Store.Complete(other.Id, foreign.Id, new("completed", "foreign-owned answer"));
+        fixture.Complete(other.Id, "needle foreign-owned source", "foreign-owned answer");
         var current = new string('x', 62427);
+        fixture.BeginExercise();
         using var sent = await fixture.Http.PostAsJsonAsync($"/api/chats/{chat.Id}/turns", new ExperimentSendRequest(current, "native-count-test"), HostProtocol.Json, fixture.Token);
         Assert.Equal(HttpStatusCode.OK, sent.StatusCode);
         var admitted = (await sent.Content.ReadFromJsonAsync<ExperimentTurn>(HostProtocol.Json, fixture.Token))!;
@@ -52,6 +52,36 @@ public sealed class ExperimentNativeAdmissionTests
         Assert.True(projection.GetProperty("tokenCount").GetProperty("providerCount").GetBoolean());
         Assert.Equal(62976, projection.GetProperty("inputAllowance").GetInt32());
         Assert.Equal(4, chat.Settings.ThreadRecallRecentTurns);
+    }
+
+    [Fact]
+    public async Task Large_fixture_arrangement_does_not_consume_the_bounded_native_count_exercise()
+    {
+        var clock = new FixtureTimeProvider();
+        await using (var fixture = await Fixture.Start(arrangeBeforeExercise: true, timeProvider: clock))
+        {
+            var chat = fixture.Store.Create(Settings(), null);
+            fixture.Complete(chat.Id, "canonical user source", "canonical assistant source");
+            clock.Advance(TimeSpan.FromSeconds(31));
+            Assert.False(fixture.Token.IsCancellationRequested);
+            fixture.BeginExercise();
+            using var response = await fixture.Http.PostAsJsonAsync($"/api/chats/{chat.Id}/context-check",
+                new ExperimentSendRequest("exact current input"), HostProtocol.Json, fixture.Token);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Empty(fixture.Handler.GenerationBodies);
+            Assert.Equal(1, fixture.Store.GetHead(chat.Id).CompletedTurns);
+            clock.Advance(TimeSpan.FromSeconds(29));
+            Assert.False(fixture.Token.IsCancellationRequested);
+            clock.Advance(TimeSpan.FromSeconds(1));
+            Assert.True(fixture.Token.IsCancellationRequested);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => fixture.Http.GetAsync("/api/chats", fixture.Token));
+        }
+
+        var expiredClock = new FixtureTimeProvider();
+        await using var expired = await Fixture.Start(arrangeBeforeExercise: true, timeProvider: expiredClock);
+        expiredClock.Advance(TimeSpan.FromMinutes(3));
+        Assert.True(expired.Token.IsCancellationRequested);
+        Assert.Throws<OperationCanceledException>(expired.BeginExercise);
     }
 
     [Fact]
@@ -158,31 +188,114 @@ public sealed class ExperimentNativeAdmissionTests
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly string _directory = Directory.CreateTempSubdirectory("agentica-native-admission-").FullName;
-        private readonly CancellationTokenSource _deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        private WebApplication _app = null!;
+        private readonly TimeProvider _timeProvider;
+        private CancellationTokenSource _phaseDeadline = null!;
+        private CancellationTokenSource _deadline = null!;
+        private bool _arranging;
+        private WebApplication? _app;
         private OpenAiExperimentExecutor _executor = null!;
         private HttpClient _provider = null!;
         public Handler Handler { get; } = new();
-        public ExperimentStore Store => _app.Services.GetRequiredService<ExperimentStore>();
+        public ExperimentStore Store => _app!.Services.GetRequiredService<ExperimentStore>();
         public HttpClient Http { get; private set; } = null!;
         public CancellationToken Token => _deadline.Token;
-        public static async Task<Fixture> Start()
+        private Fixture(bool arrangeBeforeExercise, TimeProvider? timeProvider)
         {
-            var fixture = new Fixture(); fixture._deadline.CancelAfter(TimeSpan.FromSeconds(30));
-            fixture._provider = new HttpClient(fixture.Handler);
-            var config = new OpenAiProviderConfiguration(name => name == "OPENAI_API_KEY" ? "synthetic-fixture-key" : null);
-            fixture._executor = new OpenAiExperimentExecutor(config, fixture._provider);
-            fixture._app = LabWebApplication.Create(["--urls", "http://127.0.0.1:0", "--Logging:LogLevel:Default", "Warning"],
-                storageDirectory: fixture._directory, openAiConfiguration: config, experimentExecutor: fixture._executor);
-            await fixture._app.StartAsync(fixture.Token);
-            fixture.Http = new HttpClient { BaseAddress = new Uri(fixture._app.Urls.Single()) };
-            return fixture;
+            _timeProvider = timeProvider ?? TimeProvider.System;
+            _arranging = arrangeBeforeExercise;
+            SetDeadline(arrangeBeforeExercise ? TimeSpan.FromMinutes(3) : TimeSpan.FromSeconds(30));
+        }
+
+        public static async Task<Fixture> Start(bool arrangeBeforeExercise = false, TimeProvider? timeProvider = null)
+        {
+            var fixture = new Fixture(arrangeBeforeExercise, timeProvider);
+            try
+            {
+                fixture._provider = new HttpClient(fixture.Handler);
+                var config = new OpenAiProviderConfiguration(name => name == "OPENAI_API_KEY" ? "synthetic-fixture-key" : null);
+                fixture._executor = new OpenAiExperimentExecutor(config, fixture._provider);
+                fixture._app = LabWebApplication.Create(["--urls", "http://127.0.0.1:0", "--Logging:LogLevel:Default", "Warning"],
+                    storageDirectory: fixture._directory, openAiConfiguration: config, experimentExecutor: fixture._executor);
+                await fixture._app.StartAsync(fixture.Token);
+                fixture.Http = new HttpClient { BaseAddress = new Uri(fixture._app.Urls.Single()) };
+                return fixture;
+            }
+            catch { await fixture.DisposeAsync(); throw; }
+        }
+
+        public void BeginExercise()
+        {
+            Token.ThrowIfCancellationRequested();
+            if (!_arranging) throw new InvalidOperationException("The fixture exercise already owns its deadline.");
+            SetDeadline(TimeSpan.FromSeconds(30));
+            _arranging = false;
+        }
+
+        private void SetDeadline(TimeSpan budget)
+        {
+            var phase = new CancellationTokenSource(budget, _timeProvider);
+            var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken, phase.Token);
+            _deadline?.Dispose(); _phaseDeadline?.Dispose();
+            _phaseDeadline = phase; _deadline = deadline;
+        }
+
+        public void Complete(string chatId, string user, string answer)
+        {
+            Token.ThrowIfCancellationRequested();
+            var turn = Store.Begin(chatId, new(user)).Turn;
+            Token.ThrowIfCancellationRequested();
+            Store.Complete(chatId, turn.Id, new("completed", answer));
         }
         public async ValueTask DisposeAsync()
         {
-            await _app.StopAsync(CancellationToken.None); await _app.DisposeAsync();
-            Http.Dispose(); _executor.Dispose(); _provider.Dispose(); _deadline.Dispose();
+            Http?.Dispose();
+            if (_app is not null)
+            {
+                using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                try { await _app.StopAsync(cleanup.Token); }
+                finally { await _app.DisposeAsync(); _app = null; }
+            }
+            _executor?.Dispose(); _provider?.Dispose(); _deadline.Dispose(); _phaseDeadline.Dispose();
             Directory.Delete(_directory, recursive: true);
+        }
+    }
+
+    // Only fixture phase deadlines use this clock; HTTP, storage and the executor
+    // retain their actual implementations and do not wait for simulated delays.
+    private sealed class FixtureTimeProvider : TimeProvider
+    {
+        private readonly List<FixtureTimer> _timers = [];
+        private TimeSpan _elapsed;
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new FixtureTimer(this, callback, state);
+            timer.Change(dueTime, period); _timers.Add(timer); return timer;
+        }
+
+        internal void Advance(TimeSpan elapsed)
+        {
+            _elapsed += elapsed;
+            foreach (var timer in _timers.ToArray()) timer.FireIfDue();
+        }
+
+        private sealed class FixtureTimer(FixtureTimeProvider owner, TimerCallback callback, object? state) : ITimer
+        {
+            private TimeSpan _due;
+            private bool _disposed;
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                if (_disposed) return false;
+                if (period != Timeout.InfiniteTimeSpan) throw new InvalidOperationException("The fixture supports one-shot deadlines only.");
+                _due = dueTime == Timeout.InfiniteTimeSpan ? TimeSpan.MaxValue : owner._elapsed + dueTime;
+                return true;
+            }
+            internal void FireIfDue()
+            {
+                if (_disposed || _due > owner._elapsed) return;
+                _due = TimeSpan.MaxValue; callback(state);
+            }
+            public void Dispose() => _disposed = true;
+            public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
         }
     }
 }

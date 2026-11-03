@@ -1,0 +1,1005 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-03",
+  "repository": "zekenaulty/Agentica",
+  "scope": "Agentica repository and its own workspaces only. Root owns GitHub publication, implementation assignment and exact-head stable merge decisions.",
+  "sources": [
+    {
+      "key": "epic-plan",
+      "id": "18YbyqcqiOaNukNWcB1CW1GQk4YOqmAkXKwIM405E0eU",
+      "title": "Agentica — Parallel Implementation and Epic Plan",
+      "url": "https://docs.google.com/document/d/18YbyqcqiOaNukNWcB1CW1GQk4YOqmAkXKwIM405E0eU/edit",
+      "modified_time": "2026-10-04T14:44:24.419Z",
+      "status": "governing-plan",
+      "revision_id": null
+    },
+    {
+      "key": "approved-refinement",
+      "id": "1VEKHUVs9pSkJZIs4ODgFclXjoEsN73KHb4EKmIXw5ew",
+      "title": "Agentica — Approved Refinement of Typed Obligations and Dynamic Capability Discovery",
+      "url": "https://docs.google.com/document/d/1VEKHUVs9pSkJZIs4ODgFclXjoEsN73KHb4EKmIXw5ew/edit",
+      "modified_time": "2026-10-04T13:34:35.971Z",
+      "status": "approved-direction",
+      "revision_id": null
+    },
+    {
+      "key": "long-horizon",
+      "id": "1fmkWlsQCbqLm2-cIEOTLu6X7lTm3dzGxaGN2WZWgmbA",
+      "title": "Nyx Lab and Bridge — Agentica Learning and Long-Horizon Replacement Plan",
+      "url": "https://docs.google.com/document/d/1fmkWlsQCbqLm2-cIEOTLu6X7lTm3dzGxaGN2WZWgmbA/edit",
+      "modified_time": "2026-10-04T14:42:27.028Z",
+      "status": "governing-plan",
+      "revision_id": null
+    },
+    {
+      "key": "post-thesis",
+      "id": "16tpVECDICln00xF5FwiXvELvPMCy-IpzLahz3N2q_N4",
+      "title": "Agentica — Post-Thesis Reconciliation and Architecture Decisions",
+      "url": "https://docs.google.com/document/d/16tpVECDICln00xF5FwiXvELvPMCy-IpzLahz3N2q_N4/edit",
+      "modified_time": "2026-10-04T14:42:06.224Z",
+      "status": "reconciliation",
+      "revision_id": null
+    },
+    {
+      "key": "memory-provider-proposal",
+      "id": "1a5LFWJTqRP5zHLk5Hk9HC3c6gP_Rsr5LSxTL3uAB9HQ",
+      "title": "Nyx memory construction as the first Agentica provider adoption — research and phased plan — 2026-10-15",
+      "url": "https://docs.google.com/document/d/1a5LFWJTqRP5zHLk5Hk9HC3c6gP_Rsr5LSxTL3uAB9HQ/edit",
+      "modified_time": "2026-10-15T14:41:26.841Z",
+      "status": "later-proposal",
+      "revision_id": null
+    },
+    {
+      "key": "recovery-proposal",
+      "id": "1O-yZuQ7kVp9vIpfIMC4gsQyycAxrm968UyoJxThO2XE",
+      "title": "Agentica / Nyx — Cognitive Recovery Interpretation Across Failed Activations — Design Note v0.1 — 2026-10-08",
+      "url": "https://docs.google.com/document/d/1O-yZuQ7kVp9vIpfIMC4gsQyycAxrm968UyoJxThO2XE/edit",
+      "modified_time": "2026-10-08T14:25:27.939Z",
+      "status": "research-proposal",
+      "revision_id": null
+    },
+    {
+      "key": "jit-proposal",
+      "id": "1nCNqoFtWrHB0UDVyNyfzUiKzy7PI8tzG6LJjTWO3zPI",
+      "title": "Agentica × Maze Battle — Conditional Speculative Cognition and Stateless Turn Merge — Review Draft — 2026-10-11",
+      "url": "https://docs.google.com/document/d/1nCNqoFtWrHB0UDVyNyfzUiKzy7PI8tzG6LJjTWO3zPI/edit",
+      "modified_time": "2026-10-11T18:34:15.980Z",
+      "status": "future-design",
+      "revision_id": null
+    }
+  ],
+  "source_pins": {
+    "main": "977d0cab5421fd4e09fd33f1224f241b7e425abe",
+    "pr11_reviewed_abbreviation": "785040e",
+    "qualification": "Read-only source/design reconciliation; no builds, test runs, provider calls, GitHub writes or Drive writes by this worker."
+  },
+  "program": {
+    "id": "AGENTICA-PROGRAM",
+    "title": "Agentica activation, Lab and Nyx learning — reconciled implementation storyboard",
+    "groups": [
+      "OA-C",
+      "OA-H",
+      "OA-R",
+      "OA-Q",
+      "OA-N"
+    ],
+    "acceptance": "Agentica-only source changes and bounded evidence gates can close individual leaves. The long-horizon program remains open while included external adoption/retirement gates are deferred.",
+    "publication": "Create or link one storyboard plus the five groups; planning IDs are not GitHub issue numbers."
+  },
+  "reconciliation_rules": [
+    "The user's November3 authorization now permits actual Agentica issue creation/implementation/stable merges; October4 publication-only restrictions describe that earlier planning event.",
+    "Approved October4 typed-obligation direction is distinct from current implementation. Plans do not establish runtime availability.",
+    "The October15 memory-construction document is a proposed first provider-library adoption, while historical evidence remains first MCP conformance proof. No Bridge adoption is authorized here.",
+    "Preserve existing constructors and unopted-in callers; reuse PlanningFrame, EvidenceRef, Artifact, TaskAcceptanceResult and existing runner.",
+    "Stable semantic definitions may be reused. Current source eligibility, grants, readiness, resources, acceptance and outstanding attempts are rechecked.",
+    "Provider-native opaque state is not user-display thought, durable domain evidence or a portable cross-provider reasoning format.",
+    "Publish leaves after fresh existing issue/PR reconciliation. Do not create new issues for record-existing/link-existing entries.",
+    "Root must replace evidence placeholders with actual source/head/test outcomes at implementation closure; no fixture counts imply live/provider or other-host acceptance."
+  ],
+  "epics": [
+    {
+      "id": "OA-C",
+      "title": "Obligation contracts, semantic realization and existing-runtime integration",
+      "outcome": "Introduce the smallest optional obligation/evidence/fulfillment expression, prove it through existing Agentica boundaries, and add realization matching only after two-host falsification.",
+      "children": [
+        "C-01",
+        "C-02",
+        "C-03"
+      ],
+      "closure": "C-01/C-02 qualify two distinct synthetic hosts; C-03 has its own disposition. No obligation database or universal IR is required."
+    },
+    {
+      "id": "OA-H",
+      "title": "Provider, capability and custody correctness for host integration",
+      "outcome": "Remove generic adapter/schema/usage/readiness ambiguity before external hosts depend on it.",
+      "children": [
+        "H-01",
+        "H-02",
+        "H-03"
+      ],
+      "closure": "Affected offline adapter/host seams pass with honest limits; any missing live-provider evidence remains explicit. External Bridge correctness packets retain independent ownership."
+    },
+    {
+      "id": "OA-R",
+      "title": "Exact interpretation reuse and evidence-qualified recovery",
+      "outcome": "Reuse compatible interpretation while keeping evidence, consumer fulfillment and original attempt custody separate.",
+      "children": [
+        "R-01",
+        "R-02"
+      ],
+      "closure": "Matched exact reuse and invalidation/recovery countercases pass in an isolated host. Interpreted recovery remains optional unless measured useful."
+    },
+    {
+      "id": "OA-Q",
+      "title": "Lab and provider qualification with coherent product truth",
+      "outcome": "Consolidate existing work, preserve the full streaming loop and publish current evidence-qualified status.",
+      "children": [
+        "Q-01",
+        "Q-02",
+        "Q-03",
+        "Q-04",
+        "Q-05",
+        "Q-06"
+      ],
+      "closure": "Source/runtime/fixture/live claims are separated, existing work is linked rather than duplicated, applicable stable changes reach main with exact-head review evidence."
+    },
+    {
+      "id": "OA-N",
+      "title": "Nyx learning corpus, MCP faculty and independent cognition seam",
+      "outcome": "Learn through synthetic reference scenarios and an independently runnable Agentica host while existing Nyx and Bridge stay untouched.",
+      "children": [
+        "N-01",
+        "N-02",
+        "N-03",
+        "N-04"
+      ],
+      "closure": "Agentica-side NL-01–04 have explicit qualified dispositions. This does not close future host adoption NL-05 or retirement NL-06."
+    }
+  ],
+  "candidates": [
+    {
+      "repository": "zekenaulty/Agentica",
+      "workflow_state": "unclaimed",
+      "claim_owner": null,
+      "workspace": null,
+      "evidence_level": "source-review; implementation and execution not yet qualified",
+      "migration": "No production migration. Any sample state is disposable; version retained formats before changing them.",
+      "rollback": "Revert the bounded opt-in change; preserve existing caller behavior, evidence and outstanding custody.",
+      "issue_url": null,
+      "id": "C-01",
+      "epic": "OA-C",
+      "title": "Pin opt-in obligation, exact perspective evidence and fulfillment v1",
+      "priority": 0,
+      "planning_packets": [
+        "OA-01"
+      ],
+      "dependencies": [],
+      "paths": [
+        "docs/contracts/obligation-activation-v1.md",
+        "Agentica/Projection/ObligationActivationContracts.cs",
+        "Agentica.Tests/ObligationActivationContractTests.cs"
+      ],
+      "outcome": "Add the smallest optional contract for stable host obligation identity, acceptance revision, exact presented manifest, coverage and residual fulfillment, compatible with existing frames and evidence.",
+      "acceptance": [
+        "Equivalent presented inputs across consumers have identical content identity; consumer IDs/timestamps do not affect it.",
+        "Subject/question, perspective, scope, ordered sources/revisions, coverage horizon, compiler/generation policy changes affect identity.",
+        "References outside the actually presented manifest fail validation; incomplete required coverage and unresolved effect attempts cannot become satisfied.",
+        "Bound collections, deep snapshots and explicit ready/pending/unavailable/indeterminate states; existing unopted-in callers remain unchanged."
+      ],
+      "boundaries": [
+        "No persistence, scheduler, universal IR, compulsory six-class hierarchy or provider-native continuation format."
+      ],
+      "publication_action": "create",
+      "source_keys": [
+        "epic-plan",
+        "approved-refinement",
+        "post-thesis"
+      ],
+      "current_gap": "Focused committed-source symbol scan found no obligation activation contract or fulfillment adapter."
+    },
+    {
+      "repository": "zekenaulty/Agentica",
+      "workflow_state": "unclaimed",
+      "claim_owner": null,
+      "workspace": null,
+      "evidence_level": "source-review; implementation and execution not yet qualified",
+      "migration": "No production migration. Any sample state is disposable; version retained formats before changing them.",
+      "rollback": "Revert the bounded opt-in change; preserve existing caller behavior, evidence and outstanding custody.",
+      "issue_url": null,
+      "id": "C-02",
+      "epic": "OA-C",
+      "title": "Project obligation evidence through the existing frame and acceptance seams",
+      "priority": 1,
+      "planning_packets": [
+        "OA-02"
+      ],
+      "dependencies": [
+        "C-01",
+        "N-01"
+      ],
+      "paths": [
+        "Agentica/Projection/ObligationPlanningFrameProjector.cs",
+        "Agentica/Orchestration/Acceptance/ObligationFulfillmentAdapter.cs",
+        "Agentica.Tests/ObligationHostConformanceTests.cs"
+      ],
+      "outcome": "Make C-01 useful in the existing Agentica loop with source grounding and effectful continuation as two distinct synthetic hosts.",
+      "acceptance": [
+        "Use the same frame/artifact/evidence/acceptance API for both hosts without document, Book or companion branches in core.",
+        "Run observe/decide/act/result/update/continue through a real runner until exact host acceptance or explicit residual work.",
+        "Method/provider changes preserve obligation, acceptance revision, parent lineage, cumulative resources and unresolved original attempts.",
+        "A warm ready interpretation is separately accepted or rejected under the consumer's current contract; execution success alone never satisfies it."
+      ],
+      "boundaries": [
+        "No second executor, durable obligation database, recursive scheduler or Bridge dependency."
+      ],
+      "publication_action": "create",
+      "source_keys": [
+        "epic-plan",
+        "approved-refinement"
+      ]
+    },
+    {
+      "repository": "zekenaulty/Agentica",
+      "workflow_state": "unclaimed",
+      "claim_owner": null,
+      "workspace": null,
+      "evidence_level": "source-review; implementation and execution not yet qualified",
+      "migration": "No production migration. Any sample state is disposable; version retained formats before changing them.",
+      "rollback": "Revert the bounded opt-in change; preserve existing caller behavior, evidence and outstanding custody.",
+      "issue_url": null,
+      "id": "C-03",
+      "epic": "OA-C",
+      "title": "Prove minimal realization matching and bounded capability discovery",
+      "priority": 2,
+      "planning_packets": [],
+      "dependencies": [
+        "C-02",
+        "N-02"
+      ],
+      "paths": [
+        "Agentica/Tools/ToolDescriptor.cs",
+        "Agentica/Tools/ToolCatalog.cs",
+        "Agentica/Projection/",
+        "docs/contracts/skill-realization-matching.md",
+        "Agentica.Tests/"
+      ],
+      "outcome": "Use requires/produces/applies/effects plus surrounding versioned guidance to filter incompatible realizations before model reasoning; prototype in the learning host before extracting new core types.",
+      "acceptance": [
+        "Document the mapping onto current descriptors/manifests first and add only missing optional fields demonstrated by both synthetic hosts.",
+        "Reject known input/output/scope/effect/readiness mismatches deterministically and record bounded reasons.",
+        "Unresolved HOW can invoke one bounded discovery capability returning candidate envelope/handshake identities.",
+        "An installed/bound capability carries its standing scoped grant; mere discovery of an unbound remote descriptor does not install it.",
+        "Reevaluate live grants, revocation, integrity and resources even when semantic definitions are reused."
+      ],
+      "boundaries": [
+        "No automatic installation, broad registry, permission reinterpretation or new composition verb without a concrete falsification case."
+      ],
+      "publication_action": "create",
+      "source_keys": [
+        "approved-refinement"
+      ],
+      "enablement_dependencies": [
+        "Two-host evidence from C-02/N-02"
+      ]
+    },
+    {
+      "repository": "zekenaulty/Agentica",
+      "workflow_state": "unclaimed",
+      "claim_owner": null,
+      "workspace": null,
+      "evidence_level": "source-review; implementation and execution not yet qualified",
+      "migration": "No production migration. Any sample state is disposable; version retained formats before changing them.",
+      "rollback": "Revert the bounded opt-in change; preserve existing caller behavior, evidence and outstanding custody.",
+      "issue_url": null,
+      "id": "H-01",
+      "epic": "OA-H",
+      "title": "Honor supplied strict schemas in the OpenAI Responses adapter",
+      "priority": 0,
+      "planning_packets": [],
+      "dependencies": [],
+      "paths": [
+        "Agentica.Clients/OpenAI/OpenAiResponsesLlmClient.cs",
+        "Agentica.Clients/Llm/LlmStructuredOutputOptions.cs",
+        "Agentica.Clients.Tests/OpenAiResponsesLlmClientTests.cs"
+      ],
+      "outcome": "Qualify and implement actual schema projection when a caller supplies a JSON schema; current committed source parses it but sends json_object.",
+      "acceptance": [
+        "Verify the current official API contract before choosing the exact wire shape.",
+        "Inspect outgoing HTTP to prove supplied name/schema/strict semantics reach Responses without silently downgrading to JSON-object mode.",
+        "Preserve JSON-only behavior when no schema is requested and reject unsupported schema/profile combinations explicitly.",
+        "Exercise structured initial/refinement plans, malformed schemas, refusals, incomplete output, streaming and cancellation with deterministic HTTP fixtures.",
+        "Keep store:false, opaque continuation custody and explicit host-side semantic validation."
+      ],
+      "boundaries": [
+        "No Bridge memory integration, hidden repair/retry, unsupported universal schema support claim or live-provider pass inferred from fixtures."
+      ],
+      "publication_action": "create",
+      "source_keys": [
+        "memory-provider-proposal"
+      ],
+      "current_gap": "OpenAiResponsesLlmClient.BuildRequestBody emits text.format.type=json_object even with StructuredOutput.JsonSchema."
+    },
+    {
+      "repository": "zekenaulty/Agentica",
+      "workflow_state": "unclaimed",
+      "claim_owner": null,
+      "workspace": null,
+      "evidence_level": "source-review; implementation and execution not yet qualified",
+      "migration": "No production migration. Any sample state is disposable; version retained formats before changing them.",
+      "rollback": "Revert the bounded opt-in change; preserve existing caller behavior, evidence and outstanding custody.",
+      "issue_url": null,
+      "id": "H-02",
+      "epic": "OA-H",
+      "title": "Make provider usage inclusion and billable totals explicit",
+      "priority": 0,
+      "planning_packets": [],
+      "dependencies": [],
+      "paths": [
+        "Agentica.Clients/Llm/LlmUsage.cs",
+        "Agentica.Clients/OpenAI/OpenAiResponsesLlmClient.cs",
+        "Agentica.Clients/Gemini/GeminiResponseMapper.cs",
+        "Agentica.Clients/Anthropic/AnthropicMessagesLlmClient.cs",
+        "Agentica.Clients/Ollama/OllamaLlmClient.cs",
+        "Agentica.Clients/Xai/XaiResponsesLlmClient.cs",
+        "Agentica.Clients.Tests/"
+      ],
+      "outcome": "Publish provider-specific usage semantics so consumers cannot double-count reasoning or interpret missing usage as zero.",
+      "acceptance": [
+        "Retain provider output/total/cached counts and explain whether reasoning is a subset or an additional category.",
+        "Provide an explicit normalized visible-output quantity or equivalent documented projection without silently changing existing OutputTokens meaning.",
+        "For OpenAI, count billed output once while preserving reported reasoning as its subset; test absent, partial and inconsistent usage safely.",
+        "Qualify Gemini separate candidate/thought behavior and explicitly mark unsupported or unknown fields for other adapters.",
+        "Do not fabricate dollars or apply stale price tables; consumer pricing/admission stays host-owned."
+      ],
+      "boundaries": [
+        "No Bridge ledger changes, inferred thought cost from signature bytes, model pricing service or hidden retries."
+      ],
+      "publication_action": "create",
+      "source_keys": [
+        "memory-provider-proposal"
+      ],
+      "current_gap": "LlmUsage exposes OutputTokens and ThinkingTokens without provider inclusion semantics; OpenAI maps output_tokens plus its reasoning subset."
+    },
+    {
+      "repository": "zekenaulty/Agentica",
+      "workflow_state": "unclaimed",
+      "claim_owner": null,
+      "workspace": null,
+      "evidence_level": "source-review; implementation and execution not yet qualified",
+      "migration": "No production migration. Any sample state is disposable; version retained formats before changing them.",
+      "rollback": "Revert the bounded opt-in change; preserve existing caller behavior, evidence and outstanding custody.",
+      "issue_url": null,
+      "id": "H-03",
+      "epic": "OA-H",
+      "title": "Expose persistent MCP binding and current readiness separately",
+      "priority": 1,
+      "planning_packets": [],
+      "dependencies": [],
+      "paths": [
+        "Agentica.Mcp/McpToolBinding.cs",
+        "Agentica.Mcp/McpToolCatalogAdapter.cs",
+        "Agentica.Mcp/SdkMcpToolTransport.cs",
+        "Agentica.Tests/McpToolCatalogAdapterTests.cs",
+        "docs/host-binding-authority.md"
+      ],
+      "outcome": "Keep trusted binding configuration inspectable through dependency outages while preventing unavailable or drifted implementations from dispatching.",
+      "acceptance": [
+        "Return a bounded status projection distinguishing installed/bound, applicable, runtime-ready and integrity/drift disposition.",
+        "A discovery/connection failure does not silently delete host-owned binding configuration.",
+        "Schema/server mismatch blocks dispatch with an explicit reason; recovery revalidates the same pin before readiness returns.",
+        "No invocation on unavailable or unbound candidates; no repeated approval for selection within a standing bound grant.",
+        "Preserve the existing strict BindAsync behavior for compatibility or add an explicit opt-in composition path."
+      ],
+      "boundaries": [
+        "No production MCP server, remote credential sharing, standard MCP permission extension or automatic rebinding to drifted schema."
+      ],
+      "publication_action": "create",
+      "source_keys": [
+        "approved-refinement",
+        "long-horizon"
+      ],
+      "current_gap": "BindAsync requires successful discovery and returns only ready registrations or throws; no separate binding/readiness projection exists."
+    },
+    {
+      "repository": "zekenaulty/Agentica",
+      "workflow_state": "unclaimed",
+      "claim_owner": null,
+      "workspace": null,
+      "evidence_level": "source-review; implementation and execution not yet qualified",
+      "migration": "No production migration. Any sample state is disposable; version retained formats before changing them.",
+      "rollback": "Revert the bounded opt-in change; preserve existing caller behavior, evidence and outstanding custody.",
+      "issue_url": null,
+      "id": "R-01",
+      "epic": "OA-R",
+      "title": "Prove exact interpretation reuse and shared-attempt custody in the learning host",
+      "priority": 2,
+      "planning_packets": [],
+      "dependencies": [
+        "C-02",
+        "N-02"
+      ],
+      "paths": [
+        "samples/Agentica.NyxLearningHost/Reuse/",
+        "Agentica.Tests/NyxLearningReuseTests.cs",
+        "docs/learning/interpretation-reuse.md"
+      ],
+      "outcome": "Demonstrate host-owned exact reuse independently of Bridge production cache work.",
+      "acceptance": [
+        "Equivalent exact manifest resolves one validated artifact; each consumer independently accepts it and receives a separate receipt.",
+        "Concurrent identical misses share one dispatch with truthful pending/ready/unavailable/indeterminate states.",
+        "Before/after dispatch interruption and cancellation retain original attempt and cumulative allowance; one waiter cannot discard another's eligible work.",
+        "Source/perspective/scope/question/policy changes invalidate reuse; a new relevant corpus source invalidates prior completeness/absence even if selected sources are unchanged.",
+        "A warm compatible hit performs zero additional synthesis calls; report lookup/revalidation/invalidation/recovery cost."
+      ],
+      "boundaries": [
+        "No cross-scope/fuzzy answer cache, core persistence, production Bridge cache migration or claimed percentage improvement."
+      ],
+      "publication_action": "create",
+      "source_keys": [
+        "epic-plan",
+        "post-thesis",
+        "long-horizon"
+      ],
+      "external_dependencies": [
+        "OA-03/OA-07/OA-08/OA-09/OA-10 remain Bridge-owned future adoption work; isolated Agentica proof does not close them."
+      ]
+    },
+    {
+      "repository": "zekenaulty/Agentica",
+      "workflow_state": "research-backlog",
+      "claim_owner": null,
+      "workspace": null,
+      "evidence_level": "source-review; implementation and execution not yet qualified",
+      "migration": "No production migration. Any sample state is disposable; version retained formats before changing them.",
+      "rollback": "Revert the bounded opt-in change; preserve existing caller behavior, evidence and outstanding custody.",
+      "issue_url": null,
+      "id": "R-02",
+      "epic": "OA-R",
+      "title": "Specify and compare recovery projections before adding interpreter calls",
+      "priority": 3,
+      "planning_packets": [],
+      "dependencies": [
+        "C-02",
+        "N-02"
+      ],
+      "paths": [
+        "docs/learning/cognitive-recovery-comparison.md",
+        "samples/Agentica.NyxLearningHost/Comparison/",
+        "Agentica.Tests/NyxLearningRecoveryTests.cs"
+      ],
+      "outcome": "Test whether selected exact evidence or one bounded recovery interpretation helps resume a failed obligation; keep the proposal separate from native continuation and effect truth.",
+      "acceptance": [
+        "Freeze one committed source/journal cut and retain missing/unavailable coverage explicitly.",
+        "Compare checkpoint+receipts, compatible native replay, exact selected evidence, and bounded interpreted recovery under matched acceptance.",
+        "Unknown effects remain unresolved and are reconciled before any retry; interpretation cannot supply effect confirmation.",
+        "Any candidate identifies supported/provisional/refuted positions and residual requirements with exact presented-source references.",
+        "Add no extra model activation by default; only promote a measured useful strategy under its declared budget."
+      ],
+      "boundaries": [
+        "No raw hidden reasoning reconstruction, production observer, bulk operational trace export, automatic policy promotion or mandatory recovery model."
+      ],
+      "publication_action": "create",
+      "source_keys": [
+        "recovery-proposal"
+      ]
+    },
+    {
+      "repository": "zekenaulty/Agentica",
+      "workflow_state": "existing-issue",
+      "claim_owner": null,
+      "workspace": null,
+      "evidence_level": "source-review; implementation and execution not yet qualified",
+      "migration": "No production migration. Any sample state is disposable; version retained formats before changing them.",
+      "rollback": "Revert the bounded opt-in change; preserve existing caller behavior, evidence and outstanding custody.",
+      "issue_url": "https://github.com/zekenaulty/Agentica/issues/10",
+      "id": "Q-01",
+      "epic": "OA-Q",
+      "title": "Audit provider default model profiles and preserve truthful parity levels",
+      "priority": 1,
+      "planning_packets": [],
+      "dependencies": [],
+      "paths": [
+        "Agentica.Clients/*/*ClientOptions.cs",
+        "Agentica.Lab.Web/Providers/LabPlannerFactory.cs",
+        "docs/provider-capability-matrix.md",
+        "Agentica.Clients.Tests/"
+      ],
+      "outcome": "Use existing issue #10 for defaults and, if appropriate, amend its bounded profile matrix rather than creating a duplicate.",
+      "acceptance": [
+        "Verify changing defaults against current official provider documentation and preserve exact caller overrides.",
+        "Inventory OpenAI, Gemini Interactions, selectable GenerateContent, Anthropic, Grok and Ollama for schema projection, streaming, cancellation, continuation and usage.",
+        "Prove first useful event precedes completion in deterministic streaming seams, with no synthetic thought events.",
+        "Keep stateless defaults and private provider/model-bound native state; incompatible state resets explicitly.",
+        "Record offline, installed and live status separately; deferred live providers remain unqualified."
+      ],
+      "boundaries": [
+        "No claim of equal provider capabilities, mandatory live spend or Bridge/Cloud modifications."
+      ],
+      "publication_action": "link-existing",
+      "source_keys": [
+        "post-thesis",
+        "long-horizon",
+        "memory-provider-proposal"
+      ]
+    },
+    {
+      "repository": "zekenaulty/Agentica",
+      "workflow_state": "unclaimed",
+      "claim_owner": null,
+      "workspace": null,
+      "evidence_level": "source-review; implementation and execution not yet qualified",
+      "migration": "No production migration. Any sample state is disposable; version retained formats before changing them.",
+      "rollback": "Revert the bounded opt-in change; preserve existing caller behavior, evidence and outstanding custody.",
+      "issue_url": null,
+      "id": "Q-02",
+      "epic": "OA-Q",
+      "title": "Publish Agentica paired contract and learning qualification matrix",
+      "priority": 1,
+      "planning_packets": [
+        "OA-12 (Agentica-only contribution)"
+      ],
+      "dependencies": [
+        "C-02",
+        "N-02",
+        "N-03"
+      ],
+      "paths": [
+        "docs/qualification/obligation-activation-v1.md",
+        "Agentica.Tests/ObligationHostConformanceTests.cs"
+      ],
+      "outcome": "Record exact contract/source/fixture pins and behavior-level PASS/FAIL/UNKNOWN across the reusable Agentica slice.",
+      "acceptance": [
+        "Both exact-source grounding and effectful continuation use the same optional contracts and independently checked host acceptance.",
+        "Record source attribution, partial coverage, wrong perspective, invalid references, stale dependencies and unknown-effect custody countercases.",
+        "Measure matched cold/warm context, provider calls/tokens where actually available, time to first useful observed event and accepted fulfillment.",
+        "Include invalidation/restart overhead; do not infer savings or intelligence from scripted fixtures.",
+        "Explicitly keep full Bridge paired-caller/cache enablement, installed behavior and deferred live evidence UNKNOWN."
+      ],
+      "boundaries": [
+        "No closure of full OA-12, deployment, authentic Bridge user acceptance or unsupported performance guarantee."
+      ],
+      "publication_action": "create",
+      "source_keys": [
+        "epic-plan",
+        "long-horizon"
+      ],
+      "external_dependencies": [
+        "Full OA-12 depends on future Bridge OA-07/OA-09/OA-10/OA-11 evidence and is outside this assignment."
+      ]
+    },
+    {
+      "repository": "zekenaulty/Agentica",
+      "workflow_state": "unclaimed",
+      "claim_owner": null,
+      "workspace": null,
+      "evidence_level": "source-review; implementation and execution not yet qualified",
+      "migration": "No production migration. Any sample state is disposable; version retained formats before changing them.",
+      "rollback": "Revert the bounded opt-in change; preserve existing caller behavior, evidence and outstanding custody.",
+      "issue_url": null,
+      "id": "Q-03",
+      "epic": "OA-Q",
+      "title": "Reconcile product status, roadmap and local contributor entry points",
+      "priority": 0,
+      "planning_packets": [],
+      "dependencies": [],
+      "paths": [
+        "docs/Agentica.ProductStatus.md",
+        "docs/Agentica.RuntimeContracts.md",
+        "docs/Agentica.TypedObligationActivation.Direction.md",
+        "AGENTS.md",
+        ".agents/skills/agentica-work-learning/",
+        ".agents/learning/",
+        "docs/reconciliation/2026-11-03/"
+      ],
+      "outcome": "Publish one current source-grounded roadmap and preserve useful unmerged Agentica-local guidance after Git custody reconciliation.",
+      "acceptance": [
+        "Separate historical 100% bounded programs from current Incubating lifecycle and long-horizon gates.",
+        "Reconcile the stale deferred MCP client entry with its implemented client/SDK acceptance and explicitly defer production server work.",
+        "Link actual new/existing issues and PR dispositions, current source pins and the five group storyboards.",
+        "Review dirty/local-only guidance before bounded import; preserve source provenance and avoid copying runtime truth from design prose.",
+        "Keep all writes Agentica-local; no global skill/memory or other repository changes."
+      ],
+      "boundaries": [
+        "No wholesale rewrite of historical goals, claims of production readiness or mutation of other agents' checkouts."
+      ],
+      "publication_action": "create",
+      "source_keys": [
+        "epic-plan",
+        "approved-refinement"
+      ],
+      "current_gap": "ProductStatus dated October9 still lists all MCP client/server adapters as deferred despite client implementation; primary checkout guidance includes unmerged local additions."
+    },
+    {
+      "repository": "zekenaulty/Agentica",
+      "workflow_state": "unclaimed",
+      "claim_owner": null,
+      "workspace": null,
+      "evidence_level": "source-review; implementation and execution not yet qualified",
+      "migration": "No production migration. Any sample state is disposable; version retained formats before changing them.",
+      "rollback": "Revert the bounded opt-in change; preserve existing caller behavior, evidence and outstanding custody.",
+      "issue_url": null,
+      "id": "N-01",
+      "epic": "OA-N",
+      "title": "Pin synthetic Nyx reference behavior, ownership and falsification corpus",
+      "priority": 0,
+      "planning_packets": [
+        "NL-01"
+      ],
+      "dependencies": [],
+      "paths": [
+        "docs/learning/nyx-reference-baseline.md",
+        "Agentica.Tests/Fixtures/NyxLearning/"
+      ],
+      "outcome": "Capture a reproducible reference and three synthetic cases without changing Nyx or importing participant data.",
+      "acceptance": [
+        "Record historical Bridge source cut and current Agentica pins, combined-versus-proposed topology and owner map without claiming current Bridge deployment knowledge.",
+        "Include historical-lineage interpretation, exact-document grounding with unavailable preferred connector, and effectful continuation with lost acknowledgment.",
+        "Each fixture declares obligation/acceptance revision, speaker/perspective, exact ordered evidence/coverage, bound capability, resource horizon, expected residual work and effect custody.",
+        "Add a thought-test hypothesis with supporting and disconfirming evidence; distinguish model assessment from host fact.",
+        "Version and hash fixtures; reproducing them needs no production data, credentials or other repository mutation."
+      ],
+      "boundaries": [
+        "No production observer, Nyx Lab setting/storage/routing changes or automatic reflection-to-policy learning."
+      ],
+      "publication_action": "create",
+      "source_keys": [
+        "epic-plan",
+        "long-horizon",
+        "memory-provider-proposal"
+      ]
+    },
+    {
+      "repository": "zekenaulty/Agentica",
+      "workflow_state": "unclaimed",
+      "claim_owner": null,
+      "workspace": null,
+      "evidence_level": "source-review; implementation and execution not yet qualified",
+      "migration": "No production migration. Any sample state is disposable; version retained formats before changing them.",
+      "rollback": "Revert the bounded opt-in change; preserve existing caller behavior, evidence and outstanding custody.",
+      "issue_url": null,
+      "id": "N-02",
+      "epic": "OA-N",
+      "title": "Run an isolated comparative learning host through the full Agentica loop",
+      "priority": 1,
+      "planning_packets": [
+        "NL-02"
+      ],
+      "dependencies": [
+        "C-01",
+        "N-01"
+      ],
+      "paths": [
+        "samples/Agentica.NyxLearningHost/Comparison/",
+        "Agentica.Tests/NyxLearningHarnessTests.cs"
+      ],
+      "outcome": "Compare pinned reference semantics with an Agentica candidate using independent disposable state and fake provider/recorded tool evidence.",
+      "acceptance": [
+        "Exercise observe/decide/act/result/update/continue to host acceptance or explicit residual/indeterminate outcome, rather than a one-shot mock.",
+        "Keep exact source attribution, perspective separation, corrections, partial coverage and original attempts across activations.",
+        "Inert reference/shadow proposals have no production dispatch credentials, canonical effects, speech delivery or memory promotion.",
+        "Report acceptance errors, false reuse, context/call counts and actual event timing against matched horizons.",
+        "Produce source-linked regression cases; no unmeasured percentage saving or live-model quality claim."
+      ],
+      "boundaries": [
+        "No current Nyx Lab changes, new core scheduler, fuzzy cross-domain reuse or implicit paid experiments."
+      ],
+      "publication_action": "create",
+      "source_keys": [
+        "epic-plan",
+        "long-horizon"
+      ]
+    },
+    {
+      "repository": "zekenaulty/Agentica",
+      "workflow_state": "unclaimed",
+      "claim_owner": null,
+      "workspace": null,
+      "evidence_level": "source-review; implementation and execution not yet qualified",
+      "migration": "No production migration. Any sample state is disposable; version retained formats before changing them.",
+      "rollback": "Revert the bounded opt-in change; preserve existing caller behavior, evidence and outstanding custody.",
+      "issue_url": null,
+      "id": "N-03",
+      "epic": "OA-N",
+      "title": "Prove a historical-evidence faculty over in-process and actual MCP paths",
+      "priority": 1,
+      "planning_packets": [
+        "NL-03"
+      ],
+      "dependencies": [
+        "C-01",
+        "N-01"
+      ],
+      "paths": [
+        "samples/Agentica.NyxLearningHost/Mcp/",
+        "Agentica.Tests/NyxFacultyMcpConformanceTests.cs",
+        "docs/learning/nyx-faculty-contract.md"
+      ],
+      "outcome": "Extend the existing bound MCP acceptance pattern to one isolated exact historical-evidence contract.",
+      "acceptance": [
+        "Pin server/implementation, negotiated protocol, descriptor/input/output revisions and host semantic requires/produces/applies/effects.",
+        "Equivalent in-process and SDK client/server calls return exact typed evidence, source/coverage, unavailable and error meaning.",
+        "Unbound tools, changed schema/identity and out-of-scope source IDs never dispatch.",
+        "Exercise structured results, cancellation, server restart and binding-preserving unavailable disposition; distinguish transport progress from actual provider stream.",
+        "Use existing Agentica.Mcp/native faculty adapter and record compatibility with the pinned SDK rather than inferring support from its package version."
+      ],
+      "boundaries": [
+        "No production server/catalog, invented standard MCP acceptance/permission fields, shared secrets or Bridge writes."
+      ],
+      "publication_action": "create",
+      "source_keys": [
+        "epic-plan",
+        "long-horizon"
+      ],
+      "current_gap": "Existing lookup SDK fixture proves generic MCP execution, not this historical faculty contract."
+    },
+    {
+      "repository": "zekenaulty/Agentica",
+      "workflow_state": "unclaimed",
+      "claim_owner": null,
+      "workspace": null,
+      "evidence_level": "source-review; implementation and execution not yet qualified",
+      "migration": "No production migration. Any sample state is disposable; version retained formats before changing them.",
+      "rollback": "Revert the bounded opt-in change; preserve existing caller behavior, evidence and outstanding custody.",
+      "issue_url": null,
+      "id": "N-04",
+      "epic": "OA-N",
+      "title": "Compose an independently runnable historical-review cognition seam",
+      "priority": 2,
+      "planning_packets": [
+        "NL-04"
+      ],
+      "dependencies": [
+        "C-02",
+        "N-02",
+        "N-03"
+      ],
+      "paths": [
+        "samples/Agentica.NyxLearningHost/Adapters/",
+        "samples/Agentica.NyxLearningHost/Program.cs",
+        "Agentica.Tests/NyxStandaloneSeamTests.cs"
+      ],
+      "outcome": "Provide an isolated Agentica-backed exact-manifest review seam with validated interpretation and per-consumer fulfillment.",
+      "acceptance": [
+        "Starts, stops and restarts with independent disposable state/configuration and no other host database access.",
+        "Uses one existing runner/provider boundary; exact presented evidence and candidate validation stay separate from consumer acceptance.",
+        "Record real emitted events during fixture calls; native signatures remain opaque/private.",
+        "Expose five provider seams with honest unsupported controls; Gemini defaults Interactions and allows GenerateContent on demand.",
+        "Source-qualified reuse must retain truthful attempt/cache state and warm zero-synthesis behavior before enablement."
+      ],
+      "boundaries": [
+        "No production data migration, current Nyx replacement, whole CompanionRuntime rewrite or paid/live qualification by implication."
+      ],
+      "publication_action": "create",
+      "source_keys": [
+        "epic-plan",
+        "long-horizon"
+      ],
+      "enablement_dependencies": [
+        "R-01 before claiming warm reuse; Q-02 evidence before promoting the standalone slice."
+      ]
+    },
+    {
+      "repository": "zekenaulty/Agentica",
+      "workflow_state": "implemented-on-pr",
+      "claim_owner": null,
+      "workspace": null,
+      "evidence_level": "source reviewed on 785040e; root owns fresh review/CI qualification",
+      "migration": "No production migration. Any sample state is disposable; version retained formats before changing them.",
+      "rollback": "Revert the bounded opt-in change; preserve existing caller behavior, evidence and outstanding custody.",
+      "issue_url": "https://github.com/zekenaulty/Agentica/pull/11",
+      "id": "Q-04",
+      "epic": "OA-Q",
+      "title": "Integrate existing clean-room chat and scoped recall work",
+      "priority": 0,
+      "planning_packets": [],
+      "dependencies": [],
+      "paths": [
+        "Agentica.Lab.Web/Chat/",
+        "Agentica.Lab.Web/wwwroot/chat.*",
+        "Agentica.Lab.Web.Tests/Experiment*",
+        "docs/lab-experimental-chat.md"
+      ],
+      "outcome": "Link PR #11 and its exact-head review/CI; preserve the completed Lab feature rather than recreate it.",
+      "acceptance": [
+        "Review current head, unresolved review comments, scope and exact-head CI before merging.",
+        "Preserve blank instructions/default recall-off/memory-off, per-conversation persistence/isolation and explicit Harness condition.",
+        "Retain native complete-request token admission, count-only context check, exact historical source readback and the full actual runner recall proof.",
+        "Retain safe Markdown rendering and collapsed trace trees; no text/provider-wire changes from display.",
+        "Report current offline/browser/live evidence from PR qualification without treating it as OA/NL implementation."
+      ],
+      "boundaries": [
+        "No automatic merge based solely on prior CI or claim that Clean Room direct responses exercise the Harness."
+      ],
+      "publication_action": "link-existing-pr"
+    },
+    {
+      "repository": "zekenaulty/Agentica",
+      "workflow_state": "merged-substrate",
+      "claim_owner": null,
+      "workspace": null,
+      "evidence_level": "committed source 977d0ca; historical deterministic qualification documented, not rerun here",
+      "migration": "No production migration. Any sample state is disposable; version retained formats before changing them.",
+      "rollback": "Revert the bounded opt-in change; preserve existing caller behavior, evidence and outstanding custody.",
+      "issue_url": "https://github.com/zekenaulty/Agentica/pull/9",
+      "id": "Q-05",
+      "epic": "OA-Q",
+      "title": "Retain shipped reusable Lab host, park/wake and thought-test proof",
+      "priority": 1,
+      "planning_packets": [],
+      "dependencies": [],
+      "paths": [
+        "Agentica.Lab.Web/Runtime/",
+        "Agentica.Lab.Web/Context/",
+        "Agentica.Lab.Web/wwwroot/sdk/agentica-host.mjs",
+        "docs/durable-host-operations.md",
+        "docs/lab-thought-testing.md"
+      ],
+      "outcome": "Link already merged PRs #7, #8 and #9 as implementation substrate and historical qualification.",
+      "acceptance": [
+        "Treat durable host operation, bounded execution window and objective as separate lifetimes.",
+        "Preserve original action custody, late result reconciliation, idempotent semantic wake and cumulative usage.",
+        "Keep sourced hypothesis assessments distinct from host observations and completion proof.",
+        "Future learning work must reuse these seams where applicable and name any actual contract delta."
+      ],
+      "boundaries": [
+        "No new implementation issue for already shipped scope; no Maze Battle changes or stronger exactly-once guarantee."
+      ],
+      "publication_action": "record-existing",
+      "related_urls": [
+        "https://github.com/zekenaulty/Agentica/pull/7",
+        "https://github.com/zekenaulty/Agentica/pull/8"
+      ]
+    },
+    {
+      "repository": "zekenaulty/Agentica",
+      "workflow_state": "implemented-substrate",
+      "claim_owner": null,
+      "workspace": null,
+      "evidence_level": "committed source 977d0ca; no new test run in reconciliation",
+      "migration": "No production migration. Any sample state is disposable; version retained formats before changing them.",
+      "rollback": "Revert the bounded opt-in change; preserve existing caller behavior, evidence and outstanding custody.",
+      "issue_url": null,
+      "id": "Q-06",
+      "epic": "OA-Q",
+      "title": "Retain existing domain perspective projection as the routing substrate",
+      "priority": 1,
+      "planning_packets": [],
+      "dependencies": [],
+      "paths": [
+        "Agentica/Projection/SemanticProjectionCatalog.cs",
+        "Agentica/Projection/SemanticProjectionCompiler.cs",
+        "Agentica/Projection/SemanticPlanningFrameProjector.cs",
+        "Agentica.Tests/SemanticProjectionTests.cs",
+        "docs/semantic-projection.md"
+      ],
+      "outcome": "Record the implemented AI.Forge-derived semantic projection instead of creating a duplicate Domain of Domains graph project.",
+      "acceptance": [
+        "Reuse scope-before-ranking/traversal, inherited sparse perspective facets, exact vector SpaceId, bounded projection and deterministic hashes.",
+        "Concept changes remain proposals requiring current host authority and revision checks.",
+        "SemanticBinding is an opaque graph reference, distinct from an installed ToolRegistration/standing effect grant.",
+        "Only implement additional routing semantics when C-02/N-02 expose a concrete gap."
+      ],
+      "boundaries": [
+        "No automatic ontology learner, new vector database, six router services or claim that graph projection is dynamic skill execution."
+      ],
+      "publication_action": "record-existing"
+    }
+  ],
+  "external_packets": [
+    {
+      "id": "OA-03",
+      "owner": "zekenaulty/Raistlin-Bridge",
+      "state": "external-deferred",
+      "action": "Storyboard dependency/research context only; no new Bridge issue, code, migration, setting or deployment under this assignment.",
+      "qualification": "October4 findings require fresh owner-side reconciliation; October15 says parts of OA-04 were already overtaken."
+    },
+    {
+      "id": "OA-04",
+      "owner": "zekenaulty/Raistlin-Bridge",
+      "state": "external-deferred",
+      "action": "Storyboard dependency/research context only; no new Bridge issue, code, migration, setting or deployment under this assignment.",
+      "qualification": "October4 findings require fresh owner-side reconciliation; October15 says parts of OA-04 were already overtaken."
+    },
+    {
+      "id": "OA-05",
+      "owner": "zekenaulty/Raistlin-Bridge",
+      "state": "external-deferred",
+      "action": "Storyboard dependency/research context only; no new Bridge issue, code, migration, setting or deployment under this assignment.",
+      "qualification": "October4 findings require fresh owner-side reconciliation; October15 says parts of OA-04 were already overtaken."
+    },
+    {
+      "id": "OA-06",
+      "owner": "zekenaulty/Raistlin-Bridge",
+      "state": "external-deferred",
+      "action": "Storyboard dependency/research context only; no new Bridge issue, code, migration, setting or deployment under this assignment.",
+      "qualification": "October4 findings require fresh owner-side reconciliation; October15 says parts of OA-04 were already overtaken."
+    },
+    {
+      "id": "OA-07",
+      "owner": "zekenaulty/Raistlin-Bridge",
+      "state": "external-deferred",
+      "action": "Storyboard dependency/research context only; no new Bridge issue, code, migration, setting or deployment under this assignment.",
+      "qualification": "October4 findings require fresh owner-side reconciliation; October15 says parts of OA-04 were already overtaken."
+    },
+    {
+      "id": "OA-08",
+      "owner": "zekenaulty/Raistlin-Bridge",
+      "state": "external-deferred",
+      "action": "Storyboard dependency/research context only; no new Bridge issue, code, migration, setting or deployment under this assignment.",
+      "qualification": "October4 findings require fresh owner-side reconciliation; October15 says parts of OA-04 were already overtaken."
+    },
+    {
+      "id": "OA-09",
+      "owner": "zekenaulty/Raistlin-Bridge",
+      "state": "external-deferred",
+      "action": "Storyboard dependency/research context only; no new Bridge issue, code, migration, setting or deployment under this assignment.",
+      "qualification": "October4 findings require fresh owner-side reconciliation; October15 says parts of OA-04 were already overtaken."
+    },
+    {
+      "id": "OA-10",
+      "owner": "zekenaulty/Raistlin-Bridge",
+      "state": "external-deferred",
+      "action": "Storyboard dependency/research context only; no new Bridge issue, code, migration, setting or deployment under this assignment.",
+      "qualification": "October4 findings require fresh owner-side reconciliation; October15 says parts of OA-04 were already overtaken."
+    },
+    {
+      "id": "OA-11",
+      "owner": "zekenaulty/Raistlin-Bridge",
+      "state": "external-deferred",
+      "action": "Storyboard dependency/research context only; no new Bridge issue, code, migration, setting or deployment under this assignment.",
+      "qualification": "October4 findings require fresh owner-side reconciliation; October15 says parts of OA-04 were already overtaken."
+    },
+    {
+      "id": "OA-12",
+      "owner": "Agentica plus paired external host",
+      "state": "partial-agentica-contribution",
+      "action": "Q-02 qualifies Agentica-only semantics. Full paired-caller/cache enablement remains dependent on future Bridge evidence."
+    },
+    {
+      "id": "NL-05",
+      "owner": "future selected Nyx/Bridge host",
+      "state": "external-deferred",
+      "action": "Requires later exclusive routing/custody/rollback qualification; no live adoption here."
+    },
+    {
+      "id": "NL-06",
+      "owner": "future selected Nyx/Bridge host",
+      "state": "external-deferred",
+      "action": "Requires NL-05 operational acceptance and discharged custody/rollback obligations; no route retirement here."
+    }
+  ],
+  "research_not_current_implementation": [
+    {
+      "topic": "JIT conditional speculation",
+      "source_key": "jit-proposal",
+      "state": "future-design",
+      "action": "Keep the reviewed missing seams recorded. Do not fold speculative turn promotion into the existing Maze proving ground or change Maze Battle."
+    },
+    {
+      "topic": "Runtime-editable skill/workflow IR",
+      "state": "long-horizon",
+      "action": "Use C-03 evidence before new shared representation; no generic execution substrate project is required now."
+    },
+    {
+      "topic": "Nyx memory provider adoption",
+      "source_key": "memory-provider-proposal",
+      "state": "external-proposal",
+      "action": "H-01/H-02 and Q-01 remove Agentica-side prerequisites. Provider transmission, paid custody, integration and actual canonical admission stay with the future owner-host task."
+    }
+  ],
+  "top_implementation_choices": [
+    {
+      "id": "C-01",
+      "parallel_with": "N-01",
+      "reason": "The governing plan's first independent wave creates the reusable contract and falsification corpus without another host dependency."
+    },
+    {
+      "id": "H-01",
+      "reason": "Current source demonstrably ignores the supplied schema on the OpenAI wire; strict-output qualification is a small generic prerequisite for serious host use."
+    },
+    {
+      "id": "H-02",
+      "reason": "Cross-provider consumers need explicit reasoning inclusion semantics before cost/accounting integration; preserve raw counts and avoid silent API reinterpretation."
+    }
+  ]
+}

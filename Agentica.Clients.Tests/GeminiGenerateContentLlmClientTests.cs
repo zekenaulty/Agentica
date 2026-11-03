@@ -32,7 +32,10 @@ public sealed class GeminiGenerateContentLlmClientTests
         using var continuation = Assert.IsType<LlmNativeContinuation>(response.NativeContinuation);
         Assert.Equal("hello", response.Text);
         Assert.Equal(LlmFinishReason.Stop, response.FinishReason);
-        Assert.Equal(new LlmUsage(11, 2, 3, 16, 1), response.Usage);
+        Assert.Equal(new LlmUsage(11, 2, 3, 16, 1)
+        { OutputTokenSemantics = LlmOutputTokenSemantics.ExcludesThinking }, response.Usage);
+        Assert.Equal(2, response.Usage?.NonThinkingOutputTokens);
+        Assert.Equal(5, response.Usage?.GeneratedOutputTokens);
         Assert.Contains(events, item => item.Kind == LlmStreamEventKind.Activity && item.Text == "thinking");
         Assert.Equal(includeThoughts ? 1 : 0, events.Count(item => item.Kind == LlmStreamEventKind.ThoughtSummaryDelta));
         Assert.Equal(includeThoughts ? 1 : 0, response.ThoughtSummaries!.Count);

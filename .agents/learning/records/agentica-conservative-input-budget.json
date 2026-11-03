@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "id": "agentica-conservative-input-budget",
+  "scope": "agentica",
+  "kind": "technical",
+  "status": "accepted",
+  "title": "Size compiled mandatory context before a paid run",
+  "trigger": "context window small world mandatory planning context input budget provider failure",
+  "guidance": "Check the compiled input allowance and estimator before assuming a small domain observation fits. The reviewed default reserves output, tool results and safety, and estimates serialized UTF-8 request bytes plus overhead rather than provider tokens. Mandatory instructions, tool schemas and output schemas can exhaust it before any HTTP request. The same failure also covers the independent character ceiling; measure which gate fails before choosing a repair.",
+  "evidence": [
+    {
+      "kind": "source_review",
+      "reference": "Agentica.Clients/Planning/PlanningPromptCompiler.cs",
+      "revision": "27cb2ce9717438edfe19487e3920faa183112c97"
+    },
+    {
+      "kind": "source_review",
+      "reference": "Agentica.Clients/Planning/LlmContextWindowBudget.cs",
+      "revision": "27cb2ce9717438edfe19487e3920faa183112c97"
+    }
+  ],
+  "recheck": "Read the current estimator/reserve configuration. A source inspection proves the gate, not an exact prompt size or the smallest sufficient new window.",
+  "tags": [
+    "context",
+    "budget",
+    "provider",
+    "compilation",
+    "preflight"
+  ],
+  "recorded_on": "2026-10-29"
+}

@@ -49,13 +49,18 @@ public sealed class OpenAiResponsesLlmClientTests
              new LlmMessage(LlmMessageRole.User, "How many?")],
             new LlmGenerationOptions(MaxOutputTokens: 128,
                 Thinking: LlmThinkingOptions.AtEffort(LlmReasoningEffort.High, includeThoughts: true)),
-            new LlmStructuredOutputOptions(JsonSchema: "{\"type\":\"object\"}"));
+            new LlmStructuredOutputOptions());
         var events = new List<LlmStreamEvent>();
         await foreach (var item in client.StreamAsync(firstRequest)) events.Add(item);
         var first = Assert.IsType<LlmResponse>(events[^1].Response);
         Assert.Equal("four", first.Text);
         Assert.Equal(6, first.Usage?.ThinkingTokens);
         Assert.Equal(2, first.Usage?.CachedPromptTokens);
+        Assert.Equal(LlmOutputTokenSemantics.IncludesThinking, first.Usage?.OutputTokenSemantics);
+        Assert.Equal(10, first.Usage?.OutputTokens);
+        Assert.Equal(4, first.Usage?.NonThinkingOutputTokens);
+        Assert.Equal(10, first.Usage?.GeneratedOutputTokens);
+        Assert.Equal(18, first.Usage?.TotalTokens);
         Assert.Equal([LlmStreamEventKind.Activity,
             LlmStreamEventKind.ThoughtSummaryDelta, LlmStreamEventKind.TextDelta,
             LlmStreamEventKind.Completed], events.Select(item => item.Kind));

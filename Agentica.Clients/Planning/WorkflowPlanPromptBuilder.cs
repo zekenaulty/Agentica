@@ -39,7 +39,7 @@ public static class WorkflowPlanPromptBuilder
         var compiled = PlanningPromptCompiler.Compile(request,
             EffectivePlanningCeiling(options), options,
             SystemInstruction,
-            new LlmStructuredOutputOptions(JsonSchema: WorkflowPlanJsonSchemas.InitialPlan),
+            PlanningOutput(WorkflowPlanJsonSchemas.InitialPlan),
             BuildInitialPrompt);
         return new LlmRequest(
             ModelId: options.ModelId,
@@ -49,8 +49,7 @@ public static class WorkflowPlanPromptBuilder
                 new LlmMessage(LlmMessageRole.User, compiled.Prompt)
             ],
             GenerationOptions: options.GenerationOptions,
-            StructuredOutput: new LlmStructuredOutputOptions(
-                JsonSchema: WorkflowPlanJsonSchemas.InitialPlan),
+            StructuredOutput: PlanningOutput(WorkflowPlanJsonSchemas.InitialPlan),
             Metadata: CreateRequestMetadata(
                 InitialPromptVersion,
                 InitialSchemaVersion,
@@ -71,7 +70,7 @@ public static class WorkflowPlanPromptBuilder
         ValidateTriggerIdentity(request, observation);
         var compiled = PlanningPromptCompiler.Compile(request,
             EffectivePlanningCeiling(options), options, SystemInstruction,
-            new LlmStructuredOutputOptions(JsonSchema: WorkflowPlanJsonSchemas.Refinement),
+            PlanningOutput(WorkflowPlanJsonSchemas.Refinement),
             value => BuildRefinementPrompt(value, observation));
         // The trigger is mandatory even if the compiler removes its duplicate history entry.
         // Preserve all original inclusion decisions and account the trigger's actual rendering.
@@ -90,8 +89,7 @@ public static class WorkflowPlanPromptBuilder
                 new LlmMessage(LlmMessageRole.User, compiled.Prompt)
             ],
             GenerationOptions: options.GenerationOptions,
-            StructuredOutput: new LlmStructuredOutputOptions(
-                JsonSchema: WorkflowPlanJsonSchemas.Refinement),
+            StructuredOutput: PlanningOutput(WorkflowPlanJsonSchemas.Refinement),
             Metadata: CreateRequestMetadata(
                 RefinementPromptVersion,
                 RefinementSchemaVersion,
@@ -101,6 +99,13 @@ public static class WorkflowPlanPromptBuilder
             InputCompilationReceipt = receipt
         };
     }
+
+    private static LlmStructuredOutputOptions PlanningOutput(string schema) => new(JsonSchema: schema)
+    {
+        // Tool inputs remain open objects. Preserve that contract and the schema itself;
+        // the workflow parser, manifest and effect checks remain authoritative.
+        SchemaEnforcement = LlmJsonSchemaEnforcement.BestEffort
+    };
 
     private static void ValidateTriggerIdentity(PlanningRequest request, Observation observation)
     {

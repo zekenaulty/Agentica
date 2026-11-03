@@ -171,24 +171,27 @@ internal static class ChatCommand
         var planner = CreatePlanner(selectedPlanner, options, services);
         await using var mcp = await McpLabRuntime.OpenFromEnvironmentAsync(cancellationToken)
             .ConfigureAwait(false);
+        var artistProfile = ChatArtistPromptProfile.ForPlanner(selectedPlanner,
+            options.ModelId ?? (selectedPlanner == PlannerKind.Ollama
+                ? Environment.GetEnvironmentVariable("OLLAMA_MODEL") : null));
         ILlmClient promptComposer = selectedPlanner == PlannerKind.Ollama
             ? new OllamaLlmClient(OllamaClientOptions.FromEnvironment(
-                options.ModelId ?? Environment.GetEnvironmentVariable("OLLAMA_MODEL")))
+                artistProfile.DefaultModelId))
             : selectedPlanner == PlannerKind.OpenAI
                 ? new OpenAiResponsesLlmClient(OpenAiResponsesClientOptions.FromEnvironment(
-                    options.ModelId ?? "gpt-4.1"))
+                    artistProfile.DefaultModelId!))
             : selectedPlanner == PlannerKind.Anthropic
                 ? new AnthropicMessagesLlmClient(AnthropicMessagesClientOptions.FromEnvironment(
-                    options.ModelId ?? "claude-sonnet-4-6"))
+                    artistProfile.DefaultModelId!))
             : selectedPlanner == PlannerKind.Grok
                 ? new XaiResponsesLlmClient(XaiResponsesClientOptions.FromEnvironment(
-                    options.ModelId ?? "grok-4.7"))
-            : new GeminiLlmClient();
+                    artistProfile.DefaultModelId!))
+            : new GeminiLlmClient(GeminiClientOptions.FromEnvironment(artistProfile.DefaultModelId!));
         var runner = new AgenticaRunner(
             planner,
             ChatTools.CreateCatalog(store, conversation, persona,
                 conversation.WorkspaceRoot,
-                new ChatToolDependencies(promptComposer, new GeminiImageGenerationClient()),
+                new ChatToolDependencies(promptComposer, new GeminiImageGenerationClient(), artistProfile),
                 mcp?.Registrations),
             eventSink,
             new ChatOutcomeReporter(),
