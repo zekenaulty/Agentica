@@ -546,7 +546,15 @@ public sealed class NyxFacultyMcpConformanceTests
             // Caller cancellation may close its response stream before the SDK finishes writing.
             catch (IOException) { }
             catch (HttpListenerException) { }
-            finally { context.Response.Close(); }
+            finally { CloseClientResponse(context.Response.Close); }
+        }
+
+        private static void CloseClientResponse(Action close)
+        {
+            try { close(); }
+            // Match the admitted runtime fixture's known-disconnect policy only
+            // around response disposal. Unexpected cleanup failures still escape.
+            catch (HttpListenerException exception) when (exception.NativeErrorCode is 64 or 1229) { }
         }
 
         public async ValueTask DisposeAsync()
