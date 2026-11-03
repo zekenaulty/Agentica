@@ -125,9 +125,9 @@ internal static class ChatTools
                     conversation,
                     persona,
                     workspaceRoot,
-                    new ChatArtistPromptComposer(dependencies.PromptComposerClient),
+                    new ChatArtistPromptComposer(dependencies.PromptComposerClient, dependencies.PromptComposerProfile),
                     dependencies.ImageGenerationClient),
-                "Quarantined pending scoped external-transmission approvals. When enabled later, this tool will compose an artist brief with Gemini, generate an image, and save a durable workspace artifact.",
+                "Quarantined pending scoped external-transmission approvals. When enabled later, this tool will compose an artist brief with the configured text provider, generate an image with Gemini, and save a durable workspace artifact.",
                 ToolInputSchema.Create(
                     new ToolInputField("request", ToolInputValueType.String, Required: true, Description: "User image request or subject to visualize."),
                     new ToolInputField("styleRecipe", ToolInputValueType.String, Description: "Optional style recipe override. When omitted, the artist uses the chat host's default image style."),
@@ -136,7 +136,7 @@ internal static class ChatTools
                     new ToolInputField("outputMimeType", ToolInputValueType.String, Description: "Optional output MIME type.", AllowedValues: ["image/png", "image/jpeg", "image/webp"], Example: "image/png"),
                     new ToolInputField("outputCompressionQuality", ToolInputValueType.Integer, Description: "Optional compression quality for compressed formats.", Minimum: 1, Maximum: 100),
                     new ToolInputField("model", ToolInputValueType.String, Description: "Optional Gemini image model id.", Example: GeminiModelId.FlashImage31Preview),
-                    new ToolInputField("composerModel", ToolInputValueType.String, Description: "Optional Gemini text model for the artist brief.", Example: GeminiModelId.Flash25)),
+                    new ToolInputField("composerModel", ToolInputValueType.String, Description: "Optional model override for the configured artist text provider.", Example: "provider-specific-model")),
                 requiresApproval: true),
             Registration(
                 ChatToolIds.WorkspaceImageGenerate,
@@ -245,7 +245,8 @@ internal static class ChatTools
 
 internal sealed record ChatToolDependencies(
     ILlmClient PromptComposerClient,
-    IImageGenerationClient ImageGenerationClient);
+    IImageGenerationClient ImageGenerationClient,
+    ChatArtistPromptProfile? PromptComposerProfile = null);
 
 internal sealed class ChatContextReadTool : ITool
 {
@@ -1299,7 +1300,9 @@ internal sealed class WorkspaceImageCreateTool : ITool
         var promptDirectoryEffects = new List<(string EffectName, string Path, string RelativePath)>();
         string? promptContextItemId = null;
         var composerModelId = ChatImageToolSupport.EmptyToNull(ChatToolInput.String(invocation.Input, "composerModel"))
-            ?? GeminiModelId.Flash25;
+            ?? _composer.DefaultModelId;
+        if (composerModelId is null)
+            return Refused(invocation, "Configure the artist composer's model or supply composerModel.");
         var styleRecipe = ChatToolInput.String(invocation.Input, "styleRecipe");
         var recentMessages = _store.GetRecentMessages(_conversation.ConversationId, 16);
         var contextItems = _store.GetContextItems(_conversation.ConversationId, 40);
