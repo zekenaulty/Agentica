@@ -336,7 +336,7 @@ Content-Type: application/json
 Response: { "actionId": "original-action-id", "resolved": true, "duplicate": false }
 ```
 
-GET returns an array of durable custody entries containing the original `.request: HostActionRequest` plus its host/session/run bindings. POST resolves only that original action; it does not invoke a capability. An unresolved result keeps the fence. If the original run remains retained in this process, POST reports `recovery.live_run`: reconnect via WebSocket and submit `action.result` so the live runner receives the result.
+GET returns an array of durable custody entries containing the original `.request: HostActionRequest` plus its host/session/run bindings. POST resolves only that original action; it does not invoke a capability. An unresolved result keeps the fence. While the original run's task is still active, POST reports `recovery.live_run`: reconnect via WebSocket and submit `action.result` so that runner receives the result. A displayed cancelled status alone does not prove the task is quiescent. Once the task has ended, POST can reconcile its retained run directly, or the durable original after process restart. Exact duplicate results are recognized without invoking the capability.
 
 The GET array contains only unresolved entries with this exact shape:
 
@@ -348,10 +348,35 @@ type ActionCustodyEntry = {
   requestHash: string; capabilityHash: string;
   reservedAt: string; updatedAt: string;
   result?: HostActionResult | null; resultHash?: string | null;
+  recoveryRetention?: 'reserved' | 'http' | null;
 };
 ```
 
-The service reserves and flushes the original request/capability binding before possible delivery. The custody ledger allows at most 128 unresolved entries, 1,024 total entries, 256 retained completed entries per host/session, and 64 MiB on disk. Completed history may be pruned; unresolved entries are never pruned to make room. The ledger's content hash and initialization marker are checked on reads. A missing/corrupt ledger or changed marker fences admission instead of creating a replacement store. Keep the ledger and marker together; manually deleting all storage cannot prove old effects absent.
+The service reserves and flushes the original request/capability binding before possible delivery. The custody ledger allows at most 128 unresolved entries, 1,024 total entries, and a 64 MiB logical storage envelope including reserved result/recovery allowance. Ordinary completed socket results are prunable, with at most 256 such results retained per host/session. Unresolved entries, operation-admission results, and terminal results pinned by HTTP recovery are excluded from per-session, entry-count and byte-budget pruning. Protected retention can fill the store; a full store fails admission rather than deleting required custody. `recoveryRetention: 'reserved'` funds an unresolved action's result; `'http'` pins its terminal HTTP receipt. An exact duplicate HTTP recovery persists that pin before acknowledging success. These guarantees do not recreate evidence already pruned by an earlier version, and logical allowances do not guarantee physical disk space.
+
+The ledger's content hash and initialization marker are checked on reads. A missing/corrupt ledger or changed marker fences admission instead of creating a replacement store. Keep the ledger and marker together; manually deleting all storage cannot prove old effects absent.
+
+#### Exact and paged retained recovery reads
+
+The unresolved inventory above is not a complete history. For explicit inspection, two additional read-only routes return retained evidence without opening a run, resolving custody, invoking a capability, or calling a provider:
+
+```text
+GET /api/recovery/action?hostId=inventory-app&sessionId=inventory-session-1&actionId=original-action-id
+  -> ActionCustodyEntry
+
+GET /api/recovery/run?hostId=inventory-app&sessionId=inventory-session-1&sessionEpoch=owner-1&runId=original-run-id[&afterActionId=last-action-id]
+  -> {
+       hostId, sessionId, sessionEpoch, runId,
+       items: [{actionId,requestHash,capabilityHash,disposition,recoveryRetention}],
+       nextAfterActionId: string | null
+     }
+```
+
+Both routes use exact, case-sensitive identity matching and `Cache-Control: no-store`. Exact action lookup returns the original request, capability and any retained result; an absent action fails with `custody.not_found`. Run discovery returns at most 16 metadata items in ordinal action-ID order, including unresolved, ordinary completed and HTTP-pinned evidence. Pass the returned `nextAfterActionId` as `afterActionId` for the next page; null ends the retained page sequence. Each item has nullable `disposition` and `recoveryRetention`; fetch its exact action separately when the full source is needed. Pagination bounds each response, while storage validation still reads the bounded full ledger.
+
+A missing action or empty/exhausted run page is not proof that no earlier attempt occurred, that an effect is absent, or that the objective is complete. Ordinary history may have been pruned. Preserve original host records and reconcile uncertain effects instead of issuing a replacement attempt. These endpoints can be called through the host's normal HTTP transport; they do not add an automatic SDK polling or recovery loop.
+
+#### SDK recovery
 
 The SDK helper uses completed host records first:
 
@@ -417,6 +442,8 @@ The SDK invokes `onMessage` for display only. Exceptions in display callbacks do
 | `GET /api/runs/{runId}/events` | SSE observational envelopes |
 | `POST /api/runs/{runId}/cancel` | `{runId,status:"cancel_requested"}`; stop requested, effects may require reconciliation |
 | `GET /api/recovery` / `POST /api/recovery` | Durable custody inspection and original-attempt resolution |
+| `GET /api/recovery/action` | Exact retained original action/result by host, session and action identity; no-store |
+| `GET /api/recovery/run` | Scoped retained-action metadata, at most 16 items per ordinal action-ID page; no-store |
 
 A run snapshot is `{runId,hostId,sessionId,sessionEpoch,objectiveId,objective,scopeId,perspectiveId,status,createdAt,updatedAt,connected,manifestHash,pendingActions,outcome,termination,context}`. Each pending item is `{request:HostActionRequest,deliveryAttempted,unresolved}`. `outcome` is the existing core [`OutcomeEnvelope`](../Agentica/Outcomes/OutcomeEnvelope.cs), or `null`; `termination` is the exceptional terminal record described above or `null`.
 

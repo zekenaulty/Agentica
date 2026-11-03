@@ -70,7 +70,7 @@ public sealed partial class HostRunRegistry(HostContextStore contexts, ILabPlann
             if (entry.Usage.Steps >= limits.MaxSteps || entry.Usage.Refinements > limits.MaxRefinements ||
                 entry.Usage.Continuations >= limits.MaxPlanContinuations)
                 throw new HostProtocolException("operation.budget", "The objective's cumulative execution allowance is exhausted. Progress and terminal evidence remain admissible.");
-            MakeRunCapacity();
+            var removable = FindCapacityCandidate();
             var runId = "labrun_" + Guid.NewGuid().ToString("N");
             ValidateOperationObservation(entry, item);
             if (adoption is not null) ValidateOperationObservation(entry,
@@ -79,6 +79,7 @@ public sealed partial class HostRunRegistry(HostContextStore contexts, ILabPlann
             var request = entry.Request with { SessionEpoch = claimed.ActiveEpoch, Observation = adoption?.Observation ?? item.Observation };
             var usage = entry.Usage with { Continuations = checked(entry.Usage.Continuations + 1) };
             var run = new HostRun(request, contexts.Open(request), planners, custody, store, usage, runId, claimed);
+            ReleaseRunCapacity(removable);
             _runs.Add(run.RunId, run);
             return run;
         }
