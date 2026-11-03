@@ -6,6 +6,8 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.4" />
     <ProjectReference Include="../Agentica/Agentica.csproj" />
     <ProjectReference Include="../Agentica.Clients/Agentica.Clients.csproj" />
   </ItemGroup>
