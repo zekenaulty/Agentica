@@ -290,7 +290,7 @@ public sealed class ChatWorkspaceResourceLimitTests
         using var fixture = new WorkspaceFixture();
         var tool = new LabWorkspaceFileSearchTool(
             fixture.WorkspaceRoot,
-            OutputFloodProcess(),
+            OutputFloodProcess(fixture),
             TestLimits());
         var stopwatch = Stopwatch.StartNew();
 
@@ -305,7 +305,13 @@ public sealed class ChatWorkspaceResourceLimitTests
             CancellationToken.None);
 
         stopwatch.Stop();
-        Assert.Equal(ReceiptStatus.Succeeded, result.Receipt.Status);
+        Assert.True(result.Receipt.Status == ReceiptStatus.Succeeded,
+            $"Expected successful result-limit termination; actual receipt: {JsonSerializer.Serialize(result.Receipt)}");
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Equal("started", File.ReadAllText(Path.Combine(fixture.Root, "stdout-producer.started")).Trim());
+            Assert.False(File.Exists(Path.Combine(fixture.Root, "stdout-producer.completed")));
+        }
         Assert.False(Assert.IsType<bool>(result.Receipt.Data["usedFallback"]));
         Assert.True(Assert.IsType<bool>(result.Receipt.Data["truncated"]));
         Assert.Equal("result_count", result.Receipt.Data["limitReason"]);
@@ -525,12 +531,24 @@ public sealed class ChatWorkspaceResourceLimitTests
     private static LabWorkspaceSearchProcessSpec MissingProcess(WorkspaceFixture fixture) =>
         new(Path.Combine(fixture.Root, "missing-ripgrep"), [], AppendRipgrepArguments: false);
 
-    private static LabWorkspaceSearchProcessSpec OutputFloodProcess() =>
-        OperatingSystem.IsWindows()
-            ? PowerShell(
-                "$i=0; while($i -lt 10000) { [Console]::Out.WriteLine(('fake:{0}:1:needle' -f $i)); $i++ }; Start-Sleep -Seconds 30")
-            : Shell(
-                "i=0; while [ \"$i\" -lt 10000 ]; do printf 'fake:%s:1:needle\\n' \"$i\"; i=$((i+1)); done; sleep 30");
+    private static LabWorkspaceSearchProcessSpec OutputFloodProcess(WorkspaceFixture fixture)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return Shell("i=0; while [ \"$i\" -lt 10000 ]; do printf 'fake:%s:1:needle\\n' \"$i\"; i=$((i+1)); done; sleep 30");
+        }
+
+        // The real 5s operation proves bounded output/termination, independently
+        // of PowerShell managed startup. Script and markers are not search inputs.
+        var script = Path.Combine(fixture.Root, "stdout-producer.cmd");
+        File.WriteAllText(script,
+            "@echo off\r\n" +
+            ">\"%~dp0stdout-producer.started\" echo started\r\n" +
+            "for /l %%i in (0,1,9999) do @echo fake:%%i:1:needle\r\n" +
+            "ping.exe -n 31 127.0.0.1 >nul\r\n" +
+            ">\"%~dp0stdout-producer.completed\" echo completed\r\n", Encoding.ASCII);
+        return new("cmd.exe", ["/d", "/q", "/c", "call", script], AppendRipgrepArguments: false);
+    }
 
     private static LabWorkspaceSearchProcessSpec ErrorFloodProcess(WorkspaceFixture fixture)
     {
