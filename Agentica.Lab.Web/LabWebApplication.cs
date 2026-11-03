@@ -5,13 +5,15 @@ using Agentica.Lab.Web.Contracts;
 using Agentica.Lab.Web.Providers;
 using Agentica.Lab.Web.Runtime;
 using Agentica.Lab.Web.Transport;
+using Agentica.Lab.Web.Chat;
+using Agentica.Lab.Web.Chat.Recall;
 
 namespace Agentica.Lab.Web;
 
 public static class LabWebApplication
 {
     public static WebApplication Create(string[] args, ILabPlannerFactory? plannerFactory = null, string? storageDirectory = null,
-        OpenAiProviderConfiguration? openAiConfiguration = null)
+        OpenAiProviderConfiguration? openAiConfiguration = null, IExperimentExecutor? experimentExecutor = null)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -37,6 +39,14 @@ public static class LabWebApplication
         builder.Services.AddSingleton(new ActionCustodyStore(Path.Combine(storageRoot, "custody")));
         builder.Services.AddSingleton(new HostOperationStore(Path.Combine(storageRoot, "operations")));
         builder.Services.AddSingleton<HostRunRegistry>();
+        builder.Services.AddSingleton(_ => new ExperimentStore(Path.Combine(storageRoot, "chat")));
+        if (experimentExecutor is null) builder.Services.AddSingleton<IExperimentExecutor>(services =>
+            new OpenAiExperimentExecutor(services.GetRequiredService<OpenAiProviderConfiguration>()));
+        else builder.Services.AddSingleton(experimentExecutor);
+        builder.Services.AddSingleton<ExperimentService>();
+        builder.Services.AddHostedService(services => services.GetRequiredService<ExperimentService>());
+        builder.Services.AddSingleton<ExperimentHistoryMaintenance>();
+        builder.Services.AddHostedService(services => services.GetRequiredService<ExperimentHistoryMaintenance>());
         builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
         var app = builder.Build();
         app.Use(async (context, next) =>
@@ -88,6 +98,7 @@ public static class LabWebApplication
         });
         app.MapGet("/api/runs/{runId}/events", StreamEventsAsync);
         app.Map("/api/host", HandleHostAsync);
+        app.MapExperimentChat();
         return app;
     }
 
