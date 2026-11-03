@@ -30,9 +30,57 @@ For any proposed authority blocker, identify the invariant it protects, the mate
 - `ToolCatalog` and the compiled manifest hold host registrations. Planning visibility is narrowed by effect policy, planner data boundaries, and any explicit grant condition.
 - Registrations with `ApprovalRequirement.None` can execute within the active policy, including `ExternalSideEffect`. `ExplicitGrant` remains an installed per-invocation condition. The runtime still validates the manifest, planned kind and effect, input schema, and data boundaries at dispatch.
 - MCP discovery alone is non-authoritative. The host must select a named server/tool, pin its schema, and bind a registration before the model can use it.
+- The optional MCP binding inspection API reports configured standing bindings independently of transient dependency readiness; see the next section. The existing strict `BindAsync` path still throws when it cannot compose the complete requested registration set.
 - `RunRequest.Objective` and `AuthorizationScopeId` do not by themselves represent a durable bounded context envelope. The runner passes the host-supplied `AuthorizationScopeId` to `ToolInvocation` so the bound tool can resolve the active host context at dispatch. The identifier is a lookup key, not authority proof. Agentica does not itself prove semantic fit between an arbitrary proposed action and the objective. The host must encode operation scope in its bindings and tools. A generic core classifier or English phrase grammar would be the wrong substitute.
 - A host can now supply `IChildAuthorityDeriver` to `TaskOrchestrator`. When a `LargeTaskRequest` carries a parent authorization scope, child dispatch requires a distinct derived child scope and a derivation receipt ID. The derivation request includes the proposed child objective and typed context projection; these remain planner proposals for the host to check against its parent record. A missing deriver, an out-of-scope child, a temporarily unavailable derivation, or malformed proof stops before child dispatch. The host owns durable lineage, objective/scope validation, delegation policy, receipt storage, and renewal of execution controls. Unscoped legacy orchestrations retain their current behavior.
 - `GoalSpine` is continuity context, not authority or proof. Receipts and authoritative host state establish effects and completion.
+
+## MCP binding inspection and readiness
+
+`McpToolCatalogAdapter.InspectAsync` is an opt-in composition path for at most
+64 host-owned `McpToolBinding` records. Its bounded `Statuses` retain each original
+binding even when connection, discovery, server identity or schema integrity
+prevents execution. `ReadyRegistrations` contains only applicable bindings whose
+current transport and exact original schema pin match. Remote discoveries never
+create a binding, choose applicability or widen a grant.
+
+Each status exposes `Bound`, host-supplied `Applicable`, `RuntimeReady`,
+`Integrity` (`Unknown`, `Matched`, `Mismatch`) and a stable reason code. A false
+runtime-ready flag with `mcp.not_applicable` means the dependency was not probed;
+it does not establish an outage. Connection/discovery failures leave integrity
+unknown. Missing, ambiguous and malformed remote tools, server mismatch and
+schema drift have distinct dispositions. Status contains no remote exception
+message, credential or remote description. Malformed host configuration and a
+caller cancellation remain errors rather than being labelled dependency outages.
+
+The host continues to own persistent installation/binding configuration and
+transport lifetime. It can load the same trusted records, attempt the existing
+strict `SdkMcpToolTransport.ConnectHttpAsync`, and pass a null transport to
+inspection after an expected connection failure. That reports
+`mcp.connection_unavailable`; it does not remove or re-authorize the installed
+binding. Inspection does not introduce a store, retry loop, reconnect manager,
+credential sharing or approval prompt. `Bound` describes the supplied host grant,
+not the existence of a matching remote executable. Callers that omit an
+applicable-ID set treat their supplied bindings as applicable; an empty set
+selects none and spends no discovery request.
+
+Readiness is an observation at inspection time. Every actual invocation checks
+the host-labelled transport server ID before and after discovery, then the same
+pinned schema before tools/call. A retained old registration cannot bypass a
+later discovery outage, server mismatch or schema drift. Recovery requires a
+fresh match to the original pin; inspection never adopts a new schema. The
+transport's server ID is a host logical identity, not authentication of a remote
+process. The host owns endpoint authentication and scope controls. MCP supplies
+no atomic schema-check-and-call transaction here, so the adapter does not claim
+to prevent a remote implementation changing between those protocol operations.
+
+Fake-transport tests cover status/configuration retention, host applicability,
+unbound discoveries, bounded inspection, cancellation, drift and same-pin
+recovery, and server changes at dispatch. The existing SDK loopback fixture also
+exercises real HTTP discovery, drift rejection, restoration and one receipted
+call using the unchanged pin. These fixtures establish local adapter behavior;
+they do not establish a production installation, live external service,
+durable host persistence or automatic recovery across restarts.
 
 ## Next implementation proof
 
