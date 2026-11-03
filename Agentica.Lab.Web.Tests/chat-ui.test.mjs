@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import './chat-markdown.test.mjs';
-import { actionErrorMessage, catalogSelection, citationPresentation, classifyEvent, contextCheckSummary, depthPresets, exactSourceSelection, familyModelCatalog, instructionValue, isTerminal, knownFamilyModelIds, mergeTrace, mergeTurnPages, safeHttpUrl, summarizeTrace, validateSettings } from '../Agentica.Lab.Web/wwwroot/chat.mjs';
+import { actionErrorMessage, appendTraceWindow, catalogSelection, citationPresentation, classifyEvent, contextCheckSummary, depthPresets, exactSourceSelection, familyModelCatalog, instructionValue, isTerminal, knownFamilyModelIds, mergeTrace, mergeTurnPages, safeHttpUrl, summarizeTrace, validateSettings } from '../Agentica.Lab.Web/wwwroot/chat.mjs';
 
 test('explicit context check displays provider tokens and evidence without using byte estimates', () => {
   const result = { inferenceDispatched: false, settingsRevision: 7, manifest: { inputAllowance: 62976, estimatedInputUnits: 999999, selectedMessageIds: ['u1', 'a1', 'u2', 'a2', 'current'], tokenCount: { tokens: 62600, method: 'openai.responses.input_tokens', providerCount: true } }, recall: { selected: [{ content: 'exact quote' }], presentedCharacters: 11 } };
@@ -137,6 +137,35 @@ test('browser trace retention is bounded and reports the exact omitted window', 
   assert.equal(result.events[0].sequence, 11);
   assert.equal(result.events.at(-1).sequence, 1010);
   assert.equal(mergeTrace(result.events, [events.at(-1)]).omitted, 0);
+});
+
+test('retained pages stay independently inspectable while a full live tail advances', () => {
+  const events = (start, count) => Array.from({ length: count }, (_, index) => ({ sequence: start + index, type: 'provider.item' }));
+  const trace = { events: events(1001, 1000), inspectionEvents: [], inspecting: false, inspectionOmitted: 0, windowOmitted: 0, after: 0, hasMore: true };
+  appendTraceWindow(trace, events(1, 100), true);
+  assert.equal(trace.inspecting, true);
+  assert.deepEqual(trace.inspectionEvents.map(event => event.sequence), events(1, 100).map(event => event.sequence));
+  assert.equal(trace.events[0].sequence, 1001); assert.equal(trace.events.at(-1).sequence, 2000);
+  assert.equal(trace.windowOmitted, 0, 'Fetching older pages does not inflate live eviction accounting.');
+  appendTraceWindow(trace, events(2001, 25));
+  assert.equal(trace.inspectionEvents[0].sequence, 1); assert.equal(trace.inspectionEvents.at(-1).sequence, 100);
+  assert.equal(trace.events[0].sequence, 1026); assert.equal(trace.events.at(-1).sequence, 2025); assert.equal(trace.windowOmitted, 25);
+  appendTraceWindow(trace, events(101, 100), true);
+  assert.equal(trace.inspectionEvents[0].sequence, 1); assert.equal(trace.inspectionEvents.at(-1).sequence, 200);
+  assert.equal(trace.events.at(-1).sequence, 2025); assert.equal(trace.inspectionOmitted, 0);
+  trace.inspecting = false;
+  assert.equal((trace.inspecting ? trace.inspectionEvents : trace.events).at(-1).sequence, 2025);
+  assert.equal(trace.inspectionEvents[0].sequence, 1, 'Resuming the live tail does not destroy the retained inspection window.');
+});
+
+test('retained inspection remains bounded with honest eviction and pending page coverage', () => {
+  const trace = { events: [], inspectionEvents: [], inspecting: false, inspectionOmitted: 0, windowOmitted: 0, after: 1100, hasMore: false };
+  appendTraceWindow(trace, Array.from({ length: 1100 }, (_, index) => ({ sequence: index + 1 })), true);
+  assert.equal(trace.inspectionEvents.length, 1000); assert.equal(trace.inspectionEvents[0].sequence, 101);
+  assert.equal(trace.inspectionOmitted, 100); assert.equal(trace.windowOmitted, 0);
+  appendTraceWindow(trace, [{ sequence: 1101 }]);
+  assert.equal(trace.hasMore, true); assert.equal(trace.inspectionEvents.at(-1).sequence, 1100);
+  assert.equal(trace.events.at(-1).sequence, 1101); assert.equal(trace.windowOmitted, 1);
 });
 
 test('wrapped native completion summaries are visible and do not repeat streamed artifacts', () => {

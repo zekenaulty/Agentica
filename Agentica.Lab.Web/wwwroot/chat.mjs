@@ -156,6 +156,16 @@ export function mergeTrace(current, incoming, limit = 1000) {
   const events = [...map.values()].sort((a, b) => a.sequence - b.sequence);
   return { events: events.slice(-limit), omitted: Math.max(0, events.length - limit) };
 }
+export function appendTraceWindow(trace, incoming, retained = false) {
+  // Retained inspection has its own bounded window. Live arrivals can update
+  // the tail without evicting the page an operator explicitly chose to read.
+  const live = mergeTrace(trace.events, incoming); trace.events = live.events;
+  if (!retained) trace.windowOmitted += live.omitted;
+  if (retained) {
+    const inspected = mergeTrace(trace.inspectionEvents, incoming);
+    trace.inspectionEvents = inspected.events; trace.inspectionOmitted += inspected.omitted; trace.inspecting = true;
+  } else if (incoming.some(event => Number.isSafeInteger(event.sequence) && event.sequence > trace.after)) trace.hasMore = true;
+}
 
 if (typeof document !== 'undefined') startChat();
 
@@ -301,7 +311,7 @@ function startChat() {
     upsertConversation(conversation); await selectConversation(conversation.id, true); $('message').focus();
   }
   function newTrace(turn) {
-    return { events: [], citationEvents: [], citationsLoading: false, citationsHydrated: false, citationCoverage: '', after: 0, hasMore: true, loaded: false, loading: false, liveLast: turn.traceCount ?? 0, windowOmitted: 0, streamError: '', gap: '', renderPending: false, payloads: new Map() };
+    return { events: [], inspectionEvents: [], inspecting: false, inspectionOmitted: 0, citationEvents: [], citationsLoading: false, citationsHydrated: false, citationCoverage: '', after: 0, hasMore: true, loaded: false, loading: false, liveLast: turn.traceCount ?? 0, windowOmitted: 0, streamError: '', gap: '', renderPending: false, payloads: new Map() };
   }
   function renderTranscript() {
     $('transcript').replaceChildren();
@@ -333,18 +343,20 @@ function startChat() {
     const timelineSection = node('details', 'trace-inspector'); const timelineLabel = node('summary', '', 'Typed timeline'); timelineSection.append(timelineLabel); const timeline = node('ol', 'typed-timeline'); timelineSection.append(timeline);
     const pageControls = node('div', 'trace-page-controls'); const load = node('button', 'button secondary', 'Load retained trace'); load.type = 'button';
     const restart = node('button', 'button secondary', 'Read from start'); restart.type = 'button'; restart.title = 'Reset only the browser trace window and reread retained pages. Makes no provider call.';
-    const pageInfo = node('span'); pageControls.append(load, restart, pageInfo);
+    const resumeLive = node('button', 'button secondary', 'Resume live'); resumeLive.type = 'button'; resumeLive.title = 'Show the latest bounded trace tail. Retained inspection remains available. Makes no provider call.';
+    const pageInfo = node('span'); pageControls.append(load, restart, resumeLive, pageInfo);
     traceContent.append(activity, summary, absence, coverage, requestInspector.section, contextInspector.section, recallInspector.section, searchInspector.section, nativeInspector.section, sourceInspector.section, settingsInspector.section, timelineSection, pageControls); trace.append(traceContent); article.append(trace);
-    const entry = { article, content, placeholder, answerSources, meta, error, continuity, trace, traceLabel, activity, summary, summaryText, absence, coverage, timeline, timelineSection, timelineLabel, requestInspector, contextInspector, nativeInspector, sourceInspector, searchInspector, recallInspector, load, pageInfo };
+    const entry = { article, content, placeholder, answerSources, meta, error, continuity, trace, traceLabel, activity, summary, summaryText, absence, coverage, timeline, timelineSection, timelineLabel, requestInspector, contextInspector, nativeInspector, sourceInspector, searchInspector, recallInspector, load, resumeLive, pageInfo };
     state.nodes.set(turn.id, entry); state.traces.set(turn.id, newTrace(turn));
     trace.addEventListener('toggle', () => { if (trace.open && !state.traces.get(turn.id)?.loaded) loadTrace(turn.id); });
     for (const inspector of [timelineSection, requestInspector.section, contextInspector.section, nativeInspector.section, sourceInspector.section, searchInspector.section, recallInspector.section]) inspector.addEventListener('toggle', () => { if (inspector.open) renderTrace(turn.id); });
     load.addEventListener('click', () => loadTrace(turn.id));
     restart.addEventListener('click', () => {
       const retained = state.traces.get(turn.id); if (!retained || retained.loading) return;
-      retained.events = []; retained.after = 0; retained.loaded = false; retained.hasMore = true; retained.windowOmitted = 0;
+      retained.inspectionEvents = []; retained.after = 0; retained.loaded = false; retained.hasMore = true; retained.inspectionOmitted = 0;
       loadTrace(turn.id);
     });
+    resumeLive.addEventListener('click', () => { const retained = state.traces.get(turn.id); if (retained) { retained.inspecting = false; renderTrace(turn.id); } });
     $('transcript').append(article); updateTurn(turn); renderTrace(turn.id);
   }
   function makeInspector(title) { const section = node('details', 'trace-inspector'); section.append(node('summary', '', title)); const body = node('pre', 'json-view', 'No retained record loaded.'); section.append(body); return { section, body }; }
@@ -357,7 +369,7 @@ function startChat() {
   }
   function renderAnswer(turn, elements) {
     const retained = state.traces.get(turn.id);
-    const events = [...new Map([...(retained?.events ?? []), ...(retained?.citationEvents ?? [])].map(event => [event.sequence, event])).values()];
+    const events = [...new Map([...(retained?.events ?? []), ...(retained?.inspectionEvents ?? []), ...(retained?.citationEvents ?? [])].map(event => [event.sequence, event])).values()];
     const text = turn.assistantText ?? ''; const presentation = citationPresentation(text, events);
     const signature = JSON.stringify(presentation.inline);
     if (elements.renderedText !== text || elements.renderedCitations !== signature) {
@@ -392,9 +404,9 @@ function startChat() {
     const input = usage.inputTokens ?? usage.promptTokens; const output = usage.outputTokens ?? usage.completionTokens; const reasoning = usage.reasoningTokens ?? usage.outputTokensDetails?.reasoningTokens ?? usage.output_tokens_details?.reasoning_tokens;
     return [['input', input], ['output', output], ['reasoning', reasoning]].filter(([, value]) => value !== undefined && value !== null).map(([name, value]) => `${Number(value).toLocaleString()} ${name} tokens`).join(' · ') || 'Usage returned · inspect trace';
   }
-  function appendEvents(id, events) {
+  function appendEvents(id, events, retained = false) {
     const trace = state.traces.get(id); if (!trace) return;
-    const merged = mergeTrace(trace.events, events); trace.events = merged.events; trace.windowOmitted += merged.omitted;
+    appendTraceWindow(trace, events, retained);
     if (!trace.renderPending) {
       trace.renderPending = true;
       requestAnimationFrame(() => {
@@ -436,30 +448,31 @@ function startChat() {
   function renderTrace(id) {
     const trace = state.traces.get(id); const elements = state.nodes.get(id); const turn = turnById(id); if (!trace || !elements || !turn) return;
     renderAnswer(turn, elements);
-    const fullCoverage = trace.events.length === (turn.traceCount ?? 0) && (!trace.events.length || (trace.events[0].sequence === 1 && trace.events.at(-1).sequence === turn.traceCount));
-    const moreRetained = trace.hasMore && !fullCoverage;
-    const summary = summarizeTrace(trace.events); elements.summary.hidden = !summary; elements.summaryText.textContent = summary;
+    const events = trace.inspecting ? trace.inspectionEvents : trace.events;
+    const omitted = trace.inspecting ? trace.inspectionOmitted : trace.windowOmitted;
+    const fullCoverage = events.length === (turn.traceCount ?? 0) && (!events.length || (events[0].sequence === 1 && events.at(-1).sequence === turn.traceCount));
+    const summary = summarizeTrace(events); elements.summary.hidden = !summary; elements.summaryText.textContent = summary;
     elements.absence.hidden = Boolean(summary);
-    elements.absence.textContent = !turn.settings?.reasoningSummary ? 'Provider reasoning summary was not requested. Private reasoning is not exposed.' : !isTerminal(turn.status) ? 'Summary requested; none emitted in the loaded trace yet.' : !fullCoverage && (!trace.loaded || trace.hasMore) ? 'Summary status is incomplete until the retained trace is loaded.' : 'Provider reasoning summary was not emitted or is unsupported. Private reasoning is not exposed.';
-    const latest = trace.events.at(-1); elements.activity.replaceChildren(node('span', `status-dot${isTerminal(turn.status) ? '' : ' busy'}`), node('span', '', latest ? label(latest.type) : 'Waiting for retained trace'));
-    const coverage = [trace.streamError, trace.gap, summary && moreRetained ? 'The summary shown covers loaded events only; load remaining trace pages for complete retained coverage.' : '', trace.windowOmitted ? `${trace.windowOmitted} events left the browser's 1,000-event display window; retained service trace is still independently paged.` : '', turn.droppedTraceCount ? `${turn.droppedTraceCount} service trace events were dropped. Coverage is incomplete.` : ''].filter(Boolean);
+    elements.absence.textContent = !turn.settings?.reasoningSummary ? 'Provider reasoning summary was not requested. Private reasoning is not exposed.' : !isTerminal(turn.status) ? 'Summary requested; none emitted in the loaded trace yet.' : !fullCoverage ? 'Summary status is incomplete in this trace window; inspect retained pages before inferring absence.' : 'Provider reasoning summary was not emitted or is unsupported. Private reasoning is not exposed.';
+    const latest = trace.events.at(-1); elements.activity.replaceChildren(node('span', `status-dot${isTerminal(turn.status) ? '' : ' busy'}`), node('span', '', latest ? `Latest activity: ${label(latest.type)}` : 'Waiting for retained trace'));
+    const coverage = [trace.streamError, trace.gap, trace.inspecting ? 'Inspecting retained pages. Live activity continues separately; Resume live shows the latest tail.' : '', summary && !fullCoverage ? 'The summary shown covers this window only; inspect retained pages for other summary events.' : '', omitted ? `${omitted} events left this 1,000-event ${trace.inspecting ? 'inspection' : 'live'} window; the service trace remains available through Read from start.` : '', turn.droppedTraceCount ? `${turn.droppedTraceCount} service trace events were dropped. Coverage is incomplete.` : ''].filter(Boolean);
     elements.coverage.textContent = coverage.join(' '); elements.coverage.hidden = !coverage.length; elements.coverage.classList.toggle('warning', Boolean(coverage.length));
     if (elements.requestInspector.section.open) {
-      const requests = trace.events.filter(event => event.type === 'provider.request');
+      const requests = events.filter(event => event.type === 'provider.request');
       elements.requestInspector.body.textContent = requests.length ? json(requests.map(event => ({ sequence: event.sequence, callId: event.callId, data: event.data }))) : 'No provider request loaded. A pre-dispatch failure may have no request.';
     }
     if (elements.contextInspector.section.open) {
-      const manifests = trace.events.filter(event => event.type === 'context.manifest'); elements.contextInspector.body.textContent = manifests.length ? json(manifests.map(event => event.data)) : 'No context manifest loaded.';
+      const manifests = events.filter(event => event.type === 'context.manifest'); elements.contextInspector.body.textContent = manifests.length ? json(manifests.map(event => event.data)) : 'No context manifest loaded.';
     }
     if (elements.nativeInspector.section.open) {
-      const items = trace.events.filter(event => event.type === 'provider.item'); elements.nativeInspector.body.textContent = items.length ? json(items.map(event => ({ callId: event.callId, itemId: event.itemId, data: event.data }))) : 'No native items loaded. Opaque continuation material is not displayed.';
+      const items = events.filter(event => event.type === 'provider.item'); elements.nativeInspector.body.textContent = items.length ? json(items.map(event => ({ callId: event.callId, itemId: event.itemId, data: event.data }))) : 'No native items loaded. Opaque continuation material is not displayed.';
     }
     if (elements.searchInspector.section.open) {
-      const searches = [...new Map([...trace.events, ...trace.citationEvents].filter(event => event.type === 'provider.citations' || /web.search|web_search/.test(event.type)).map(event => [event.sequence, event])).values()].sort((a, b) => a.sequence - b.sequence);
+      const searches = [...new Map([...events, ...trace.citationEvents].filter(event => event.type === 'provider.citations' || /web.search|web_search/.test(event.type)).map(event => [event.sequence, event])).values()].sort((a, b) => a.sequence - b.sequence);
       elements.searchInspector.body.textContent = searches.length ? json(searches.map(event => ({ sequence: event.sequence, callId: event.callId, itemId: event.itemId, type: event.type, data: event.data }))) : 'No search/source events loaded. Search may be disabled or unused; inspect retained coverage before inferring absence.';
     }
     if (elements.recallInspector.section.open) {
-      const recalls = trace.events.filter(event => event.type === 'context.recall' || /^recall\./.test(event.type)).map(event => ({ ...event, data: trace.payloads.get(event.sequence) ?? event.data }));
+      const recalls = events.filter(event => event.type === 'context.recall' || /^recall\./.test(event.type)).map(event => ({ ...event, data: trace.payloads.get(event.sequence) ?? event.data }));
       elements.recallInspector.body.textContent = recalls.length ? json(recalls.map(event => ({ sequence: event.sequence, type: event.type, callId: event.callId, data: event.data }))) : 'No recall manifest loaded. Thread recall may be off; inspect trace coverage before inferring absence.';
       elements.recallInspector.links.replaceChildren(...recalls.flatMap(event => {
         if (event.data?.payloadRef) { const load = node('button', 'button secondary', 'Load retained recall manifest'); load.type = 'button'; load.addEventListener('click', async () => { load.disabled = true; try { await retainedPayload(id, event); renderTrace(id); } catch (error) { load.disabled = false; notice(`Cannot load recall manifest: ${error.message}`); } }); return [load]; }
@@ -467,19 +480,21 @@ function startChat() {
       }));
     }
     if (elements.sourceInspector.section.open) {
-      const records = trace.events.filter(event => event.type === 'provider.record');
+      const records = events.filter(event => event.type === 'provider.record');
       const open = new Set([...elements.sourceInspector.records.querySelectorAll('details[open]')].map(detail => detail.dataset.sequence));
       elements.sourceInspector.records.replaceChildren(...(records.length ? records.map(event => eventElement(id, event, open, true)) : [node('li', 'trace-coverage', 'No provider source records loaded. Inspect trace coverage before inferring absence.')]));
     }
-    const normalized = trace.events.filter(event => event.type !== 'provider.record');
+    const normalized = events.filter(event => event.type !== 'provider.record');
     elements.timelineLabel.textContent = `Typed timeline · ${normalized.length.toLocaleString()} normalized events`;
     if (elements.timelineSection.open) {
       const open = new Set([...elements.timeline.querySelectorAll('details[open]')].map(detail => detail.dataset.sequence));
       elements.timeline.replaceChildren(...normalized.map(event => eventElement(id, event, open)));
     }
     elements.load.disabled = trace.loading || fullCoverage || (trace.loaded && !trace.hasMore);
+    elements.resumeLive.hidden = !trace.inspecting;
     elements.load.textContent = trace.loading ? 'Loading…' : fullCoverage ? 'Retained trace loaded' : !trace.loaded ? 'Load retained trace' : trace.hasMore ? 'Load next 100 events' : 'Retained trace loaded';
-    elements.pageInfo.textContent = fullCoverage ? `${trace.events.length.toLocaleString()} visible · full retained sequence loaded` : `${trace.events.length.toLocaleString()} visible · page cursor ${trace.after}`;
+    const range = events.length ? ` · sequences ${events[0].sequence}–${events.at(-1).sequence}` : '';
+    elements.pageInfo.textContent = `${trace.inspecting ? 'Retained inspection' : 'Live tail'} · ${events.length.toLocaleString()} visible${range} · ${fullCoverage ? 'full retained sequence loaded' : `page cursor ${trace.after}`}`;
   }
   async function loadTrace(id) {
     const trace = state.traces.get(id); if (!trace || trace.loading || (trace.loaded && !trace.hasMore)) return;
@@ -487,8 +502,9 @@ function startChat() {
     try {
       const result = await api(`${turnBase(id)}/trace?after=${trace.after}&limit=100`);
       if (generation !== state.generation) return;
-      trace.loaded = true; trace.after = result.next ?? result.events?.at(-1)?.sequence ?? trace.after; trace.hasMore = result.hasMore;
-      appendEvents(id, result.events ?? []);
+      trace.loaded = true; trace.after = result.next ?? result.events?.at(-1)?.sequence ?? trace.after;
+      trace.hasMore = Boolean(result.hasMore) || trace.after < (turnById(id)?.traceCount ?? 0);
+      appendEvents(id, result.events ?? [], true);
     } catch (error) { if (generation === state.generation) { trace.streamError = `Retained trace unavailable: ${error.message}`; notice(trace.streamError); } }
     finally { trace.loading = false; if (generation === state.generation) renderTrace(id); }
   }

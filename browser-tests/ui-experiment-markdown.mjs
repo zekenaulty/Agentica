@@ -191,6 +191,7 @@ try {
   await turnNode(running).locator('details.turn-trace > summary').click();
   await page.waitForFunction(() => document.querySelector('.turn[data-turn-id="markdown-turn-2"] .trace-page-controls span')?.textContent.includes('full retained sequence'));
   assert.equal(traceReads.length, 1); assert.equal(await turnNode(running).locator('details.trace-inspector[open]').count(), 0);
+  await turnNode(running).getByRole('button', { name: 'Resume live', exact: true }).click();
   const timeline = inspector('Typed timeline'); const sources = inspector('Provider source records'); const request = inspector('Effective provider request');
   for (const section of [timeline, sources, request]) await section.locator(':scope > summary').click();
   assert.equal(await turnNode(running).locator('details.typed-event[open]').count(), 0); assert.equal(payloadReads.length, 0);

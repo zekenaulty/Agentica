@@ -17,6 +17,8 @@ User and assistant messages render GitHub-flavored Markdown, including headings,
 
 Provider citation markers attach outside code and links at their containing Markdown block. Ambiguous offsets retain clickable sources below the answer. All trace accordions, inner inspectors and new event details start collapsed, including during a running turn or reconnect. Explicitly opened details remain open through updates; full retained payloads still load only when inspected.
 
+Retained trace inspection uses its own bounded 1000-event window, separate from the live tail. Loading older records displays that page even while newer events arrive. **Read from start** resets inspection only; **Resume live** returns to the current tail. Coverage, sequence ranges and omissions identify the displayed window rather than claiming every stored event is visible.
+
 ## Ambient and explicit web search
 
 Both paths use [OpenAI Responses web search](https://developers.openai.com/api/docs/guides/tools-web-search), the selected model and the existing server-side credential. Search is off in new conversations.
