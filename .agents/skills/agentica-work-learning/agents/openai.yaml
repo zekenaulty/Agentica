@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agentica work learning"
+  short_description: "Reuse scoped lessons and capture verified improvements"
+  default_prompt: "Use $agentica-work-learning to reuse relevant domain lessons and preserve what this work teaches."

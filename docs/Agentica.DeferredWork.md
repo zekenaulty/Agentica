@@ -49,13 +49,13 @@ Do not add a general `create_note` tool yet. System-curated context should come 
 
 ## MCP Adapters
 
-Agentica remains MCP-adapter-ready but MCP-independent.
+Agentica remains MCP-independent at the runtime contract boundary. `Agentica.Mcp` now has a host-bound read-only client adapter and an [SDK acceptance fixture](mcp-runtime-acceptance.md). Discovery alone does not install a tool or grant authority.
 
 Deferred:
 
 - expose Agentica as an MCP tool
-- consume remote MCP tools as `ToolDescriptor` / `ToolResult`
-- JSON-RPC transport concerns
+- broader remote authentication, content blocks, and mutation-specific objectives
+- full MCP server/client parity beyond the first bounded client slice
 
 ## Persistence
 

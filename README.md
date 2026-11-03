@@ -50,6 +50,8 @@ Runtime contract reference:
 
 - `docs/Agentica.RuntimeContracts.md`
 - `docs/Agentica.DeferredWork.md`
+- [November reconciliation and issue program](docs/reconciliation/2026-11-03/planning-reconciliation.md) ([GitHub storyboard #12](https://github.com/zekenaulty/Agentica/issues/12))
+- [Typed obligation activation direction](docs/Agentica.TypedObligationActivation.Direction.md) (approved planning direction; implementation and performance remain unproven)
 
 Current active slice:
 
@@ -156,12 +158,12 @@ Tool Layer
   host tools
   query/read tools
   action/mutation tools
-  MCP tools through adapters later
+  MCP tools through the first host-bound read-only adapter now
 
 Optional Boundary Adapters
   Lab host now
   LLM provider clients in Agentica.Clients now
-  MCP host/client adapters later
+  MCP client adapter now; server adapter and broader parity later
   Lab event/run recorder now; reusable recorder later
 ```
 
@@ -577,11 +579,11 @@ Status: implemented as Lab logging only.
 
 ### Slice 7: Boundary Adapters
 
-Status: not started.
+Status: first read-only MCP client slice implemented; broader integration remains open.
 
-- MCP server adapter.
-- MCP client/tool adapter.
-- Host integration examples.
+- MCP server adapter remains deferred.
+- The host-bound MCP client/tool adapter has [SDK runtime acceptance coverage](docs/mcp-runtime-acceptance.md).
+- Broader host integration examples remain open.
 
 ## Design Documents
 
