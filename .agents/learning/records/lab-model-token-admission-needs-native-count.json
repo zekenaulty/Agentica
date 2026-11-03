@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "lab-model-token-admission-needs-native-count",
+  "scope": "agentica",
+  "kind": "technical",
+  "status": "accepted",
+  "supersedes": ["lab-context-selection-uses-dispatch-envelope"],
+  "title": "Measure model tokens separately from serialized request size",
+  "trigger": "Clean Room context recent floor input admission token window byte proxy wire envelope count-only inspection",
+  "guidance": "Preserve the exact request boundary lesson, but matching preflight and dispatch bytes alone cannot establish token-window fit. Production OpenAI Lab admission counts the same model and complete semantic input with responses/input_tokens, binds the result to the generation-body hash, and keeps serialized characters, wire bytes, tokens, output reservation and returned usage separate. Check mandatory current input, instructions and the protected recent floor before optional recall; shrink only permitted complete pairs or exact optional spans with recorded omissions. Never silently reduce the floor, rewrite the draft or change saved limits. Native count failures remain unavailable rather than falling back to a heuristic. Cache counts within the operation, bound and disclose count HTTP attempts separately from generation, and distinguish count-only success from generated-answer qualification. Verify corrections against the owner's actual failing envelope at the host boundary; synthetic size fixtures alone missed this defect.",
+  "evidence": [
+    {"kind": "source_review", "reference": "Agentica.Lab.Web/Chat/OpenAiExperimentInputTokenCounter.cs; ExperimentContextCompiler.cs; ExperimentProviderTransport.cs; docs/implementation/lab-experimental-chat-20261102/qualification.md native correction dated 2026-11-03"},
+    {"kind": "offline_test", "reference": "verification/test-results/native-count-full.trx: Web292passed1skip; host/chat JavaScript104passed; ExperimentNativeAdmissionTests verifies actual HTTP/service/SQLite/executor composition with intercepted native HTTP"},
+    {"kind": "live_test", "reference": "verification/browser/actual-draft-native-count.png (restricted local artifact); real preview Check context: 28327/62976 native input tokens with four protected turns and optional evidence; settings revision9 and22completed turns unchanged; no generation or new turn"}
+  ],
+  "recheck": "Reinspect model, native count schema, exact serializer, tool/schema fields, output reservation, selection policy and provider compatibility. Replace recorded sample sizes and verdicts when transferring the method. This Lab-specific correction does not establish every host's estimator or generation limits.",
+  "tags": ["context", "tokens", "budget", "native-count", "preflight", "recall", "lab", "recovery"],
+  "recorded_on": "2026-11-03"
+}

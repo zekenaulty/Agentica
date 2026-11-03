@@ -87,7 +87,7 @@ jobs:
       - name: Qualify the browser host SDK
         env:
           AGENTICA_TEST_START_SERIALIZATION: '1'
-        run: node --test browser-tests/host-sdk.test.mjs browser-tests/host-recovery.test.mjs browser-tests/host-result-validation.test.mjs browser-tests/host-operations.test.mjs browser-tests/host-decision-stop.test.mjs browser-tests/host-decision-adoption.test.mjs browser-tests/host-starts.test.mjs
+        run: node --test browser-tests/host-sdk.test.mjs browser-tests/host-recovery.test.mjs browser-tests/host-result-validation.test.mjs browser-tests/host-operations.test.mjs browser-tests/host-decision-stop.test.mjs browser-tests/host-decision-adoption.test.mjs browser-tests/host-starts.test.mjs Agentica.Lab.Web.Tests/chat-ui.test.mjs
 
   quality:
     name: Locked build, proof tests, and package validation
@@ -179,7 +179,7 @@ jobs:
       - name: Qualify the browser host SDK
         env:
           AGENTICA_TEST_START_SERIALIZATION: '1'
-        run: node --test browser-tests/host-sdk.test.mjs browser-tests/host-recovery.test.mjs browser-tests/host-result-validation.test.mjs browser-tests/host-operations.test.mjs browser-tests/host-decision-stop.test.mjs browser-tests/host-decision-adoption.test.mjs browser-tests/host-starts.test.mjs
+        run: node --test browser-tests/host-sdk.test.mjs browser-tests/host-recovery.test.mjs browser-tests/host-result-validation.test.mjs browser-tests/host-operations.test.mjs browser-tests/host-decision-stop.test.mjs browser-tests/host-decision-adoption.test.mjs browser-tests/host-starts.test.mjs Agentica.Lab.Web.Tests/chat-ui.test.mjs
 
       - name: Run tests with coverage
         run: >-
