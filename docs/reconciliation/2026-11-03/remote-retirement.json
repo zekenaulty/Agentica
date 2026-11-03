@@ -1,0 +1,133 @@
+{
+  "observed_utc": "2026-11-03T16:21:29.4273945Z",
+  "main": "2e5c39d742698df41b0a96a7959e417c81cee039",
+  "preserved": "All local branches, worktrees, ignored runtime data and primary dirty files",
+  "branches": [
+    {
+      "branch": "codex/capability-test-suites",
+      "head": "408407aa8d99e036a0422d84b6f6babcbd9e891e",
+      "archive_ref": "refs/archive/agentica-reconciliation/2026-11-03/remote/codex/capability-test-suites",
+      "state": "verified_absent",
+      "merged_into": "a841b414d12051c742bc7b25f3753ceb3427b24d"
+    },
+    {
+      "branch": "codex/lab-clean-room-chat",
+      "head": "cc813f6a9c2b1a851a1698b52ab2e96a4a68716f",
+      "archive_ref": "refs/archive/agentica-reconciliation/2026-11-03/remote/codex/lab-clean-room-chat",
+      "state": "verified_absent",
+      "merged_into": "a841b414d12051c742bc7b25f3753ceb3427b24d"
+    },
+    {
+      "branch": "codex/lab-durable-handoff",
+      "head": "1e1a2df3c489d633b62b739b7bd61eba2cfa3c5d",
+      "archive_ref": "refs/archive/agentica-reconciliation/2026-11-03/remote/codex/lab-durable-handoff",
+      "state": "verified_absent",
+      "merged_into": "a841b414d12051c742bc7b25f3753ceb3427b24d"
+    },
+    {
+      "branch": "codex/lab-provider-settings",
+      "head": "54831b4031b3a8fac058ab73fc2ab73f4328f8c8",
+      "archive_ref": "refs/archive/agentica-reconciliation/2026-11-03/remote/codex/lab-provider-settings",
+      "state": "verified_absent",
+      "merged_into": "a841b414d12051c742bc7b25f3753ceb3427b24d"
+    },
+    {
+      "branch": "codex/lab-web-host",
+      "head": "7e233cdf735d85c3b34a7b13730a6b720dbd2afa",
+      "archive_ref": "refs/archive/agentica-reconciliation/2026-11-03/remote/codex/lab-web-host",
+      "state": "verified_absent",
+      "merged_into": "a841b414d12051c742bc7b25f3753ceb3427b24d"
+    },
+    {
+      "branch": "codex/mcp-streaming-first-slice",
+      "head": "e075d932bdf13db713b1e338eaa443a093a6953e",
+      "archive_ref": "refs/archive/agentica-reconciliation/2026-11-03/remote/codex/mcp-streaming-first-slice",
+      "state": "verified_absent",
+      "merged_into": "a841b414d12051c742bc7b25f3753ceb3427b24d"
+    },
+    {
+      "branch": "codex/obligation-contracts",
+      "head": "9186540f788ea69cc5f948f496ddd441f730245f",
+      "archive_ref": "refs/archive/agentica-reconciliation/2026-11-03/remote/codex/obligation-contracts",
+      "state": "verified_absent",
+      "merged_into": "a841b414d12051c742bc7b25f3753ceb3427b24d"
+    },
+    {
+      "branch": "codex/provider-schema-parity",
+      "head": "236ee5e09c379f45361380b52725c421f2ebc3bb",
+      "archive_ref": "refs/archive/agentica-reconciliation/2026-11-03/remote/codex/provider-schema-parity",
+      "state": "verified_absent",
+      "merged_into": "a841b414d12051c742bc7b25f3753ceb3427b24d"
+    },
+    {
+      "branch": "codex/provider-usage-semantics",
+      "head": "ffcef01f7d2955ad6015589fdf9481481f20af6e",
+      "archive_ref": "refs/archive/agentica-reconciliation/2026-11-03/remote/codex/provider-usage-semantics",
+      "state": "verified_absent",
+      "merged_into": "a841b414d12051c742bc7b25f3753ceb3427b24d"
+    },
+    {
+      "branch": "zekenaulty-cloud-audit",
+      "head": "144ab2aa25c360e68474bfbe43a058e3abdf9273",
+      "archive_ref": "refs/archive/agentica-reconciliation/2026-11-03/remote/zekenaulty-cloud-audit",
+      "state": "verified_absent",
+      "merged_into": "a841b414d12051c742bc7b25f3753ceb3427b24d"
+    },
+    {
+      "branch": "codex/mcp-binding-readiness",
+      "head": "b7784d6482baaadf9da0de6d8f5f418941491171",
+      "archive_ref": "refs/archive/agentica-reconciliation/2026-11-03/remote/codex/mcp-binding-readiness",
+      "state": "verified_absent",
+      "merged_into": "a841b414d12051c742bc7b25f3753ceb3427b24d"
+    },
+    {
+      "branch": "codex/maze-action-recovery",
+      "head": "27cb2ce9717438edfe19487e3920faa183112c97",
+      "archive_ref": "refs/archive/agentica-reconciliation/2026-11-03/remote/codex/maze-action-recovery",
+      "state": "verified_absent",
+      "merged_into": "2e5c39d742698df41b0a96a7959e417c81cee039"
+    },
+    {
+      "branch": "codex/maze-decision-adoption",
+      "head": "d65fb5b7a5d4895921f8854054215b1d6279852e",
+      "archive_ref": "refs/archive/agentica-reconciliation/2026-11-03/remote/codex/maze-decision-adoption",
+      "state": "verified_absent",
+      "merged_into": "2e5c39d742698df41b0a96a7959e417c81cee039"
+    },
+    {
+      "branch": "codex/maze-operation-stop",
+      "head": "6d8db3b68a3851c9118adb6e05010921b850138b",
+      "archive_ref": "refs/archive/agentica-reconciliation/2026-11-03/remote/codex/maze-operation-stop",
+      "state": "verified_absent",
+      "merged_into": "2e5c39d742698df41b0a96a7959e417c81cee039"
+    },
+    {
+      "branch": "codex/maze-start-admission",
+      "head": "adb5cfecdc73888e9d9243a6b4131e50b9c9761b",
+      "archive_ref": "refs/archive/agentica-reconciliation/2026-11-03/remote/codex/maze-start-admission",
+      "state": "verified_absent",
+      "merged_into": "2e5c39d742698df41b0a96a7959e417c81cee039"
+    },
+    {
+      "branch": "codex/obligation-learning-host",
+      "head": "a03e20c18a70dd06fc7862ef7b37c83a91ded384",
+      "archive_ref": "refs/archive/agentica-reconciliation/2026-11-03/remote/codex/obligation-learning-host",
+      "state": "verified_absent",
+      "merged_into": "2e5c39d742698df41b0a96a7959e417c81cee039"
+    },
+    {
+      "branch": "codex/fixture-contention-proof",
+      "head": "05fdb7a7e09f246d9b26d434f4b0c71ea8c18750",
+      "archive_ref": "refs/archive/agentica-reconciliation/2026-11-03/remote/codex/fixture-contention-proof",
+      "state": "verified_absent",
+      "merged_into": "2e5c39d742698df41b0a96a7959e417c81cee039"
+    },
+    {
+      "branch": "codex/host-custody-consolidation",
+      "head": "123a11b05c8406e68842eb1cc5e8428e35eda9ad",
+      "archive_ref": "refs/archive/agentica-reconciliation/2026-11-03/remote/codex/host-custody-consolidation",
+      "state": "verified_absent",
+      "merged_into": "2e5c39d742698df41b0a96a7959e417c81cee039"
+    }
+  ]
+}
