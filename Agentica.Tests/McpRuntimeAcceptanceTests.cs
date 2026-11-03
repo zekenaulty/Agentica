@@ -126,6 +126,34 @@ public sealed class McpRuntimeAcceptanceTests
         Assert.Equal(0, server.RequestCount);
     }
 
+    [Theory]
+    [InlineData(64)] // ERROR_NETNAME_DELETED
+    [InlineData(1229)] // ERROR_CONNECTION_INVALID
+    public void Fixture_response_close_tolerates_disconnect_without_hiding_request_failure(int nativeError)
+    {
+        static void ThrowDisconnect(int error) => throw new HttpListenerException(error);
+        SdkFixtureServer.CloseClientResponse(() => ThrowDisconnect(nativeError));
+        var requestFailure = new InvalidOperationException("The request handler failed.");
+        Action request = () =>
+        {
+            try { throw requestFailure; }
+            finally { SdkFixtureServer.CloseClientResponse(() => ThrowDisconnect(nativeError)); }
+        };
+        var actual = Assert.Throws<InvalidOperationException>(request);
+        Assert.Same(requestFailure, actual);
+    }
+
+    [Fact]
+    public void Fixture_response_close_preserves_unexpected_listener_and_stream_errors()
+    {
+        var listenerFailure = new HttpListenerException(5);
+        Assert.Same(listenerFailure, Assert.Throws<HttpListenerException>(() =>
+            SdkFixtureServer.CloseClientResponse(() => throw listenerFailure)));
+        var streamFailure = new IOException("Unexpected response stream failure.");
+        Assert.Same(streamFailure, Assert.Throws<IOException>(() =>
+            SdkFixtureServer.CloseClientResponse(() => throw streamFailure)));
+    }
+
     private sealed class RecordPlanner : IWorkflowPlanner
     {
         public string[] VisibleToolIds { get; private set; } = [];
@@ -282,12 +310,21 @@ public sealed class McpRuntimeAcceptanceTests
                     }
                     finally
                     {
-                        context.Response.Close();
+                        CloseClientResponse(context.Response.Close);
                     }
                 }
             }
             catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
             catch (HttpListenerException) when (_stop.IsCancellationRequested) { }
+        }
+
+        internal static void CloseClientResponse(Action close)
+        {
+            try { close(); }
+            // A completed CLI client can disconnect before Windows closes the
+            // chunked response. Only that cleanup call tolerates these codes;
+            // handler assertions and protocol writes remain outside this catch.
+            catch (HttpListenerException exception) when (exception.NativeErrorCode is 64 or 1229) { }
         }
 
         public async ValueTask DisposeAsync()
