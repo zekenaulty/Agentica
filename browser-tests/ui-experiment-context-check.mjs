@@ -32,7 +32,7 @@ try {
       return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify(unavailable) });
     } else if (url.pathname.startsWith('/api/')) throw new Error(`Unexpected request: ${request.method()} ${url.pathname}`);
     if (body !== undefined) return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
-    const name = url.pathname.slice(1); if (!['chat.html', 'chat.css', 'chat.mjs', 'styles.css'].includes(name)) return route.fulfill({ status: 404, body: '' });
+    const name = url.pathname.slice(1); if (!['chat.html', 'chat.css', 'chat.mjs', 'chat-markdown.mjs', 'vendor/marked-18.1.3/marked.esm.mjs', 'vendor/entities-9.0.0/decode.js', 'vendor/entities-9.0.0/decode-codepoint.js', 'vendor/entities-9.0.0/generated/decode-data-html.js', 'vendor/entities-9.0.0/internal/decode-data-format.js', 'styles.css'].includes(name)) return route.fulfill({ status: 404, body: '' });
     return route.fulfill({ contentType: name.endsWith('.html') ? 'text/html' : name.endsWith('.css') ? 'text/css' : 'text/javascript', body: await readFile(new URL(name, assets)) });
   });
   const capture = async name => { if (!process.env.AGENTICA_BROWSER_ARTIFACTS) return; await mkdir(process.env.AGENTICA_BROWSER_ARTIFACTS, { recursive: true }); const path = join(process.env.AGENTICA_BROWSER_ARTIFACTS, name); await page.screenshot({ path }); screenshots.push(path); };

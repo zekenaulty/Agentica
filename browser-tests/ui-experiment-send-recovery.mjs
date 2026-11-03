@@ -43,7 +43,7 @@ try {
     } else if (url.pathname.startsWith('/api/')) throw new Error(`Unexpected API operation: ${request.method()} ${url.pathname}`);
     if (result !== undefined) return route.fulfill({ contentType: 'application/json', body: JSON.stringify(result) });
     const file = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
-    if (!['chat.html', 'chat.css', 'chat.mjs', 'styles.css'].includes(file)) return route.fulfill({ status: 404, body: '' });
+    if (!['chat.html', 'chat.css', 'chat.mjs', 'chat-markdown.mjs', 'vendor/marked-18.1.3/marked.esm.mjs', 'vendor/entities-9.0.0/decode.js', 'vendor/entities-9.0.0/decode-codepoint.js', 'vendor/entities-9.0.0/generated/decode-data-html.js', 'vendor/entities-9.0.0/internal/decode-data-format.js', 'styles.css'].includes(file)) return route.fulfill({ status: 404, body: '' });
     return route.fulfill({ contentType: file.endsWith('.html') ? 'text/html' : file.endsWith('.css') ? 'text/css' : 'text/javascript', body: await readFile(new URL(file, source)) });
   });
   const capture = async name => { if (!artifactDirectory) return; await mkdir(artifactDirectory, { recursive: true }); const path = join(artifactDirectory, name); await page.screenshot({ path }); screenshots.push(path); };

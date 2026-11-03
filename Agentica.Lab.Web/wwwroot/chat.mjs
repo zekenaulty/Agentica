@@ -1,5 +1,6 @@
 // Conversation state belongs to Lab. This page never stores provider credentials or
 // promotes diagnostic events into the conversation's input history.
+import { renderMarkdown } from './chat-markdown.mjs';
 export const isTerminal = status => !['queued', 'pending', 'running', 'active', 'starting', 'cancelling'].includes(String(status ?? '').toLowerCase());
 export const depthPresets = Object.freeze({
   minimal: { maxHistoryMessages: 4, maxInputCharacters: 12000 },
@@ -312,9 +313,11 @@ function startChat() {
   }
   function renderTurn(turn) {
     const article = node('article', 'turn'); article.dataset.turnId = turn.id;
-    const user = node('div', 'user-message'); user.append(node('div', 'message-label', 'You'), node('pre', 'message-content', turn.userText)); article.append(user);
+    const user = node('div', 'user-message'); const userContent = node('div', 'message-content markdown-body');
+    renderMarkdown(userContent, turn.userText ?? '');
+    user.append(node('div', 'message-label', 'You'), userContent); article.append(user);
     const assistant = node('div', 'assistant-message'); const assistantLabel = node('div', 'message-label', 'Agentica Lab');
-    const content = node('pre', 'message-content', turn.assistantText); const placeholder = node('div', 'assistant-placeholder');
+    const content = node('div', 'message-content markdown-body'); const placeholder = node('div', 'assistant-placeholder');
     const meta = node('div', 'turn-meta'); const error = node('div', 'turn-error'); const continuity = node('div', 'continuity-label'); const answerSources = node('div', 'answer-sources');
     assistant.append(assistantLabel, content, placeholder, answerSources, meta, error, continuity); article.append(assistant);
     const trace = node('details', 'turn-trace'); const traceLabel = node('summary'); trace.append(traceLabel);
@@ -343,7 +346,6 @@ function startChat() {
       loadTrace(turn.id);
     });
     $('transcript').append(article); updateTurn(turn); renderTrace(turn.id);
-    if (!isTerminal(turn.status)) trace.open = true;
   }
   function makeInspector(title) { const section = node('details', 'trace-inspector'); section.append(node('summary', '', title)); const body = node('pre', 'json-view', 'No retained record loaded.'); section.append(body); return { section, body }; }
   function turnById(id) { return state.conversation?.turns?.find(turn => turn.id === id); }
@@ -357,11 +359,10 @@ function startChat() {
     const retained = state.traces.get(turn.id);
     const events = [...new Map([...(retained?.events ?? []), ...(retained?.citationEvents ?? [])].map(event => [event.sequence, event])).values()];
     const text = turn.assistantText ?? ''; const presentation = citationPresentation(text, events);
-    if (!presentation.inline.length) elements.content.textContent = text;
-    else {
-      const fragments = []; let cursor = 0;
-      for (const citation of presentation.inline) { fragments.push(document.createTextNode(text.slice(cursor, citation.offset)), sourceLink(citation, true)); cursor = citation.offset; }
-      fragments.push(document.createTextNode(text.slice(cursor))); elements.content.replaceChildren(...fragments);
+    const signature = JSON.stringify(presentation.inline);
+    if (elements.renderedText !== text || elements.renderedCitations !== signature) {
+      elements.markdown = renderMarkdown(elements.content, text, { citations: presentation.inline, createCitation: citation => sourceLink(citation, true) });
+      elements.renderedText = text; elements.renderedCitations = signature;
     }
     elements.content.hidden = !text; elements.answerSources.replaceChildren(); elements.answerSources.hidden = !presentation.sources.length && !retained?.citationCoverage;
     if (retained?.citationCoverage) elements.answerSources.append(node('p', 'micro', retained.citationCoverage));
@@ -369,7 +370,7 @@ function startChat() {
       const sources = presentation.sources.filter(source => source.target === target); if (!sources.length) continue;
       const section = node('section', `citation-sources ${target}-sources`); section.append(node('h4', '', target === 'tool' ? 'Tool research sources' : 'Answer sources'));
       if (target === 'tool') section.append(node('p', 'micro', 'Search-tool evidence. These source ranges do not annotate the final answer.'));
-      if (target === 'assistant' && presentation.unplaced) section.append(node('p', 'micro', 'Source links are preserved below; inline placement is unavailable for some provider offsets.'));
+      if (target === 'assistant' && (presentation.unplaced || elements.markdown?.unplacedCitations)) section.append(node('p', 'micro', 'Source links are preserved below; inline placement is unavailable for some provider offsets.'));
       const list = node('ul'); for (const source of sources) { const item = node('li'); item.append(sourceLink(source), node('span', 'source-domain', new URL(source.url).hostname)); list.append(item); }
       section.append(list); elements.answerSources.append(section);
     }
@@ -394,7 +395,14 @@ function startChat() {
   function appendEvents(id, events) {
     const trace = state.traces.get(id); if (!trace) return;
     const merged = mergeTrace(trace.events, events); trace.events = merged.events; trace.windowOmitted += merged.omitted;
-    if (!trace.renderPending) { trace.renderPending = true; requestAnimationFrame(() => { if (!state.traces.has(id)) return; trace.renderPending = false; renderTrace(id); }); }
+    if (!trace.renderPending) {
+      trace.renderPending = true;
+      requestAnimationFrame(() => {
+        if (state.traces.get(id) !== trace) return;
+        trace.renderPending = false; const turn = turnById(id); if (turn) updateTurn(turn); renderTrace(id);
+        if (trace.followOutput) { trace.followOutput = false; scrollLatest(true); }
+      });
+    }
   }
   async function retainedPayload(id, event) {
     const retained = state.traces.get(id); if (!retained) return undefined;
@@ -523,15 +531,15 @@ function startChat() {
       if (trace.liveLast && value.sequence > trace.liveLast + 1) trace.gap = `Stream sequence gap: expected ${trace.liveLast + 1}, received ${value.sequence}. Inspect the retained trace.`;
       trace.liveLast = value.sequence; turn.traceCount = Math.max(turn.traceCount ?? 0, value.sequence);
       appendEvents(turn.id, [value]);
-      if (value.type === 'assistant.delta') { turn.assistantText = (turn.assistantText ?? '') + (value.data?.text ?? ''); updateTurn(turn); }
+      if (value.type === 'assistant.delta') turn.assistantText = (turn.assistantText ?? '') + (value.data?.text ?? '');
       if (/^turn\.(completed|failed|cancelled|canceled|interrupted|indeterminate)$/.test(value.type)) {
         source.close(); state.streams.delete(turn.id);
         if (value.data?.id === turn.id) Object.assign(turn, value.data);
         else turn.status = value.type.split('.')[1];
         updateTurn(turn); renderTrace(turn.id); updateControls();
         reconcileConversation(generation).catch(error => notice(`The turn ended, but refreshing its durable result failed: ${error.message}`));
-      } else updateTurn(turn);
-      if (stick) scrollLatest(true); else $('jump-container').hidden = false;
+      }
+      if (stick) trace.followOutput = true; else $('jump-container').hidden = false;
     };
     source.onerror = () => {
       if (generation !== state.generation || isTerminal(turn.status)) return;

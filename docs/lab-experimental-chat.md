@@ -11,6 +11,12 @@ Open `/chat.html` from the Lab dashboard. Create, rename and revisit saved conve
 
 The model selector groups account-visible GPT models from 5.6 onward by version and Terra, Luna, Sol or Astra family. It includes the eight current catalog IDs, preserves exact dated/custom IDs, and marks a documentation fallback as access-unchecked when account listing fails. Listing models does not perform inference or establish every model/effort/tool combination.
 
+### Message display and quiet inspection
+
+User and assistant messages render GitHub-flavored Markdown, including headings, emphasis, lists/tasks, quotations, code blocks, tables and web links. Stored messages, request text and original-source offsets remain unchanged. Streaming updates paint together once per animation frame. Formatting uses pinned local parser/decoder assets with licenses and integrity provenance; raw HTML stays literal, unsafe destinations stay inactive, and image syntax becomes a link without automatically fetching the image. An unusually large rendered tree falls back to the complete original text with line breaks preserved.
+
+Provider citation markers attach outside code and links at their containing Markdown block. Ambiguous offsets retain clickable sources below the answer. All trace accordions, inner inspectors and new event details start collapsed, including during a running turn or reconnect. Explicitly opened details remain open through updates; full retained payloads still load only when inspected.
+
 ## Ambient and explicit web search
 
 Both paths use [OpenAI Responses web search](https://developers.openai.com/api/docs/guides/tools-web-search), the selected model and the existing server-side credential. Search is off in new conversations.

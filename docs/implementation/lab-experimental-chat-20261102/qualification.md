@@ -145,6 +145,14 @@ Restricted evidence remains outside Git: `verification/browser/actual-draft-nati
 
 The [scoped development learning](native-input-admission-learning-proposal.md) records the correction and its evidence boundary. It does not modify managed Codex memories or the earlier completed recall capsule.
 
+## Markdown and collapsed-trace presentation — 3 November 2026
+
+User and assistant messages now render GFM through a pinned local Marked lexer and entity decoder, with allowlisted DOM creation rather than generated HTML insertion. Original stored/provider text stays exact. All trace disclosures start closed, including live turns; streaming updates preserve explicit inspection choices and coalesce Markdown painting to one animation frame. The renderer caps allocations at 10000, with an exact untruncated plain-text fallback that preserves whitespace and recovers when normal formatting resumes. Remote image syntax does not cause a network fetch. Vendor licenses, exact byte hashes and registry tarball integrity are retained in `wwwroot/vendor/markdown-provenance.json`.
+
+Verification: **109 JavaScript checks pass** (26 chat/Markdown checks and 83 host SDK checks). Four focused intercepted browser workflows pass: Markdown/streaming/inspection, context check, send recovery and the 5000-turn history paging workflow. The Markdown workflow verifies both-role semantic formatting; literal hostile HTML, inactive unsafe links and zero external requests; exact message POST; incomplete code-fence streaming; two synchronous deltas causing one paint; a 216031-character valid-table fallback/recovery; closed defaults through reload/reconnect; preserved explicit disclosure state and lazy retained payload loading. Actual SSE citation events verify block-level markers outside bold/link/code content, a code-only source fallback, source restoration after reload and unchanged canonical Markdown.
+
+The actual owner preview was refreshed without changing its saved revision **9** or composer content. Its newest page contains **40 Markdown message bodies** (20 of 23 saved turns), with **zero open trace disclosures**. No turn or inference was submitted for this presentation check. Restricted screenshot and synthetic qualification artifacts remain outside Git under `verification/browser-markdown-final/`, including `actual-chat-markdown.png` and `markdown-qualification.json`. The prior native-count head's CI result remains its own evidence; a new source head receives separate CI checks.
+
 ## Explicit limits
 
 - No paid/live inference, real-provider answer quality, account-specific model/effort compatibility, production deployment or Nyx migration is claimed.
