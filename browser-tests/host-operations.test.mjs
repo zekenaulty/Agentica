@@ -4,11 +4,12 @@ import { AgenticaHost, actionKey } from '../Agentica.Lab.Web/wwwroot/sdk/agentic
 
 class Socket {
   static instances = [];
-  constructor(url) { this.url = url; this.readyState = 0; this.handlers = new Map(); this.sent = []; Socket.instances.push(this); }
+  constructor(url) { this.url = url; this.readyState = 0; this.handlers = new Map(); this.sent = []; this.sendWaiters = []; Socket.instances.push(this); }
   addEventListener(type, handler) { this.handlers.set(type, [...(this.handlers.get(type) ?? []), handler]); }
   emit(type, payload = {}) { for (const handler of this.handlers.get(type) ?? []) handler(payload); }
   open() { this.readyState = 1; this.emit('open'); }
-  send(raw) { this.sent.push(JSON.parse(raw)); }
+  send(raw) { const message = JSON.parse(raw); this.sent.push(message); this.sendWaiters.shift()?.(message); }
+  nextSend() { return new Promise(resolve => this.sendWaiters.push(resolve)); }
   receive(message) { this.emit('message', { data: JSON.stringify({ protocolVersion: 1, ...message }) }); }
   close() { this.readyState = 3; this.emit('close'); }
 }
@@ -35,7 +36,15 @@ const response = (body, status = 200) => ({ ok: status >= 200 && status < 300, s
 const host = (options = {}) => new AgenticaHost({ url: 'ws://localhost:5078/api/host', WebSocketImpl: Socket,
   onAction: () => structuredClone(admission), requestTimeoutMs: 1000, ...options });
 async function connect(client) { const pending = client.connect(); const socket = Socket.instances.at(-1); socket.open(); await pending; return socket; }
-async function turn() { await new Promise(resolve => setImmediate(resolve)); }
+function beginWake(client, socket, value) {
+  const sent = socket.nextSend();
+  const response = client.wakeOperation(value);
+  // Observe rejection immediately, keeping the original response for assertions.
+  // A send notification needs only microtasks; setImmediate can run after the
+  // real response timeout on a busy runner before the fixture supplies its reply.
+  // The response's owned timeout also bounds this wait if no send occurs.
+  return { sent: Promise.race([sent, response]), response };
+}
 function started(request, patch = {}) {
   return { type: 'started', requestId: request.requestId, runId: 'wake-run', payload: {
     runId: 'wake-run', hostId: original.hostId, sessionId: original.sessionId, sessionEpoch: original.sessionEpoch,
@@ -162,42 +171,61 @@ test('parked notification preserves operation binding while the original executi
 test('decision wake binds the returned run before early action delivery and inherits original capability metadata', async () => {
   const client = host(); const socket = await connect(client);
   await client.listOperations({ hostId: 'host', sessionId: 'session', fetchImpl: async () => response([entry()]) });
-  const wake = client.wakeOperation(event({ kind: 'decision' })); await turn(); const sent = socket.sent.at(-1);
+  const wake = beginWake(client, socket, event({ kind: 'decision' })); const sent = await wake.sent;
   assert.equal(sent.type, 'operation.wake'); assert.equal(sent.payload.kind, 'decision'); assert.equal(sent.runId, undefined);
   socket.receive(started(sent));
   const nextAction = { ...action, runId: 'wake-run', actionId: 'next-action' };
   client.onAction = () => ({ ...admission, actionId: 'next-action', operation: { ...admission.operation, operationId: 'next-operation' } });
   socket.receive({ type: 'action.request', runId: 'wake-run', payload: nextAction }); await client.actionQueue;
-  assert.equal((await wake).runId, 'wake-run'); assert.equal(client.runs.get('wake-run').objectiveId, 'objective');
+  assert.equal((await wake.response).runId, 'wake-run'); assert.equal(client.runs.get('wake-run').objectiveId, 'objective');
   assert.deepEqual(client.runs.get('wake-run').capabilities, [capability]);
   assert.equal(socket.sent.at(-1).payload.disposition, 'applied'); client.close();
 });
 
 test('wake can bind a recovered service response without locally cached inventory and rejects foreign responses', async () => {
   for (const patch of [{}, { sessionEpoch: 'foreign' }, { hostId: 'foreign' }, { objectiveId: undefined }]) {
-    const client = host(); const socket = await connect(client); const waking = client.wakeOperation(event({ kind: 'decision' })); await turn();
-    socket.receive(started(socket.sent.at(-1), patch));
-    if (Object.keys(patch).length) { await assert.rejects(waking); assert.equal(client.runs.size, 0); }
-    else { assert.equal((await waking).runId, 'wake-run'); assert.equal(client.runs.get('wake-run').objectiveId, 'objective'); }
+    const client = host(); const socket = await connect(client); const waking = beginWake(client, socket, event({ kind: 'decision' }));
+    const rejected = Object.keys(patch).length ? assert.rejects(waking.response) : null;
+    socket.receive(started(await waking.sent, patch));
+    if (rejected) { await rejected; assert.equal(client.runs.size, 0); }
+    else { assert.equal((await waking.response).runId, 'wake-run'); assert.equal(client.runs.get('wake-run').objectiveId, 'objective'); }
     client.close();
   }
 });
 
 test('wake interruption and disconnect do not automatically create another cognition window', async () => {
   const client = host(); const socket = await connect(client);
-  const waking = client.wakeOperation(event({ kind: 'decision' })); await turn(); const sent = socket.sent.at(-1);
+  const waking = beginWake(client, socket, event({ kind: 'decision' }));
+  const interrupted = assert.rejects(waking.response, error => error.code === 'operation.wake_interrupted');
+  const sent = await waking.sent;
   socket.receive({ type: 'error', requestId: sent.requestId, payload: { code: 'operation.wake_interrupted', message: 'Claimed wake requires reconciliation.' } });
-  await assert.rejects(waking, error => error.code === 'operation.wake_interrupted'); assert.equal(socket.sent.length, 1);
-  const other = client.wakeOperation(event({ kind: 'decision', eventId: 'event-2', sequence: 2 })); await turn(); socket.close();
-  await assert.rejects(other, /Disconnected/); assert.equal(socket.sent.length, 2); assert.equal(client.runs.size, 0);
+  await interrupted; assert.equal(socket.sent.length, 1);
+  const other = beginWake(client, socket, event({ kind: 'decision', eventId: 'event-2', sequence: 2 }));
+  const disconnected = assert.rejects(other.response, /Disconnected/); await other.sent; socket.close();
+  await disconnected; assert.equal(socket.sent.length, 2); assert.equal(client.runs.size, 0);
+});
+
+test('wake timeout stays unresolved without automatically sending another request or invoking effects', async () => {
+  let effects = 0;
+  const client = host({ requestTimeoutMs: 1, onAction: () => effects++ }); const socket = await connect(client);
+  client.runs.set(action.runId, structuredClone(original));
+  await client.listOperations({ hostId: 'host', sessionId: 'session', fetchImpl: async () => response([entry()]) });
+  const retainedRuns = structuredClone([...client.runs]); const retainedOperations = structuredClone([...client.operations]);
+  const waking = client.wakeOperation(event({ kind: 'decision' }));
+  // Attach the rejection assertion before yielding to the actual timeout.
+  await assert.rejects(waking, /operation\.wake response timed out; outcome is unresolved\. Do not automatically repeat it\./);
+  assert.equal(socket.sent.length, 1); assert.equal(socket.sent[0].type, 'operation.wake');
+  assert.equal(client.pending.size, 0); assert.equal(effects, 0);
+  assert.deepEqual([...client.runs], retainedRuns); assert.deepEqual([...client.operations], retainedOperations);
+  client.close();
 });
 
 test('a host-confirmed epoch transfer keeps original admission immutable and binds the wake to its new epoch', async () => {
   const client = host(); const socket = await connect(client); const transferred = { ...entry(), activeEpoch: 'epoch-2' };
   await client.listOperations({ hostId: 'host', sessionId: 'session', fetchImpl: async () => response([transferred]) });
-  const waking = client.wakeOperation(event({ kind: 'decision', sessionEpoch: 'epoch-2', sequence: 2 })); await turn();
-  const sent = socket.sent.at(-1); assert.equal(sent.payload.sessionEpoch, 'epoch-2');
-  socket.receive(started(sent, { sessionEpoch: 'epoch-2' })); await waking;
+  const waking = beginWake(client, socket, event({ kind: 'decision', sessionEpoch: 'epoch-2', sequence: 2 }));
+  const sent = await waking.sent; assert.equal(sent.payload.sessionEpoch, 'epoch-2');
+  socket.receive(started(sent, { sessionEpoch: 'epoch-2' })); await waking.response;
   assert.equal(client.runs.get('wake-run').sessionEpoch, 'epoch-2');
   assert.equal([...client.operations.values()][0].admission.sessionEpoch, 'epoch-1'); client.close();
 });

@@ -1,14 +1,100 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Agentica.Artifacts;
 using Agentica.Observations;
 using Agentica.Tools;
+using ModelContextProtocol;
 
 namespace Agentica.Mcp;
 
 /// <summary>Converts only locally approved MCP bindings into Agentica registrations.</summary>
 public static class McpToolCatalogAdapter
 {
+    public const int MaximumInspectedBindings = 64;
+
+    /// <summary>Projects configured bindings without discarding them when dependencies
+    /// are unavailable. A null transport represents a host-observed connection failure.
+    /// Applicability is supplied by the host; discovery never supplies a grant.</summary>
+    public static async Task<McpBindingInspection> InspectAsync(
+        IMcpToolTransport? transport,
+        IReadOnlyList<McpToolBinding> bindings,
+        IReadOnlySet<string>? applicableToolIds = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(bindings);
+        if (bindings.Count > MaximumInspectedBindings)
+            throw new ArgumentException("MCP inspection supports at most 64 trusted bindings.", nameof(bindings));
+        cancellationToken.ThrowIfCancellationRequested();
+        var configured = bindings.ToArray();
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var binding in configured)
+            if (binding is null || string.IsNullOrWhiteSpace(binding.ServerId) ||
+                string.IsNullOrWhiteSpace(binding.RemoteName) || string.IsNullOrWhiteSpace(binding.ExpectedInputSchemaSha256) ||
+                binding.Descriptor is null || binding.Security is null || binding.Security.Provenance is null ||
+                string.IsNullOrWhiteSpace(binding.Descriptor.ToolId) || !ids.Add(binding.Descriptor.ToolId) ||
+                binding.MaxResultCharacters is < 1 or > 262_144 || binding.Descriptor.Effect != binding.Security.Effect ||
+                binding.Security.Provenance.Kind != ToolProvenanceKind.AdapterProvided)
+                throw new ArgumentException("An MCP binding is incomplete or inconsistent.", nameof(bindings));
+
+        var statuses = configured.Select(binding => new McpBindingStatus(binding,
+            applicableToolIds?.Contains(binding.Descriptor.ToolId) ?? true, false,
+            McpBindingIntegrity.Unknown, "mcp.not_applicable")).ToArray();
+        var eligible = statuses.Select((status, index) => (status, index)).Where(item => item.status.Applicable).ToArray();
+        foreach (var (status, index) in eligible)
+            statuses[index] = transport is null ? status with { ReasonCode = "mcp.connection_unavailable" } :
+                !string.Equals(transport.ServerId, status.Binding.ServerId, StringComparison.Ordinal)
+                    ? status with { Integrity = McpBindingIntegrity.Mismatch, ReasonCode = "mcp.server_mismatch" }
+                    : status with { ReasonCode = "mcp.discovery_unavailable" };
+        if (transport is null || !statuses.Any(status => status.ReasonCode == "mcp.discovery_unavailable"))
+            return new(Array.AsReadOnly(statuses), Array.Empty<ToolRegistration>());
+
+        IReadOnlyList<McpDiscoveredTool> discovered;
+        try { discovered = await transport.ListToolsAsync(cancellationToken).ConfigureAwait(false); }
+        catch (Exception error) when (IsDependencyFailure(error, cancellationToken))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return new(Array.AsReadOnly(statuses), Array.Empty<ToolRegistration>());
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        var registrations = new List<ToolRegistration>();
+        foreach (var (status, index) in eligible)
+        {
+            if (statuses[index].ReasonCode != "mcp.discovery_unavailable") continue;
+            var binding = status.Binding;
+            if (!string.Equals(transport.ServerId, binding.ServerId, StringComparison.Ordinal))
+            {
+                statuses[index] = status with { Integrity = McpBindingIntegrity.Mismatch, ReasonCode = "mcp.server_mismatch" };
+                continue;
+            }
+            var matches = discovered.Where(tool => string.Equals(tool.Name, binding.RemoteName, StringComparison.Ordinal)).Take(2).ToArray();
+            if (matches.Length != 1)
+            {
+                statuses[index] = status with { ReasonCode = matches.Length == 0 ? "mcp.tool_missing" : "mcp.tool_ambiguous" };
+                continue;
+            }
+            string actualHash;
+            try { actualHash = McpSchemaFingerprint.Sha256(matches[0].InputSchemaJson); }
+            catch (Exception error) when (error is JsonException or ArgumentException)
+            {
+                statuses[index] = status with { Integrity = McpBindingIntegrity.Mismatch, ReasonCode = "mcp.schema_invalid" };
+                continue;
+            }
+            if (!string.Equals(actualHash, binding.ExpectedInputSchemaSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                statuses[index] = status with { Integrity = McpBindingIntegrity.Mismatch, ReasonCode = "mcp.schema_mismatch" };
+                continue;
+            }
+            statuses[index] = status with { RuntimeReady = true, Integrity = McpBindingIntegrity.Matched, ReasonCode = "mcp.ready" };
+            registrations.Add(new(binding.Descriptor, new BoundMcpTool(transport, binding), binding.Security));
+        }
+        return new(Array.AsReadOnly(statuses), registrations.AsReadOnly());
+    }
+
+    private static bool IsDependencyFailure(Exception error, CancellationToken cancellationToken) =>
+        error is HttpRequestException or IOException or TimeoutException or ObjectDisposedException or McpException ||
+        error is OperationCanceledException && !cancellationToken.IsCancellationRequested;
+
     public static async Task<IReadOnlyList<ToolRegistration>> BindAsync(
         IMcpToolTransport transport,
         IReadOnlyList<McpToolBinding> bindings,
@@ -60,6 +146,8 @@ public static class McpToolCatalogAdapter
             ToolInvocation invocation,
             CancellationToken cancellationToken)
         {
+            if (!string.Equals(transport.ServerId, binding.ServerId, StringComparison.Ordinal))
+                throw new InvalidOperationException("MCP tool server changed before invocation.");
             var discovered = await transport.ListToolsAsync(cancellationToken).ConfigureAwait(false);
             var matches = discovered.Where(tool =>
                 string.Equals(tool.Name, binding.RemoteName, StringComparison.Ordinal)).ToArray();
@@ -69,6 +157,9 @@ public static class McpToolCatalogAdapter
             {
                 throw new InvalidOperationException("MCP tool schema changed before invocation.");
             }
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!string.Equals(transport.ServerId, binding.ServerId, StringComparison.Ordinal))
+                throw new InvalidOperationException("MCP tool server changed before invocation.");
             var result = await transport.CallToolAsync(
                 binding.RemoteName,
                 invocation.Input,
