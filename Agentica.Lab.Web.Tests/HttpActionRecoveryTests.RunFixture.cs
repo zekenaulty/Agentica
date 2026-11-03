@@ -38,8 +38,13 @@ public sealed partial class HttpActionRecoveryTests
 
     private static string RunQuery(string hostId, string sessionId, string sessionEpoch, string runId, string? afterActionId = null)
     {
-        var fields = new Dictionary<string, string> { ["hostId"] = hostId, ["sessionId"] = sessionId,
-            ["sessionEpoch"] = sessionEpoch, ["runId"] = runId };
+        var fields = new Dictionary<string, string>
+        {
+            ["hostId"] = hostId,
+            ["sessionId"] = sessionId,
+            ["sessionEpoch"] = sessionEpoch,
+            ["runId"] = runId
+        };
         if (afterActionId is not null) fields["afterActionId"] = afterActionId;
         return string.Join("&", fields.Select(pair => pair.Key + "=" + Uri.EscapeDataString(pair.Value)));
     }

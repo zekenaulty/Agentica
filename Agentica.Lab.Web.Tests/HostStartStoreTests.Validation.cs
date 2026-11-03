@@ -64,8 +64,17 @@ public sealed partial class HostStartStoreTests
     {
         var store = new HostStartStore(_root);
         var original = Request() with { Provider = new ProviderSettings(requested), Limits = null };
-        var accepted = original with { Provider = original.Provider with { Provider = normalized, Model = "configured-model",
-            ThinkingEffort = "high", ThinkingEffortResolved = true }, Limits = new HostRunLimits() };
+        var accepted = original with
+        {
+            Provider = original.Provider with
+            {
+                Provider = normalized,
+                Model = "configured-model",
+                ThinkingEffort = "high",
+                ThinkingEffortResolved = true
+            },
+            Limits = new HostRunLimits()
+        };
         var entry = store.Admit("attempt", original, accepted, "run");
         Assert.NotEqual(entry.OriginalRequestHash, entry.AcceptedRequestHash);
         Same(entry, new HostStartStore(_root).Find(Key())!);

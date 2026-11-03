@@ -400,7 +400,9 @@ public sealed class HostDecisionAdoptionTests
         RefusesWithoutWrite(harness, saved, () => harness.Registry.Wake(decision, originallyAdopted ? null : adoption));
         RefusesWithoutWrite(harness, saved, () => harness.Registry.Wake(decision, adoption with
         {
-            AdoptionId = "replacement-adoption", NextSessionEpoch = "replacement-owner", Observation = Observation("replacement-observation", 4)
+            AdoptionId = "replacement-adoption",
+            NextSessionEpoch = "replacement-owner",
+            Observation = Observation("replacement-observation", 4)
         }));
         AssertSame(original, harness.Get(action));
         Assert.Empty(harness.Registry.List());
@@ -632,7 +634,8 @@ public sealed class HostDecisionAdoptionTests
         harness.Restart();
         var observation = (useAdoptionId ? adoption.Observation : decision.Observation) with
         {
-            Revision = 10, Data = HostProtocol.Element(new { changed = true })
+            Revision = 10,
+            Data = HostProtocol.Element(new { changed = true })
         };
         var saved = File.ReadAllBytes(harness.LedgerPath);
         var cancellation = Event(action, "cancelled", 2, 10) with { SessionEpoch = adoption.NextSessionEpoch, Observation = observation };

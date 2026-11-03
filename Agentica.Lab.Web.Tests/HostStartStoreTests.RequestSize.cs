@@ -62,8 +62,13 @@ public sealed partial class HostStartStoreTests
         var (original, accepted) = SizePair(oversizedOriginal, HostStartStore.MaximumRequestBytes + 1);
         ProtocolValidation.Validate(original);
         ProtocolValidation.Validate(accepted);
-        entry = entry with { OriginalRequest = original, AcceptedRequest = accepted,
-            OriginalRequestHash = ProtocolValidation.Digest(original), AcceptedRequestHash = ProtocolValidation.Digest(accepted) };
+        entry = entry with
+        {
+            OriginalRequest = original,
+            AcceptedRequest = accepted,
+            OriginalRequestHash = ProtocolValidation.Digest(original),
+            AcceptedRequestHash = ProtocolValidation.Digest(accepted)
+        };
         File.WriteAllBytes(LedgerPath, LedgerBytes([entry]));
         var before = Bytes();
         var error = Assert.Throws<InvalidDataException>(() => new HostStartStore(_root));
@@ -79,8 +84,11 @@ public sealed partial class HostStartStoreTests
         var request = Request();
         if (oversizedOriginal)
         {
-            var original = request with { Provider = request.Provider! with
-                { Provider = "openai" + new string(' ', bytes - RequestBytes(request)) } };
+            var original = request with
+            {
+                Provider = request.Provider! with
+                { Provider = "openai" + new string(' ', bytes - RequestBytes(request)) }
+            };
             Assert.Equal(bytes, RequestBytes(original));
             return (original, request);
         }
@@ -96,7 +104,10 @@ public sealed partial class HostStartStoreTests
         var remaining = bytes - RequestBytes(request);
         Assert.True(remaining >= 0);
         var unitBytes = JsonSerializer.SerializeToUtf8Bytes(padding.ToString(), HostProtocol.Json).Length - 2;
-        return request with { Provider = request.Provider with
-            { Model = new string(padding, remaining / unitBytes) + new string('m', remaining % unitBytes) } };
+        return request with
+        {
+            Provider = request.Provider with
+            { Model = new string(padding, remaining / unitBytes) + new string('m', remaining % unitBytes) }
+        };
     }
 }

@@ -125,8 +125,13 @@ public sealed partial class ActionCustodyStore
                 : recovered || entry.RecoveryRetention == "http" ? "http" : null;
             var changed = entry.ResultHash != hash;
             if (!changed && entry.RecoveryRetention == retention) return false;
-            var updated = entry with { Result = Copy(result), ResultHash = hash, UpdatedAt = DateTimeOffset.UtcNow,
-                RecoveryRetention = retention };
+            var updated = entry with
+            {
+                Result = Copy(result),
+                ResultHash = hash,
+                UpdatedAt = DateTimeOffset.UtcNow,
+                RecoveryRetention = retention
+            };
             var entries = ledger.Entries.Where(other => other != entry).Append(updated).ToList();
             Commit(ledger, entries);
             return changed;

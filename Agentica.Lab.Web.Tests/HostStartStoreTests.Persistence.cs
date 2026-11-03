@@ -158,13 +158,16 @@ public sealed partial class HostStartStoreTests
 
     private static HostStartEntry Rebind(HostStartEntry template, HostRunRequest request) => template with
     {
-        OriginalRequest = request, AcceptedRequest = request,
-        OriginalRequestHash = ProtocolValidation.Digest(request), AcceptedRequestHash = ProtocolValidation.Digest(request),
+        OriginalRequest = request,
+        AcceptedRequest = request,
+        OriginalRequestHash = ProtocolValidation.Digest(request),
+        AcceptedRequestHash = ProtocolValidation.Digest(request),
         ManifestHash = ProtocolValidation.Digest(request.Capabilities)
     };
     private static HostStartEntry EntryFor(HostStartEntry template, int index) => Rebind(template with
     {
-        AttemptId = "attempt-" + index.ToString("D4"), RunId = "run-" + index.ToString("D4")
+        AttemptId = "attempt-" + index.ToString("D4"),
+        RunId = "run-" + index.ToString("D4")
     }, template.OriginalRequest with { SessionId = "session-" + index.ToString("D4") });
     private byte[] LedgerBytes(IReadOnlyList<HostStartEntry> entries)
     {

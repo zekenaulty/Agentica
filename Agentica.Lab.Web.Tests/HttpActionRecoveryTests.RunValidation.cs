@@ -57,8 +57,14 @@ public sealed partial class HttpActionRecoveryTests
         foreach (var invalid in new string?[] { null, "", " ", "bad\nidentifier", "bad\tidentifier", new('x', 129) })
         {
             if (field == "afterActionId" && invalid is null) continue;
-            var fields = new Dictionary<string, string> { ["hostId"] = "host", ["sessionId"] = "session",
-                ["sessionEpoch"] = "epoch", ["runId"] = "run", ["afterActionId"] = "cursor" };
+            var fields = new Dictionary<string, string>
+            {
+                ["hostId"] = "host",
+                ["sessionId"] = "session",
+                ["sessionEpoch"] = "epoch",
+                ["runId"] = "run",
+                ["afterActionId"] = "cursor"
+            };
             if (invalid is null) fields.Remove(field);
             else fields[field] = invalid;
             var query = string.Join("&", fields.Select(pair => pair.Key + "=" + Uri.EscapeDataString(pair.Value)));

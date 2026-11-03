@@ -193,6 +193,8 @@ public static partial class LabWebApplication
                                     if (attached != admitted.Run) attached?.Detach(connection);
                                     attached = admitted.Run;
                                 }, context.RequestAborted).ConfigureAwait(false);
+                                // Exact start retries reattach retained custody, including replies lost before disconnect.
+                                await admitted.Run.ReplayPendingAsync(context.RequestAborted).ConfigureAwait(false);
                             }
                             finally { if (attached == admitted.Run) attached.Start(); }
                             break;
