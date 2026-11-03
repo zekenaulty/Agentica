@@ -146,10 +146,13 @@ public sealed class ExperimentRecallApiTests
     [Fact]
     public async Task Explicit_rebuild_cancel_status_and_service_restart_preserve_canonical_sources()
     {
-        await using var fixture = await ApiFixture.Start();
+        await using var fixture = await ApiFixture.Start(arrangeBeforeExercise: true);
         var chat = await fixture.Create("Maintenance");
         var first = fixture.Complete(chat.Id, new string('x', 8000) + " source-0", "answer-0");
         for (var i = 1; i < 32; i++) fixture.Complete(chat.Id, new string('x', 8000) + " source-" + i, "answer-" + i);
+        // Canonical SQLite arrangement competes with the large-corpus fixture on
+        // Windows CI. It must not spend the unchanged HTTP exercise deadline.
+        fixture.BeginExercise();
         Assert.Equal("NOT_READY", (await fixture.Get<HistoryStatus>($"/api/chats/{chat.Id}/history/status")).Coverage.Status);
         var started = await fixture.Post<ConversationIndexProgress>($"/api/chats/{chat.Id}/history/rebuild", null);
         Assert.Equal("INDEXING", started.Status);
@@ -171,6 +174,33 @@ public sealed class ExperimentRecallApiTests
         Assert.Equal(before.Hits[0].StartOffset, after.Hits[0].StartOffset);
         Assert.Equal(before.Hits[0].EndOffset, after.Hits[0].EndOffset);
         Assert.Empty(fixture.Executor.Contexts);
+    }
+
+    [Fact]
+    public async Task Fixture_arrangement_and_HTTP_exercise_have_independent_bounded_deadlines()
+    {
+        var clock = new FixtureTimeProvider();
+        await using (var fixture = await ApiFixture.Start(arrangeBeforeExercise: true, timeProvider: clock))
+        {
+            var chat = await fixture.Create("Deadline phases");
+            fixture.Complete(chat.Id, "canonical arrangement", "original response");
+            clock.Advance(TimeSpan.FromSeconds(46));
+            Assert.False(fixture.Token.IsCancellationRequested);
+            fixture.BeginExercise();
+            Assert.Equal("NOT_READY", (await fixture.Get<HistoryStatus>($"/api/chats/{chat.Id}/history/status")).Coverage.Status);
+            clock.Advance(TimeSpan.FromSeconds(44));
+            Assert.False(fixture.Token.IsCancellationRequested);
+            clock.Advance(TimeSpan.FromSeconds(1));
+            Assert.True(fixture.Token.IsCancellationRequested);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => fixture.Get<HistoryStatus>($"/api/chats/{chat.Id}/history/status"));
+            Assert.Equal(1, fixture.Store.GetHead(chat.Id).CompletedTurns);
+        }
+
+        var expiredClock = new FixtureTimeProvider();
+        await using var expired = await ApiFixture.Start(arrangeBeforeExercise: true, timeProvider: expiredClock);
+        expiredClock.Advance(TimeSpan.FromMinutes(3));
+        Assert.True(expired.Token.IsCancellationRequested);
+        Assert.Throws<OperationCanceledException>(expired.BeginExercise);
     }
 
     [Fact]
@@ -244,19 +274,39 @@ public sealed class ExperimentRecallApiTests
     private sealed class ApiFixture : IAsyncDisposable
     {
         private readonly string _directory = Directory.CreateTempSubdirectory("agentica-recall-api-").FullName;
-        private readonly CancellationTokenSource _deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        private readonly TimeProvider _timeProvider;
+        private CancellationTokenSource _phaseDeadline = null!;
+        private CancellationTokenSource _deadline = null!;
         private WebApplication? _app;
         internal CaptureExecutor Executor { get; } = new();
         internal HttpClient Http { get; private set; } = null!;
         internal ExperimentStore Store => _app!.Services.GetRequiredService<ExperimentStore>();
         internal CancellationToken Token => _deadline.Token;
-        private ApiFixture() => _deadline.CancelAfter(TimeSpan.FromSeconds(45));
-
-        internal static async Task<ApiFixture> Start()
+        private ApiFixture(bool arrangeBeforeExercise, TimeProvider? timeProvider)
         {
-            var fixture = new ApiFixture();
+            _timeProvider = timeProvider ?? TimeProvider.System;
+            SetDeadline(arrangeBeforeExercise ? TimeSpan.FromMinutes(3) : TimeSpan.FromSeconds(45));
+        }
+
+        internal static async Task<ApiFixture> Start(bool arrangeBeforeExercise = false, TimeProvider? timeProvider = null)
+        {
+            var fixture = new ApiFixture(arrangeBeforeExercise, timeProvider);
             try { await fixture.StartApplication(); return fixture; }
             catch { await fixture.DisposeAsync(); throw; }
+        }
+
+        internal void BeginExercise()
+        {
+            Token.ThrowIfCancellationRequested();
+            SetDeadline(TimeSpan.FromSeconds(45));
+        }
+
+        private void SetDeadline(TimeSpan budget)
+        {
+            var phase = new CancellationTokenSource(budget, _timeProvider);
+            var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken, phase.Token);
+            _deadline?.Dispose(); _phaseDeadline?.Dispose();
+            _phaseDeadline = phase; _deadline = deadline;
         }
 
         private async Task StartApplication()
@@ -276,6 +326,7 @@ public sealed class ExperimentRecallApiTests
         internal Task<ExperimentConversation> Create(string title) => Post<ExperimentConversation>("/api/chats", new ExperimentCreateRequest(title));
         internal ExperimentTurn Complete(string id, string user, string answer)
         {
+            Token.ThrowIfCancellationRequested();
             var turn = Store.Begin(id, new(user)).Turn;
             return Store.Complete(id, turn.Id, new("completed", answer));
         }
@@ -327,7 +378,46 @@ public sealed class ExperimentRecallApiTests
                 try { await _app.StopAsync(cleanup.Token); }
                 finally { await _app.DisposeAsync(); _app = null; }
             }
-            _deadline.Dispose(); Directory.Delete(_directory, recursive: true);
+            _deadline.Dispose(); _phaseDeadline.Dispose(); Directory.Delete(_directory, recursive: true);
+        }
+    }
+
+    // Only one-shot fixture deadlines use this clock. Advancing it exercises
+    // cancellation boundaries deterministically without delaying HTTP or storage.
+    private sealed class FixtureTimeProvider : TimeProvider
+    {
+        private readonly List<FixtureTimer> _timers = [];
+        private TimeSpan _elapsed;
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new FixtureTimer(this, callback, state);
+            timer.Change(dueTime, period); _timers.Add(timer); return timer;
+        }
+
+        internal void Advance(TimeSpan elapsed)
+        {
+            _elapsed += elapsed;
+            foreach (var timer in _timers.ToArray()) timer.FireIfDue();
+        }
+
+        private sealed class FixtureTimer(FixtureTimeProvider owner, TimerCallback callback, object? state) : ITimer
+        {
+            private TimeSpan _due;
+            private bool _disposed;
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                if (_disposed) return false;
+                if (period != Timeout.InfiniteTimeSpan) throw new InvalidOperationException("The fixture supports one-shot deadlines only.");
+                _due = dueTime == Timeout.InfiniteTimeSpan ? TimeSpan.MaxValue : owner._elapsed + dueTime;
+                return true;
+            }
+            internal void FireIfDue()
+            {
+                if (_disposed || _due > owner._elapsed) return;
+                _due = TimeSpan.MaxValue; callback(state);
+            }
+            public void Dispose() => _disposed = true;
+            public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
         }
     }
 }
