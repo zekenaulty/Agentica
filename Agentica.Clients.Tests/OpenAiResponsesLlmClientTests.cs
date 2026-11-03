@@ -49,7 +49,7 @@ public sealed class OpenAiResponsesLlmClientTests
              new LlmMessage(LlmMessageRole.User, "How many?")],
             new LlmGenerationOptions(MaxOutputTokens: 128,
                 Thinking: LlmThinkingOptions.AtEffort(LlmReasoningEffort.High, includeThoughts: true)),
-            new LlmStructuredOutputOptions(JsonSchema: "{\"type\":\"object\"}"));
+            new LlmStructuredOutputOptions());
         var events = new List<LlmStreamEvent>();
         await foreach (var item in client.StreamAsync(firstRequest)) events.Add(item);
         var first = Assert.IsType<LlmResponse>(events[^1].Response);
