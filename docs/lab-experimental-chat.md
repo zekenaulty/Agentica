@@ -64,6 +64,8 @@ Reasoning effort, context-depth preset, model window/output reservation, history
 
 Context estimates are conservative UTF-8 request proxies, not measured provider token counts. Tool results have individual limits, while the Harness evidence planner enforces a cumulative receipt/observation projection limit without deleting canonical runtime proof. The current refinement observation must fit or the run stops truthfully.
 
+Direct Clean Room history selection and dispatch size the same complete serialized Responses envelope, including optional instructions, reasoning and search metadata. Recent-history omission removes complete older pairs until that actual envelope fits. If the current input alone cannot fit, `context.limit` reports the failed gate, request size, output/safety reservations and omissions; it does not imply a settings revision conflict. A rejected send retains its draft and request identity for an explicit retry after configuration changes.
+
 Memory is disabled in settings validation, context compilation and offered capabilities. History is durable chat data; it is not admitted memory. No future memory adapter is mounted by this release.
 
 ## Opt-in capability palette

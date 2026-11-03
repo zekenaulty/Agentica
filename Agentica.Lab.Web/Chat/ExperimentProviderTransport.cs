@@ -47,8 +47,8 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
         var bytes = request.Content is null ? [] : await request.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
         _credential = request.Headers.Authorization?.Parameter;
         var body = JsonSerializer.Deserialize<JsonElement>(bytes);
-        var allowance = (long)settings.ContextWindowTokens - settings.MaxOutputTokens - 4096;
-        var estimate = bytes.LongLength + 512;
+        var allowance = ExperimentDirectRequest.InputAllowance(settings);
+        var estimate = bytes.LongLength + ExperimentDirectRequest.ProxyEnvelopeReserve;
         var purpose = request.Options.TryGetValue(PurposeOption, out var requestPurpose) ? requestPurpose : settings.Mode;
         await _context.Trace(new("provider.request", new
         {

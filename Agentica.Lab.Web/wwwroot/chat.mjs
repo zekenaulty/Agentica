@@ -68,6 +68,10 @@ export function familyModelCatalog(ids) {
   return groups;
 }
 export const catalogSelection = (groups, exactModel) => groups.some(group => group.models.some(model => model.id === exactModel)) ? exactModel : '';
+export function actionErrorMessage(error) {
+  const message = `${error.code ? `${error.code}: ` : ''}${error.message ?? 'The request failed.'}`;
+  return error.code === 'settings.conflict' ? `${message} Use “Reload saved configuration” to load the current revision. Your message draft is preserved.` : message;
+}
 export function safeHttpUrl(value) {
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : null; } catch { return null; }
 }
@@ -510,7 +514,7 @@ function startChat() {
     state.busy = true; updateControls();
     try { await action(); }
     catch (error) {
-      notice(`${error.code ? `${error.code}: ` : ''}${error.message}${error.status === 409 ? ' Another tab or a running turn changed this conversation. Refresh before trying again; your unsaved fields are preserved.' : ''}`);
+      notice(actionErrorMessage(error));
     } finally { state.busy = false; updateControls(); }
   }
   function renderCapabilities() {

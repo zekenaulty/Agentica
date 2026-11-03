@@ -112,32 +112,12 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IDisposable
         var snapshot = _configuration.Capture();
         if (snapshot.ApiKey is null)
             throw new ExperimentException("provider.not_configured", "Configure the existing OpenAI provider credential before sending a turn.");
-        var input = context.History.Select(message =>
-        {
-            if (message.Role is not ("user" or "assistant"))
-                throw new ExperimentException("context.role", "Only this conversation's visible user and assistant transcript may be replayed.");
-            return new { role = message.Role, content = message.Content };
-        }).Append(new { role = "user", content = context.Turn.UserText }).ToArray();
-        var body = new Dictionary<string, object?>
-        {
-            ["model"] = settings.Model,
-            ["input"] = input,
-            ["stream"] = true,
-            ["store"] = false,
-            ["max_output_tokens"] = settings.MaxOutputTokens
-        };
-        // Empty means omission. Every nonempty character, including whitespace, is exact.
-        if (settings.Instructions.Length != 0) body["instructions"] = settings.Instructions;
-        var reasoning = new Dictionary<string, object?>();
-        if (settings.ReasoningEffort is not null) reasoning["effort"] = settings.ReasoningEffort;
-        if (settings.ReasoningSummary) reasoning["summary"] = "auto";
-        if (reasoning.Count != 0) body["reasoning"] = reasoning;
-        if (settings.AmbientWebSearch)
-            AddWebSearch(body, "auto", settings.MaxWebSearchCalls);
+        var envelope = ExperimentDirectRequest.Build(settings, context.History, context.Turn.UserText);
         using var request = new HttpRequestMessage(HttpMethod.Post, OpenAiResponsesClientOptions.DefaultEndpoint)
         {
-            Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json")
+            Content = new ByteArrayContent(envelope.Utf8)
         };
+        request.Content.Headers.ContentType = new("application/json") { CharSet = "utf-8" };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", snapshot.ApiKey);
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
@@ -267,15 +247,6 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IDisposable
                 : "The Agentica harness did not produce a completed response artifact. Inspect the plan, receipts and outcome."));
     }
 
-    private static void AddWebSearch(Dictionary<string, object?> body, string choice, int maximumCalls)
-    {
-        if (maximumCalls <= 0) throw new ExperimentException("web.search.call_limit", "The configured web-search call limit was reached.");
-        body["tools"] = new[] { new { type = "web_search" } };
-        body["tool_choice"] = choice;
-        body["include"] = new[] { "web_search_call.action.sources" };
-        body["max_tool_calls"] = maximumCalls;
-    }
-
     private async Task<object> SearchAsync(ExperimentExecutionContext context, string query, HttpClient observed,
         ExperimentProviderTransport transport, WebSearchBudget budget, CancellationToken cancellationToken)
     {
@@ -294,7 +265,7 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IDisposable
         if (settings.ReasoningEffort is not null) reasoning["effort"] = settings.ReasoningEffort;
         if (settings.ReasoningSummary) reasoning["summary"] = "auto";
         if (reasoning.Count != 0) body["reasoning"] = reasoning;
-        AddWebSearch(body, "required", allowance);
+        ExperimentDirectRequest.AddWebSearch(body, "required", allowance);
         var state = new DirectState(context with { Output = _ => Task.CompletedTask }, allowWebSearch: true, target: "tool");
         using var request = new HttpRequestMessage(HttpMethod.Post, OpenAiResponsesClientOptions.DefaultEndpoint)
         {

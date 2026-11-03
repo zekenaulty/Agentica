@@ -108,6 +108,19 @@ Local correction evidence: regenerated solution/focused restores pass; both vuln
 
 Follow-up [run 41542375896](https://github.com/zekenaulty/Agentica/actions/runs/41542375896), head `909dbfccd87650a641d6abe59e0193dc8ba04095`: Windows **success** on the pinned SDK. Linux passed locked restores, dependency audits, formatting, builds, security analyzers, provider/Web/host tests, core coverage, package validation and container build/smoke. Its final secret scan flagged one **unverified URI** in `chat-ui.test.mjs:19`: the synthetic user-info URL used to test citation rejection. The test now constructs the same invalid URL at runtime and still asserts rejection for username-only and username/password cases. No detector/path exclusion or gate suppression was added. The unmerged feature commit was amended to remove that fixture literal from the PR history; a fresh CI run qualifies the replacement head separately.
 
+## Context admission incident correction
+
+Read-only inspection of the operator's affected chat confirmed saved settings and the form agreed: configured window 131072, output reservation 64000, safety reservation 4096, recent-history omission enabled. The resulting conservative input allowance is 62976 units. The current draft has 62427 UTF-16 characters and 62441 UTF-8 bytes; the previous content estimator added 1024 even with no retained history, exceeding that allowance. This is a local conservative proxy rejection, not evidence of actual provider token-window exhaustion or a concurrent writer. The draft was not submitted or modified during diagnosis. No private message content is copied into source, fixtures or this report.
+
+Two defects were corrected:
+
+1. The browser appended concurrency/refresh advice to every HTTP 409. It now keys revision advice to `settings.conflict`; context limits, quotas, busy state and request-identity conflicts retain their actual messages.
+2. Direct history selection counted unescaped content, while final admission counted serialized JSON. They now share the exact direct request builder, serialized character count and UTF-8-byte-plus-512 proxy. `recent` removes complete pairs against that same gate. The current input is preserved; no heuristic token conversion, automatic summarization or new memory/context feature is introduced. Harness projection keeps its existing path.
+
+Verification: full Lab Web Release **206 passed, 1 Windows symlink skip, 0 failed**, total 207 (`verification/test-results/lab-context-bug.trx`). Six new synthetic regressions cover the size-shaped oversized current draft, escaping overhead, complete-pair omission, preflight/dispatch equality, full settings fidelity and unchanged Harness projection. Focused JavaScript **17 passed**. Independent read-only review found no actionable regression in supported paths.
+
+The isolated intercepted browser regression proves autosave before rejection, accurate context-limit advice, preserved draft/request ID, retry with revised settings, a single accepted turn, clearing only after success, and genuine settings-conflict handling. Zero user-chat/service/provider calls and zero page errors. Evidence: `verification/browser/send-recovery-qualification.json`, `experiment-context-limit-recovery.png` and `experiment-settings-conflict.png`. Local diagnosis reads operator metadata/trace only; the failed send has no new admitted turn.
+
 ## Explicit limits
 
 - No paid/live inference, real-provider answer quality, account-specific model/effort compatibility, production deployment or Nyx migration is claimed.

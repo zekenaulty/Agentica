@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { catalogSelection, citationPresentation, classifyEvent, depthPresets, familyModelCatalog, instructionValue, isTerminal, knownFamilyModelIds, mergeTrace, safeHttpUrl, summarizeTrace, validateSettings } from '../Agentica.Lab.Web/wwwroot/chat.mjs';
+import { actionErrorMessage, catalogSelection, citationPresentation, classifyEvent, depthPresets, familyModelCatalog, instructionValue, isTerminal, knownFamilyModelIds, mergeTrace, safeHttpUrl, summarizeTrace, validateSettings } from '../Agentica.Lab.Web/wwwroot/chat.mjs';
+
+test('only a settings revision conflict receives reload guidance', () => {
+  assert.equal(actionErrorMessage({ status: 409, code: 'context.limit', message: 'The draft exceeds its input allowance. No model call was made.' }), 'context.limit: The draft exceeds its input allowance. No model call was made.');
+  assert.equal(actionErrorMessage({ status: 409, code: 'chat.busy', message: 'An active turn already exists.' }), 'chat.busy: An active turn already exists.');
+  assert.equal(actionErrorMessage({ status: 409, code: 'turn.request_conflict', message: 'Different content.' }), 'turn.request_conflict: Different content.');
+  assert.equal(actionErrorMessage({ status: 409, message: 'Unclassified conflict.' }), 'Unclassified conflict.');
+  assert.match(actionErrorMessage({ status: 409, code: 'settings.conflict', message: 'Settings changed elsewhere.' }), /Reload saved configuration/);
+});
 
 test('assistant citation ranges produce inline markers and source links without changing source text', () => {
   const text = 'Read the source.';
