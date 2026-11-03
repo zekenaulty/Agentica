@@ -59,6 +59,7 @@ public sealed class HostStartSdkServiceTests
             }
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             await app.StopAsync(timeout.Token);
+            await app.DisposeAsync();
             Directory.Delete(storage, true);
         }
     }

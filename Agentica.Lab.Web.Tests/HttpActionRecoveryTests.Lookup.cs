@@ -150,6 +150,12 @@ public sealed partial class HttpActionRecoveryTests
     }
 
     private (string Path, string Hash, DateTime Written)[] StorageSnapshot() =>
-        Directory.GetFiles(_storage.FullName, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal)
+        // Recovery reads must preserve host custody and continuation state. Chat owns a separate
+        // database and exclusive service lease under this root; neither belongs to that assertion.
+        new[] { "custody", "operations", "starts", "context" }
+            .Select(directory => Path.Combine(_storage.FullName, directory))
+            .Where(Directory.Exists)
+            .SelectMany(directory => Directory.GetFiles(directory, "*", SearchOption.AllDirectories))
+            .Order(StringComparer.Ordinal)
             .Select(path => (path, Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))), File.GetLastWriteTimeUtc(path))).ToArray();
 }

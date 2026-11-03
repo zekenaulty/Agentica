@@ -17,7 +17,9 @@ jobs:
   windows-proof:
     name: Windows locked build and filesystem proof
     runs-on: windows-2022
-    timeout-minutes: 20
+    # The integrated host/chat suite now has over 570 cases. Retain every
+    # per-operation deadline while allowing the complete Windows gate to finish.
+    timeout-minutes: 30
     env:
       CI: true
       DOTNET_CLI_TELEMETRY_OPTOUT: 1
