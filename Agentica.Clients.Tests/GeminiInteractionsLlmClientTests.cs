@@ -79,6 +79,11 @@ public sealed class GeminiInteractionsLlmClientTests
         Assert.Equal("hello", result.StructuredJson);
         Assert.Equal(3, result.Usage?.PromptTokens);
         Assert.Equal(1, result.Usage?.ThinkingTokens);
+        Assert.Equal(LlmOutputTokenSemantics.ExcludesThinking, result.Usage?.OutputTokenSemantics);
+        Assert.Equal(2, result.Usage?.OutputTokens);
+        Assert.Equal(2, result.Usage?.NonThinkingOutputTokens);
+        Assert.Equal(3, result.Usage?.GeneratedOutputTokens);
+        Assert.Equal(6, result.Usage?.TotalTokens);
         Assert.Equal("int_1", result.Metadata?["gemini.interaction.id"]);
         Assert.DoesNotContain("opaque", JsonSerializer.Serialize(result));
         Assert.Equal("test-key", requestKey);

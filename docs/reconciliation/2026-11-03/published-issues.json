@@ -1,0 +1,139 @@
+{
+  "date": "2026-11-03",
+  "repository": "zekenaulty/Agentica",
+  "source_main": "977d0cab5421fd4e09fd33f1224f241b7e425abe",
+  "issues": {
+    "AGENTICA-PROGRAM": {
+      "number": 12,
+      "url": "https://github.com/zekenaulty/Agentica/issues/12",
+      "title": "[Program] Agentica activation, Lab and Nyx learning \u2014 reconciled implementation storyboard",
+      "state": "OPEN"
+    },
+    "OA-C": {
+      "number": 13,
+      "url": "https://github.com/zekenaulty/Agentica/issues/13",
+      "title": "[Epic OA-C] Obligation contracts, semantic realization and existing-runtime integration",
+      "state": "OPEN"
+    },
+    "OA-H": {
+      "number": 14,
+      "url": "https://github.com/zekenaulty/Agentica/issues/14",
+      "title": "[Epic OA-H] Provider, capability and custody correctness for host integration",
+      "state": "OPEN"
+    },
+    "OA-R": {
+      "number": 15,
+      "url": "https://github.com/zekenaulty/Agentica/issues/15",
+      "title": "[Epic OA-R] Exact interpretation reuse and evidence-qualified recovery",
+      "state": "OPEN"
+    },
+    "OA-Q": {
+      "number": 16,
+      "url": "https://github.com/zekenaulty/Agentica/issues/16",
+      "title": "[Epic OA-Q] Lab and provider qualification with coherent product truth",
+      "state": "OPEN"
+    },
+    "OA-N": {
+      "number": 17,
+      "url": "https://github.com/zekenaulty/Agentica/issues/17",
+      "title": "[Epic OA-N] Nyx learning corpus, MCP faculty and independent cognition seam",
+      "state": "OPEN"
+    },
+    "C-01": {
+      "number": 18,
+      "url": "https://github.com/zekenaulty/Agentica/issues/18",
+      "title": "[C-01] Pin opt-in obligation, exact perspective evidence and fulfillment v1",
+      "state": "OPEN"
+    },
+    "C-02": {
+      "number": 19,
+      "url": "https://github.com/zekenaulty/Agentica/issues/19",
+      "title": "[C-02] Project obligation evidence through the existing frame and acceptance seams",
+      "state": "OPEN"
+    },
+    "C-03": {
+      "number": 20,
+      "url": "https://github.com/zekenaulty/Agentica/issues/20",
+      "title": "[C-03] Prove minimal realization matching and bounded capability discovery",
+      "state": "OPEN"
+    },
+    "H-01": {
+      "number": 21,
+      "url": "https://github.com/zekenaulty/Agentica/issues/21",
+      "title": "[H-01] Honor supplied strict schemas in the OpenAI Responses adapter",
+      "state": "OPEN"
+    },
+    "H-02": {
+      "number": 22,
+      "url": "https://github.com/zekenaulty/Agentica/issues/22",
+      "title": "[H-02] Make provider usage inclusion and billable totals explicit",
+      "state": "OPEN"
+    },
+    "H-03": {
+      "number": 23,
+      "url": "https://github.com/zekenaulty/Agentica/issues/23",
+      "title": "[H-03] Expose persistent MCP binding and current readiness separately",
+      "state": "OPEN"
+    },
+    "R-01": {
+      "number": 24,
+      "url": "https://github.com/zekenaulty/Agentica/issues/24",
+      "title": "[R-01] Prove exact interpretation reuse and shared-attempt custody in the learning host",
+      "state": "OPEN"
+    },
+    "R-02": {
+      "number": 25,
+      "url": "https://github.com/zekenaulty/Agentica/issues/25",
+      "title": "[R-02] Specify and compare recovery projections before adding interpreter calls",
+      "state": "OPEN"
+    },
+    "Q-02": {
+      "number": 26,
+      "url": "https://github.com/zekenaulty/Agentica/issues/26",
+      "title": "[Q-02] Publish Agentica paired contract and learning qualification matrix",
+      "state": "OPEN"
+    },
+    "Q-03": {
+      "number": 27,
+      "url": "https://github.com/zekenaulty/Agentica/issues/27",
+      "title": "[Q-03] Reconcile product status, roadmap and local contributor entry points",
+      "state": "OPEN"
+    },
+    "N-01": {
+      "number": 28,
+      "url": "https://github.com/zekenaulty/Agentica/issues/28",
+      "title": "[N-01] Pin synthetic Nyx reference behavior, ownership and falsification corpus",
+      "state": "OPEN"
+    },
+    "N-02": {
+      "number": 29,
+      "url": "https://github.com/zekenaulty/Agentica/issues/29",
+      "title": "[N-02] Run an isolated comparative learning host through the full Agentica loop",
+      "state": "OPEN"
+    },
+    "N-03": {
+      "number": 30,
+      "url": "https://github.com/zekenaulty/Agentica/issues/30",
+      "title": "[N-03] Prove a historical-evidence faculty over in-process and actual MCP paths",
+      "state": "OPEN"
+    },
+    "N-04": {
+      "number": 31,
+      "url": "https://github.com/zekenaulty/Agentica/issues/31",
+      "title": "[N-04] Compose an independently runnable historical-review cognition seam",
+      "state": "OPEN"
+    },
+    "Q-07": {
+      "number": 32,
+      "url": "https://github.com/zekenaulty/Agentica/issues/32",
+      "title": "[Q-07] Consolidate the durable host operation and action-recovery branch stack",
+      "state": "OPEN"
+    },
+    "Q-08": {
+      "number": 33,
+      "url": "https://github.com/zekenaulty/Agentica/issues/33",
+      "title": "[Q-08] Keep retained trace inspection readable while the live event tail is full",
+      "state": "OPEN"
+    }
+  }
+}

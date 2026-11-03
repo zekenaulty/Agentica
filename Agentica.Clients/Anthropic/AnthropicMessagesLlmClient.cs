@@ -193,9 +193,9 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
                                         request.StructuredOutput is null ? null : finalText,
                                         summaries.AsReadOnly(),
                                         new LlmUsage(inputTokens, outputTokens, null,
-                                            inputTokens is not null && outputTokens is not null
-                                                ? inputTokens + outputTokens : null,
-                                            cacheReadTokens),
+                                            LlmUsage.SumTokenCounts(inputTokens, outputTokens),
+                                            cacheReadTokens)
+                                        { OutputTokenSemantics = LlmOutputTokenSemantics.IncludesThinking },
                                         stopReason == "end_turn"
                                             ? LlmFinishReason.Stop : LlmFinishReason.MaxTokens,
                                         new Dictionary<string, string>(StringComparer.Ordinal)

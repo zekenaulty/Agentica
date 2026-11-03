@@ -212,7 +212,8 @@ public sealed class GeminiGenerateContentLlmClient : ILlmStreamingClient
             if (chunk.TryGetProperty("usageMetadata", out var usage))
                 Usage = new LlmUsage(Number(usage, "promptTokenCount"), Number(usage, "candidatesTokenCount"),
                     Number(usage, "thoughtsTokenCount"), Number(usage, "totalTokenCount"),
-                    Number(usage, "cachedContentTokenCount"), Number(usage, "toolUsePromptTokenCount"));
+                    Number(usage, "cachedContentTokenCount"), Number(usage, "toolUsePromptTokenCount"))
+                { OutputTokenSemantics = LlmOutputTokenSemantics.ExcludesThinking };
             if (chunk.TryGetProperty("promptFeedback", out var feedback) &&
                 String(feedback, "blockReason") is { } block && block != "BLOCK_REASON_UNSPECIFIED")
             {
