@@ -1218,7 +1218,7 @@ public sealed class ToolSecurityManifestTests
     }
 
     [Fact]
-    public async Task RegistrationMutationAtStepStartedFailsClosedBeforeToolCall()
+    public async Task RegistrationMutationAfterPlanningSurfaceFailsClosedBeforeToolCall()
     {
         var allowedValues = new List<string> { "before" };
         var descriptor = new ToolDescriptor(
@@ -1245,21 +1245,36 @@ public sealed class ToolSecurityManifestTests
             ToolKind.Query,
             ToolEffect.ReadOnly,
             new Dictionary<string, object?> { ["mode"] = "before" });
-        var eventSink = new CallbackEventSink(executionEvent =>
+        var catalog = ToolCatalog.Create(registration);
+        var pinnedManifestHash = catalog.ManifestHash;
+        string? plannerManifestHash = null;
+        var mutationApplied = false;
+        // Event sinks are bounded, best-effort observers; a StepStarted callback
+        // can be skipped or detached and cannot synchronize an authority change.
+        // Mutate after the planner receives its frozen surface, before dispatch.
+        var planner = new CallbackPlanner(plan, request =>
         {
-            if (executionEvent.Type == "step.started")
-            {
-                allowedValues.Add("after");
-            }
+            var surface = Assert.IsType<ToolSurfaceSnapshot>(request.ToolSurface);
+            plannerManifestHash = surface.ManifestHash;
+            Assert.Equal(pinnedManifestHash, plannerManifestHash);
+            Assert.Equal(["before"], Assert.Single(surface.ToolDescriptors).InputSchema!.Fields[0].AllowedValues);
+            allowedValues.Add("after");
+            mutationApplied = true;
         });
         var runner = CreateRunner(
-            new StaticPlanner(plan),
-            ToolCatalog.Create(registration),
+            planner,
+            catalog,
             new ExecutionPolicy(PlanningMode: PlanningMode.PlanOnly),
-            eventSink);
+            new InMemoryEventSink());
 
         var result = await runner.RunAsync(new RunRequest("test stale registration"));
 
+        Assert.True(mutationApplied);
+        Assert.Equal(1, planner.CreateCalls);
+        Assert.Equal(["before", "after"], allowedValues);
+        Assert.Equal(pinnedManifestHash, plannerManifestHash);
+        Assert.Equal(pinnedManifestHash, Assert.Single(result.Details.ToolSurfaces).ManifestHash);
+        Assert.NotEqual(pinnedManifestHash, ToolManifestCompiler.Compile([registration]).ManifestHash);
         Assert.Equal(RunOutcomeStatus.Blocked, result.Outcome.Status);
         Assert.Equal(StopReason.ToolRefused, result.Outcome.StopReason);
         Assert.Equal(0, tool.Calls);
@@ -1657,9 +1672,15 @@ public sealed class ToolSecurityManifestTests
     {
     }
 
-    private sealed class CallbackEventSink(Action<ExecutionEvent> callback) : IEventSink
+    private sealed class CallbackPlanner(WorkflowPlan plan, Action<PlanningRequest> beforePlan) : StaticPlanner(plan)
     {
-        public void Emit(ExecutionEvent executionEvent) => callback(executionEvent);
+        public override Task<WorkflowPlan> CreatePlanAsync(
+            PlanningRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            beforePlan(request);
+            return base.CreatePlanAsync(request, cancellationToken);
+        }
     }
 
     private sealed class DelayUntilEventSink(string eventType, DateTimeOffset releaseAt) : IEventSink
