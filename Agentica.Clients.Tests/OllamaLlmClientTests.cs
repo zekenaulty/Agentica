@@ -35,6 +35,10 @@ public sealed class OllamaLlmClientTests
         Assert.Equal("hello", completed.Response!.Text);
         Assert.Equal(7, completed.Response.Usage?.PromptTokens);
         Assert.Equal(2, completed.Response.Usage?.OutputTokens);
+        Assert.Equal(LlmOutputTokenSemantics.Unknown, completed.Response.Usage?.OutputTokenSemantics);
+        Assert.Null(completed.Response.Usage?.ThinkingTokens);
+        Assert.Null(completed.Response.Usage?.NonThinkingOutputTokens);
+        Assert.Null(completed.Response.Usage?.GeneratedOutputTokens);
         Assert.Equal("13", completed.Response.Metadata?["ollama.thinkingCharacters"]);
         Assert.NotNull(completed.Response.NativeContinuation);
         Assert.DoesNotContain("private trace", JsonSerializer.Serialize(completed.Response));
@@ -145,6 +149,31 @@ public sealed class OllamaLlmClientTests
         var error = await Assert.ThrowsAsync<LlmClientException>(() =>
             client.GenerateAsync(Request()));
         Assert.Equal("unexpected_tool_call", error.ErrorClass);
+    }
+
+    [Theory]
+    [InlineData(int.MaxValue, 1)]
+    [InlineData(-1, 7)]
+    [InlineData(8, -1)]
+    [InlineData(null, 7)]
+    [InlineData(8, null)]
+    public async Task Invalid_or_incomplete_source_counters_preserve_raw_values_without_inventing_totals(int? prompt, int? output)
+    {
+        var final = JsonSerializer.Serialize(new
+        {
+            model = "qwen3", message = new { content = "ok" }, done = true,
+            done_reason = "stop", prompt_eval_count = prompt, eval_count = output
+        });
+        var client = CreateClient(new StubHandler(_ => Task.FromResult(StreamResponse(final + "\n"))));
+        var response = await client.GenerateAsync(Request());
+        using var continuation = response.NativeContinuation;
+        Assert.Equal("ok", response.Text);
+        Assert.Equal(prompt, response.Usage?.PromptTokens);
+        Assert.Equal(output, response.Usage?.OutputTokens);
+        Assert.Null(response.Usage?.TotalTokens);
+        Assert.Equal(LlmOutputTokenSemantics.Unknown, response.Usage?.OutputTokenSemantics);
+        Assert.Null(response.Usage?.NonThinkingOutputTokens);
+        Assert.Null(response.Usage?.GeneratedOutputTokens);
     }
 
     private static LlmRequest Request() => new(

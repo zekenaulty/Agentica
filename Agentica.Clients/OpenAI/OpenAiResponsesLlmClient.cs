@@ -207,7 +207,8 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
                                             GetInt(usage, "output_tokens"),
                                             GetInt(outputDetails, "reasoning_tokens"),
                                             GetInt(usage, "total_tokens"),
-                                            GetInt(inputDetails, "cached_tokens")),
+                                            GetInt(inputDetails, "cached_tokens"))
+                                        { OutputTokenSemantics = LlmOutputTokenSemantics.IncludesThinking },
                                         LlmFinishReason.Stop,
                                         new Dictionary<string, string>(StringComparer.Ordinal)
                                         {

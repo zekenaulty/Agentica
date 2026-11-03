@@ -291,7 +291,8 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
                                         GetInt(usage, "total_thought_tokens"),
                                         GetInt(usage, "total_tokens"),
                                         GetInt(usage, "total_cached_tokens"),
-                                        GetInt(usage, "total_tool_use_tokens")),
+                                        GetInt(usage, "total_tool_use_tokens"))
+                                    { OutputTokenSemantics = LlmOutputTokenSemantics.ExcludesThinking },
                                     finish,
                                     new Dictionary<string, string>(StringComparer.Ordinal)
                                     {
