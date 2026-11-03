@@ -12,7 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Agentica.Lab.Web.Tests;
 
-public sealed class HostOperationSocketTests
+public sealed partial class HostOperationSocketTests
 {
     [Fact]
     public async Task Socket_handoff_http_progress_and_duplicate_active_wake_preserve_one_continuation()

@@ -89,6 +89,159 @@ function validateOperationEvent(event) {
 
 const operationKey = value => canonicalJson([value.hostId, value.sessionId, value.actionId, value.operationId]);
 
+const startKeyFields = ['hostId', 'sessionId', 'attemptId'];
+const startReferenceFields = [...startKeyFields, 'runId', 'acceptedRequestHash'];
+const digest = (value, name) => {
+  if (typeof value !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(value)) throw new Error(`Invalid ${name}.`);
+};
+const timestamp = (value, name) => {
+  const match = typeof value === 'string' && /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,7}))?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  const seconds = match ? Date.parse(`${match[1]}${match[3]}`) : NaN;
+  if (!Number.isFinite(seconds)) throw new Error(`Invalid ${name}.`);
+  const ticks = BigInt(seconds) * 10000n + BigInt((match[2] ?? '').padEnd(7, '0'));
+  if (ticks === -621355968000000000n) throw new Error(`Invalid ${name}.`);
+  return ticks;
+};
+const startProviderDefaults = Object.freeze({ provider: 'gemini', model: null, thinkingEffort: null,
+  maxOutputTokens: 4096, contextWindowTokens: 131072, includeThoughtSummaries: false,
+  geminiApi: null, thinkingEffortResolved: false });
+const startLimitDefaults = Object.freeze({ maxSteps: 32, maxRefinements: 32, maxPlanContinuations: 16,
+  timeoutSeconds: 300, actionTimeoutSeconds: 45, maxRecentObservations: 6, maxRecentReceipts: 6 });
+
+function validateStartKey(key, reference = false) {
+  fields(key, reference ? startReferenceFields : startKeyFields, 'start reference');
+  for (const field of startKeyFields) boundedText(key[field], field, 128, true);
+  if (reference) { boundedText(key.runId, 'runId', 128, true); digest(key.acceptedRequestHash, 'acceptedRequestHash'); }
+}
+
+function validateStartRequest(request) {
+  validateDepth(request);
+  fields(request, ['protocolVersion', 'hostId', 'sessionId', 'sessionEpoch', 'scopeId', 'perspectiveId',
+    'objectiveId', 'objective', 'observation', 'capabilities', 'provider', 'limits'], 'start request');
+  if (request.protocolVersion !== PROTOCOL_VERSION) throw new Error('Invalid start protocol version.');
+  for (const field of ['hostId', 'sessionId', 'sessionEpoch', 'scopeId', 'perspectiveId', 'objectiveId'])
+    boundedText(request[field], field, 128, true);
+  boundedText(request.objective, 'objective', 8000);
+  validateObservation(request.observation, request.observation?.revision);
+  if (!Array.isArray(request.capabilities) || request.capabilities.length < 1 || request.capabilities.length > 32)
+    throw new Error('Invalid start capabilities.');
+  const ids = new Set();
+  for (const capability of request.capabilities) {
+    fields(capability, ['id', 'name', 'description', 'kind', 'effect', 'inputSchema', 'durableHandoff'], 'start capability');
+    boundedText(capability.id, 'capability id', 128, true);
+    boundedText(capability.name, 'capability name', 128); boundedText(capability.description, 'capability description', 2000);
+    if (ids.has(capability.id) || capability.id.startsWith('lab.')
+      || !['query', 'action', 'plannerAssist', 'validation', 'synthesis'].includes(capability.kind)
+      || !['readOnly', 'writesLocalState', 'externalSideEffect', 'destructive'].includes(capability.effect)
+      || (Object.hasOwn(capability, 'durableHandoff') && typeof capability.durableHandoff !== 'boolean'))
+      throw new Error('Invalid start capability binding.');
+    ids.add(capability.id);
+    fields(capability.inputSchema, ['fields', 'allowAdditionalProperties'], 'start capability schema');
+    if (!Array.isArray(capability.inputSchema.fields) || capability.inputSchema.fields.length > 32
+      || (Object.hasOwn(capability.inputSchema, 'allowAdditionalProperties') && typeof capability.inputSchema.allowAdditionalProperties !== 'boolean')
+      || capability.inputSchema.fields.some(field => !object(field))) throw new Error('Invalid start capability schema.');
+  }
+  if (request.provider != null) {
+    fields(request.provider, Object.keys(startProviderDefaults), 'start provider');
+    for (const field of ['provider', 'model', 'thinkingEffort', 'geminiApi'])
+      if (request.provider[field] != null && typeof request.provider[field] !== 'string') throw new Error(`Invalid start provider ${field}.`);
+    for (const field of ['maxOutputTokens', 'contextWindowTokens'])
+      if (Object.hasOwn(request.provider, field) && !Number.isSafeInteger(request.provider[field])) throw new Error(`Invalid start provider ${field}.`);
+    for (const field of ['includeThoughtSummaries', 'thinkingEffortResolved'])
+      if (Object.hasOwn(request.provider, field) && typeof request.provider[field] !== 'boolean') throw new Error(`Invalid start provider ${field}.`);
+  }
+  if (request.limits != null) {
+    fields(request.limits, Object.keys(startLimitDefaults), 'start limits');
+    if (Object.values(request.limits).some(value => !Number.isSafeInteger(value))) throw new Error('Invalid start limits.');
+  }
+  if (jsonBytes(request) > 65536) throw new Error('Start request exceeds the 64 KiB size bound.');
+}
+
+// Match only the typed defaults in HostProtocol, ProviderSettings and ToolInputField.
+// Keep every supplied key and opaque JSON value; explicit null is not a non-null default.
+function typedStartRequest(request) {
+  const observation = { facts: null, ...request.observation };
+  // DateTimeOffset writes Z as +00:00 and trims fractional zeroes. Do not round
+  // through Date: its millisecond precision would erase differing .NET ticks.
+  observation.observedAt = observation.observedAt.replace(/(?:Z|[+-]00:00)$/, '+00:00')
+    .replace(/\.(\d*?[1-9])?0+(?=[+-]\d{2}:\d{2}$)/, (_, fraction) => fraction ? `.${fraction}` : '');
+  if (observation.facts !== null) observation.facts = observation.facts.map(fact => ({
+    state: 'observed', evidenceObservationIds: null, supersedes: null, ...fact,
+  }));
+  return { ...request, observation,
+    capabilities: request.capabilities.map(capability => ({ durableHandoff: false, ...capability,
+      inputSchema: { allowAdditionalProperties: false, ...capability.inputSchema,
+        fields: capability.inputSchema.fields.map(field => ({ type: 'string', required: false,
+          description: null, allowedValues: null, example: null, minimum: null, maximum: null, ...field })),
+      },
+    })),
+    provider: request.provider == null ? null : { ...startProviderDefaults, ...request.provider },
+    limits: request.limits == null ? null : { ...startLimitDefaults, ...request.limits },
+  };
+}
+
+function validateStartAcceptance(originalRequest, acceptedRequest) {
+  const { provider: originalProvider, limits: originalLimits, ...original } = typedStartRequest(originalRequest);
+  const { provider: acceptedProvider, limits: acceptedLimits, ...accepted } = typedStartRequest(acceptedRequest);
+  if (canonicalJson(original) !== canonicalJson(accepted))
+    throw new Error('Accepted start request changed authority outside provider/limits normalization.');
+  if (canonicalJson(originalLimits) !== canonicalJson(acceptedLimits)
+    && !(originalLimits === null && canonicalJson(acceptedLimits) === canonicalJson(startLimitDefaults)))
+    throw new Error('Accepted start limits differ from the requested typed limits.');
+  if (canonicalJson(originalProvider) === canonicalJson(acceptedProvider)) return;
+  const requested = originalProvider ?? startProviderDefaults;
+  const name = requested.provider?.trim().toLowerCase() ?? 'gemini';
+  const provider = name === 'google' ? 'gemini' : name === 'claude' ? 'anthropic' : name === 'xai' ? 'grok' : name;
+  // Match HostStartStore.ValidateProvider: only unspecified model/thinking may be
+  // frozen, and an explicitly resolved null thinking effort remains authoritative.
+  if (acceptedProvider === null || acceptedProvider.provider !== provider
+    || (requested.model !== null && acceptedProvider.model !== requested.model)
+    || ((requested.thinkingEffort !== null || requested.thinkingEffortResolved) && acceptedProvider.thinkingEffort !== requested.thinkingEffort)
+    || (requested.thinkingEffortResolved && !acceptedProvider.thinkingEffortResolved)
+    || ['maxOutputTokens', 'contextWindowTokens', 'includeThoughtSummaries', 'geminiApi']
+      .some(field => acceptedProvider[field] !== requested[field]))
+    throw new Error('Accepted start provider differs beyond permitted normalization and unspecified defaults.');
+}
+const startIdentity = ({ stopRequested, terminal, ...entry }) => ({ ...entry,
+  originalRequest: typedStartRequest(entry.originalRequest), acceptedRequest: typedStartRequest(entry.acceptedRequest) });
+
+function validateStartEntry(entry, key) {
+  validateDepth(entry);
+  fields(entry, ['schema', 'attemptId', 'runId', 'originalRequest', 'acceptedRequest', 'originalRequestHash',
+    'acceptedRequestHash', 'manifestHash', 'stopRequested', 'terminal', 'admittedAt'], 'start entry');
+  if (entry.schema !== 1 || typeof entry.stopRequested !== 'boolean') throw new Error('Invalid start entry schema or stop state.');
+  boundedText(entry.attemptId, 'attemptId', 128, true); boundedText(entry.runId, 'runId', 128, true);
+  validateStartRequest(entry.originalRequest); validateStartRequest(entry.acceptedRequest);
+  for (const field of ['originalRequestHash', 'acceptedRequestHash', 'manifestHash']) digest(entry[field], field);
+  const admittedAt = timestamp(entry.admittedAt, 'admittedAt');
+  if (entry.attemptId !== key.attemptId || entry.originalRequest.hostId !== key.hostId
+    || entry.originalRequest.sessionId !== key.sessionId
+    || (key.runId !== undefined && entry.runId !== key.runId)
+    || (key.acceptedRequestHash !== undefined && entry.acceptedRequestHash !== key.acceptedRequestHash))
+    throw new Error('Start entry binding differs from the requested identity.');
+  // The service owns .NET digest computation. Compare the complete authority payload,
+  // not a purported client recomputation of either request digest.
+  validateStartAcceptance(entry.originalRequest, entry.acceptedRequest);
+  if (entry.terminal !== null) {
+    fields(entry.terminal, ['reason', 'usage', 'usageUnknown', 'settledAt'], 'start terminal');
+    const terminal = entry.terminal;
+    if (!['stopped', 'interrupted'].includes(terminal.reason) || typeof terminal.usageUnknown !== 'boolean')
+      throw new Error('Invalid start terminal state.');
+    if (!entry.stopRequested || timestamp(terminal.settledAt, 'settledAt') < admittedAt)
+      throw new Error('Start settlement requires a stop request and cannot precede admission.');
+    if (terminal.reason === 'interrupted' ? terminal.usage !== null || !terminal.usageUnknown
+      : terminal.usage === null || terminal.usageUnknown)
+      throw new Error('Stopped starts require known usage; interrupted starts require unknown/null usage.');
+    if (terminal.usage !== null) {
+      const counters = ['steps', 'refinements', 'continuations', 'providerCalls'];
+      fields(terminal.usage, counters, 'start usage');
+      if (counters.some(field => !Number.isSafeInteger(terminal.usage[field]) || terminal.usage[field] < 0))
+        throw new Error('Invalid start usage counters.');
+    }
+  }
+  return copy(entry);
+}
+
 export function actionKey(action) {
   return canonicalJson([action.sessionId, action.sessionEpoch, action.runId, action.actionId]);
 }
@@ -213,6 +366,65 @@ export class AgenticaHost {
     return { ...response.payload, runId };
   }
 
+  /** Submit one frozen initial attempt. Uncertain delivery requires getStart, never an automatic retry. */
+  async startDurable(submission) {
+    submission = copy(submission);
+    fields(submission, ['attemptId', 'request'], 'start submission');
+    boundedText(submission.attemptId, 'attemptId', 128, true);
+    validateStartRequest(submission.request);
+    const response = await this.request('start.durable', submission, { binding: { startSubmission: submission } });
+    return copy(response.payload);
+  }
+
+  _checkRetainedStart(entry) {
+    const retained = this.runs.get(entry.runId);
+    if (retained && (!retained.startAdmission || canonicalJson(startIdentity(retained.startAdmission)) !== canonicalJson(startIdentity(entry))))
+      throw new Error('Durable start reply changed a retained run binding.');
+    for (const { startAdmission: previous } of this.runs.values()) {
+      if (previous?.attemptId === entry.attemptId && previous.originalRequest.hostId === entry.originalRequest.hostId
+        && previous.originalRequest.sessionId === entry.originalRequest.sessionId && previous.runId !== entry.runId)
+        throw new Error('Durable start reply changed the run for a retained attempt.');
+    }
+  }
+
+  _installStart(message, submission) {
+    if (message.type !== 'started') throw new Error('Durable start requires a started response.');
+    const entry = validateStartEntry(message.payload.startAdmission, { ...submission.request, attemptId: submission.attemptId });
+    if (canonicalJson(typedStartRequest(entry.originalRequest)) !== canonicalJson(typedStartRequest(submission.request)))
+      throw new Error('Durable start original request differs from the submitted request.');
+    const accepted = entry.acceptedRequest;
+    if (message.payload.runId !== entry.runId || (message.runId != null && message.runId !== entry.runId)
+      || message.payload.manifestHash !== entry.manifestHash
+      || ['hostId', 'sessionId', 'sessionEpoch', 'scopeId', 'perspectiveId', 'objectiveId']
+        .some(field => message.payload[field] !== accepted[field])) throw new Error('Durable start snapshot binding differs from admission.');
+    this._checkRetainedStart(entry);
+    if (!this.runs.has(entry.runId) && this.runs.size >= this.maxActions) throw new Error('Run retention limit reached. Reconcile the original start.');
+    if (entry.stopRequested || entry.terminal !== null) this.stoppedRuns.add(entry.runId);
+    this.runs.set(entry.runId, { hostId: accepted.hostId, sessionId: accepted.sessionId, sessionEpoch: accepted.sessionEpoch,
+      objectiveId: accepted.objectiveId, capabilities: copy(accepted.capabilities), manifestHash: entry.manifestHash, startAdmission: entry });
+  }
+
+  /** Read one admission without registering a run, reconnecting, retrying, or activating cognition. Not found remains unknown. */
+  async getStart(key, { fetchImpl = globalThis.fetch } = {}) {
+    key = copy(key); validateStartKey(key);
+    const entry = validateStartEntry(await this._operationHttp('/api/starts', fetchImpl, { query: key }), key);
+    this._checkRetainedStart(entry);
+    if (entry.stopRequested || entry.terminal !== null) this.stoppedRuns.add(entry.runId);
+    return entry;
+  }
+
+  /** Fence local effects immediately; terminal:null in the response is pending, not settled. Never starts or retries. */
+  async stopStart(reference, { fetchImpl = globalThis.fetch } = {}) {
+    reference = copy(reference); validateStartKey(reference, true);
+    const retained = this.runs.get(reference.runId)?.startAdmission;
+    if (retained) validateStartEntry(retained, reference);
+    this.stoppedRuns.add(reference.runId);
+    const entry = validateStartEntry(await this._operationHttp('/api/starts/stop', fetchImpl, { body: reference }), reference);
+    this._checkRetainedStart(entry);
+    if (!entry.stopRequested) throw new Error('Start stop response did not acknowledge the stop request; settlement remains unknown.');
+    return entry;
+  }
+
   async resume({ runId, sessionId, sessionEpoch }) {
     for (const [name, value] of Object.entries({ runId, sessionId, sessionEpoch })) requiredText(value, name);
     const retained = this.runs.get(runId);
@@ -279,6 +491,13 @@ export class AgenticaHost {
     return this._operationHttp('/api/operations/events', fetchImpl, { body: event });
   }
 
+  /** Stop an original decision without activating cognition, including after service restart. */
+  async stopDecision(event, { fetchImpl = globalThis.fetch } = {}) {
+    event = copy(event); validateOperationEvent(event);
+    if (event.kind !== 'decision') throw new Error('Only an original decision can be stopped without a wake.');
+    return this._operationHttp('/api/operations/stop-decision', fetchImpl, { body: event });
+  }
+
   /** Request one new bounded cognition window. The host persists the event first; no automatic retry occurs. */
   async wakeOperation(event) {
     event = copy(event); validateOperationEvent(event);
@@ -287,6 +506,24 @@ export class AgenticaHost {
     const binding = { hostId: event.hostId, sessionId: event.sessionId, sessionEpoch: event.sessionEpoch,
       ...(original ? { objectiveId: original.objectiveId, capabilities: copy(original.capabilities) } : {}) };
     const response = await this.request('operation.wake', event, { binding });
+    return { ...response.payload, runId: response.payload.runId ?? response.runId };
+  }
+
+  /** Adopt an unclaimed original decision with explicit new host custody and a separate scoped observation. */
+  async adoptDecision(event, adoption) {
+    event = copy(event); adoption = copy(adoption); validateOperationEvent(event);
+    fields(adoption, ['adoptionId', 'nextSessionEpoch', 'observation'], 'decision adoption');
+    boundedText(adoption.adoptionId, 'adoptionId', 128, true);
+    boundedText(adoption.nextSessionEpoch, 'nextSessionEpoch', 128, true);
+    validateObservation(adoption.observation, adoption.observation?.revision);
+    if (event.kind !== 'decision' || adoption.nextSessionEpoch === event.sessionEpoch ||
+      adoption.observation.revision < event.observation.revision ||
+      (adoption.observation.observationId === event.observation.observationId &&
+        canonicalJson(adoption.observation) !== canonicalJson(event.observation))) throw new Error('Invalid decision adoption.');
+    const original = this.operations.get(operationKey(event))?.request;
+    const binding = { hostId: event.hostId, sessionId: event.sessionId, sessionEpoch: adoption.nextSessionEpoch,
+      ...(original ? { objectiveId: original.objectiveId, capabilities: copy(original.capabilities) } : {}) };
+    const response = await this.request('operation.adopt', { decision: event, adoption }, { binding });
     return { ...response.payload, runId: response.payload.runId ?? response.runId };
   }
 
@@ -348,7 +585,11 @@ export class AgenticaHost {
       this.pending.delete(message.requestId);
       if (message.type === 'error') pending.reject(Object.assign(new Error(message.payload.message ?? message.payload.error ?? 'Service rejected request.'), { code: message.payload.code }));
       else {
-        if (pending.type === 'operation.wake' && (message.type !== 'started'
+        if (pending.type === 'start.durable') {
+          try { this._installStart(message, pending.binding.startSubmission); }
+          catch (error) { pending.reject(error); return; }
+        }
+        if (['operation.wake', 'operation.adopt'].includes(pending.type) && (message.type !== 'started'
           || typeof (message.payload.runId ?? message.runId) !== 'string'
           || !message.payload.objectiveId || message.payload.hostId !== pending.binding.hostId
           || message.payload.sessionId !== pending.binding.sessionId || message.payload.sessionEpoch !== pending.binding.sessionEpoch
@@ -356,7 +597,7 @@ export class AgenticaHost {
           pending.reject(new Error('Operation wake response binding differs from the requested host session.'));
           return;
         }
-        if (['started', 'resumed'].includes(message.type) && pending.binding) {
+        if (pending.type !== 'start.durable' && ['started', 'resumed'].includes(message.type) && pending.binding) {
           const binding = { ...pending.binding };
           if (binding.objectiveId === undefined && message.payload.objectiveId !== undefined) binding.objectiveId = message.payload.objectiveId;
           this.runs.set(message.payload.runId ?? message.runId, binding);
@@ -435,6 +676,8 @@ export class AgenticaHost {
     if (message.runId !== action.runId || !Number.isSafeInteger(action.expectedRevision) || action.expectedRevision < 0 || typeof action.arguments !== 'object' || action.arguments === null || Array.isArray(action.arguments)) throw new Error('Invalid action identity or revision.');
     const run = this.runs.get(action.runId);
     if (!run || run.sessionId !== action.sessionId || run.sessionEpoch !== action.sessionEpoch) throw new Error('Action belongs to an unknown run or another host session.');
+    if (run.startAdmission && (run.manifestHash !== action.manifestHash || !run.capabilities.some(capability => capability.id === action.capabilityId)))
+      throw new Error('Action differs from the durable start capability binding.');
     const key = actionKey(action);
     const fingerprint = actionFingerprint(action);
     let record;

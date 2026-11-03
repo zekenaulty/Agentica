@@ -13,3 +13,7 @@ public sealed record HostOperationEvent(
 
 /// <summary>Cumulative Agentica work across the execution windows of one objective.</summary>
 public sealed record HostRunUsage(int Steps = 0, int Refinements = 0, int Continuations = 0, int ProviderCalls = 0);
+
+/// <summary>Explicit new host custody and its scoped checkpoint; never a rewrite of the original decision.</summary>
+public sealed record HostDecisionAdoption(string AdoptionId, string NextSessionEpoch, HostObservation Observation);
+public sealed record HostDecisionWake(HostOperationEvent Decision, HostDecisionAdoption Adoption);
