@@ -1,6 +1,6 @@
 # Agentica Product Status And Goal Xref
 
-Canonical status date: 2026-11-03
+Canonical status date: 2026-11-03, 16:47 UTC
 
 Lifecycle: Incubating
 
@@ -12,7 +12,39 @@ The owner has authorized Agentica issue creation, bounded implementation and sta
 
 The Lab-owned clean-room chat was merged through [PR #11](https://github.com/zekenaulty/Agentica/pull/11) on 2026-11-03 at `3cb2d63395fee277a8eb790c57b271cd6277125b`. Its exact admitted head `cc813f6a9c2b1a851a1698b52ab2e96a4a68716f` passed both Windows and Linux jobs in [CI run 41643125122](https://github.com/zekenaulty/Agentica/actions/runs/41643125122); the retained-trace finding is corrected and its review thread resolved. [The admission record](reconciliation/2026-11-03/pr11-review.md) preserves the initial review and focused correction evidence. This is a merged experimental Lab slice, with no new live-provider or public-package readiness claim.
 
-The separate durable operation/start/adoption/action-recovery frontier is tracked by [#32](https://github.com/zekenaulty/Agentica/issues/32). New obligation contracts and learning fixtures remain planned or under qualification; local conformance evidence does not establish admission to main or operational Nyx integration. Agentica owns these changes; Bridge, Cloud, Nyx and Maze Battle remain independently owned and untouched by this program.
+### Current source and admission
+
+The current documentation source is candidate `b2589c12bfe55ffac868a6182c935949ebf755f0`, containing admitted main `2e5c39d742698df41b0a96a7959e417c81cee039` plus the N-03 historical faculty. Source implementation, local proof, exact-head CI and main admission remain separate facts. The [qualification matrix](reconciliation/2026-11-03/qualification-matrix.md) retains the earlier failures and a later dated overlay.
+
+| Slice | Current disposition | Bounded behavior |
+| --- | --- | --- |
+| C-01 / N-01, [PR #38](https://github.com/zekenaulty/Agentica/pull/38) | Admitted | Immutable exact evidence/perspective/coverage, stable content identity separate from consumer acceptance, typed fulfillment/original custody and three synthetic reference cases |
+| H-01, [PR #35](https://github.com/zekenaulty/Agentica/pull/35) | Admitted | Supplied OpenAI/xAI Responses schemas and provider-compatible artist model/temperature handling; partial progress on #10 |
+| H-02, [PR #36](https://github.com/zekenaulty/Agentica/pull/36) | Admitted | Explicit output/thinking inclusion, preserved raw counters and nullable derived counts; no inferred bill |
+| H-03, [PR #37](https://github.com/zekenaulty/Agentica/pull/37) | Admitted | Standing MCP bindings survive dependency failure while applicability/readiness/integrity and dispatch checks remain explicit |
+| C-02 / N-02, [PR #39](https://github.com/zekenaulty/Agentica/pull/39) | Admitted | Real planner/runner/tool/refinement loop, optional frame/acceptance integration and independently checked source-grounding/effect-reconciliation hosts; inert shadow |
+| Q-07, [PR #42](https://github.com/zekenaulty/Agentica/pull/42) | Admitted | Durable starts, stop/adoption, cumulative usage, park/wake and action recovery; rejected wakes preserve unrelated retained windows |
+| Q-04 / Q-08, [PR #11](https://github.com/zekenaulty/Agentica/pull/11) | Admitted | Persistent isolated Lab chat, native token admission, Markdown, quiet traces and retained-page inspection |
+| N-03, [PR #40](https://github.com/zekenaulty/Agentica/pull/40) | Implemented in this source; main admission pending at this snapshot | Exact historical faculty over equivalent native/actual SDK paths; scope/source guards, typed coverage/error and whole-record host acceptance |
+
+The earlier N-03 candidate `dcfffe23059536263251f008d09f377548fe4f15` passed both Windows and Linux in [CI run 41671185912](https://github.com/zekenaulty/Agentica/actions/runs/41671185912). Final review identified the same canceled-client Windows response-disposal hazard already corrected in the runtime fixture. Candidate `b2589c12bfe55ffac868a6182c935949ebf755f0` adds the narrow known-disconnect cleanup guard; all 15 focused faculty tests pass locally. Its fresh [CI run 41677313030](https://github.com/zekenaulty/Agentica/actions/runs/41677313030) is pending at this snapshot, and PR #40 remains open. The PR records subsequent exact-head checks and admission. SDK transport events are not provider thought; the fixture creates no production server, catalog or Nyx route.
+
+Coordinator-recorded local gates for the consolidated source are **573 Web passes plus one local link-capability skip**, **eight post-review focused passes**, **357 combined host/chat JavaScript passes**, and **41 combined faculty/loop passes**. These populations overlap and must not be summed into a unique test count. This documentation update ran no tests or providers. The matrix links the independent hosted gates and source cuts.
+
+Agentica owns these changes. Bridge, Cloud, Nyx and Maze Battle remain independently owned and untouched by this program. Current installed Nyx behavior, full paired caller/cache enablement, live provider quality/parity and migration remain UNKNOWN or NOT-RUN. Exact reuse savings have not been measured.
+
+### Remaining parallel gates
+
+| Work | Next bounded outcome / prerequisite |
+| --- | --- |
+| [#10](https://github.com/zekenaulty/Agentica/issues/10), provider defaults | Independent dated all-provider inventory/decision matrix, override and unsupported-control tests; verify the reported Gemini redirect before choosing replacements; live checks remain separately deferred |
+| [#20](https://github.com/zekenaulty/Agentica/issues/20), realization matching | Map existing descriptors/manifests in both admitted learning cases, reject known incompatibilities and prove one bounded installed discovery capability; no automatic installation |
+| [#24](https://github.com/zekenaulty/Agentica/issues/24), exact reuse | Host-owned shared-attempt custody, per-consumer acceptance, cancellation/invalidation and a measured warm zero-synthesis hit |
+| [#25](https://github.com/zekenaulty/Agentica/issues/25), recovery comparison | Matched checkpoint/native/evidence/interpreted strategies with exact source references and original unknown custody retained; no extra activation by default |
+| [#26](https://github.com/zekenaulty/Agentica/issues/26), qualification | Remains open: publish matched cold/warm cost/context/latency and invalidation/restart evidence after #24; live and external migration evidence stays unproved |
+| [#31](https://github.com/zekenaulty/Agentica/issues/31), standalone historical cognition | Requires #30 admission alongside admitted #19/#29; require #24 before warm-reuse claims and #26 before promotion; independently disposable state/configuration, no production cutover |
+
+The first four lanes can proceed with separate file ownership; qualification consumes their actual observations, and the standalone seam composes admitted dependencies. See the matrix's gate plan. The prior hardening percentages below describe closed historical programs and are not a completion score for program #12.
 
 ## Retained October 9 integration baseline: Lab web and external hosts
 
@@ -52,8 +84,10 @@ The hardening gates now support internal research artifacts, not a public releas
 | `Agentica` | Bounded single-run planning/execution, validation, authorization, receipts, and outcomes | Alpha runtime candidate | Keep package-shaped; do not call package-ready yet |
 | `Agentica/Orchestration` | Task-level adaptive supervision | Bounded proof contract is fail-closed; broader surface remains Incubating | Keep experimental and excluded from general product claims |
 | `Agentica.Clients` | Provider SDK isolation and LLM planner adapters | Alpha adapter layer | Keep |
+| `Agentica.Mcp` | Host-bound SDK client adapters and binding readiness | Implemented bounded client/fixture proof | Keep host grants, semantic policy and persistence outside the adapter |
 | `Agentica.Lab` | Lab, harness host, benchmark suite, demos, probes, Chat prototype, and run inspection | Internal research surface, explicitly non-packable, not a supported CLI | Keep the boundary explicit and stop routing general product experiments into it |
 | `Agentica.Lab.Web` | Browser Lab and domain-neutral external-host service over the existing runtime | Initial service and isolated external-host integration qualified; non-packable | Keep canonical domain state and effects in each host |
+| `samples/Agentica.NyxLearningHost` | Independent synthetic comparative host over the real loop | C-02/N-02 admitted; N-03 faculty implemented in the current candidate | Preserve fixture/live/installed proof levels; no Nyx replacement claim |
 | `Agentica.Tests` | Runtime/client contracts and selected lab behavior tests | Strong internal verification, including package-consumer and real-process gates | Keep release gates representative and fail closed |
 | Future `Agentica.Cli` | Thin supported shell over stable runtime APIs | Does not exist | Reserve the name until productization |
 | Future external workspace | Independent host consuming built artifacts rather than source links | Does not exist | Required before reusable-package readiness can be claimed |
@@ -84,20 +118,20 @@ Completion rubric:
 
 Percentages are rounded to 5% and may change only with linked implementation, test, operational, or decision evidence. Historical and superseded documents are excluded from the active-program calculation.
 
-## Program Completion
+## Historical Hardening Program Completion
 
-This score measures the newly agreed hardening and product-truth program, not the amount of code already written. Immediate blockers, proof integrity, and secure dispatch carry 60% of the weight.
+This retained score measures the original T0–T6 hardening and product-truth program, not the current November program or the amount of code already written. Immediate blockers, proof integrity, and secure dispatch carried 60% of its weight.
 
 Before this report, weighted completion was 17.75%, reported as 18%. The canonical page, complete goal xref and lifecycle banners, repository-identity decision, README alignment, and `Agentica.Lab` rename complete the T0 governance baseline.
 
-Current weighted completion:
+Recorded weighted completion:
 
 ```text
 (10*100 + 15*100 + 25*100 + 20*100 + 10*100 + 10*100 + 10*100) / 100
 = 100.00%
 ```
 
-**Current hardening/product-truth program: 100% complete.**
+**Recorded T0–T6 hardening/product-truth program: 100% complete.**
 
 T0-T6 are complete against their bounded gates. The no-publish GitHub workflow passed on Linux, including the digest-pinned container build and smoke. This score measures the agreed hardening program, not public-product readiness; the repository remains Incubating.
 
@@ -111,7 +145,7 @@ T0-T6 are complete against their bounded gates. The no-publish GitHub workflow p
 | T5 | Create a measured LLM product proof | 10% | 15% | 100% | Complete for `agentica-product-proof-v1` | Versioned strict schemas/prompts, fixed matrix, durable telemetry, strict offline reaggregation, and zero-false-success gates landed; the measured cohort passed 29/30 overall, 25/25 primary, and 4/5 holdout | Repeat on intentional model/prompt/schema changes; do not generalize from this single fixed cohort |
 | T6 | Productize after the gates | 10% | 20% | 100% | Bounded research-repository productization gate complete | The dated 2026-07-21 baseline established exact SDK and lock files, SHA-pinned no-publish CI, clean audits, clean Release/analyzer gates, 390 passing tests with 2 honest live skips, 84.84% line/67.52% branch coverage, real Lab process tests, package validation plus an external consumer, research metadata/license, a digest-pinned non-root container build/smoke, bounded/redacted resilient Lab logs, and one complete green Linux CI run | No remaining gate in this bounded program; keep CI green while public publishing and a supported CLI remain deferred |
 
-## Active Slice: Effect Truth And Ownership Closure
+## Historical Slice: Effect Truth And Ownership Closure
 
 The 2026-07-22 outside review correctly reopened ownership, Chat effect truth, and grant semantics that the first bounded program had overstated. This successor slice closed those findings without changing product identity: Agentica remains an Incubating source-available research repository, orchestration remains experimental, and external Chat image tools remain quarantined by default.
 
@@ -122,7 +156,7 @@ Weighted successor completion:
 = 100.00%
 ```
 
-**Current effect-truth/ownership slice: 100% complete.** Local implementation and deterministic proof are complete, and the first hosted Windows proof passed alongside the independent Linux release gate.
+**Recorded effect-truth/ownership slice: 100% complete.** Local implementation and deterministic proof were complete, and the first hosted Windows proof passed alongside the independent Linux release gate.
 
 | ID | Successor workstream | Weight | Completion | Current reality | Remaining exit gate |
 | --- | --- | ---: | ---: | --- | --- |
@@ -260,7 +294,7 @@ The following are intentionally outside the active slice:
 - additional ChessQuest, MazeQuest, HexQuest, WorkbenchQuest, or campaign feature growth;
 - workspace context graph implementation;
 - domain router/binding implementation;
-- MCP server adapter and broader client parity beyond the implemented read-only client slice;
+- production MCP server/catalog and broader client parity beyond the bounded host-bound adapter and isolated SDK faculty;
 - full multi-agent orchestration;
 - self-training, skill mining, prompt evolution, or automatic policy promotion;
 - the full multi-hash, taint, generated-tool, registry, and automatic-promotion architecture beyond the minimal T3 vertical slice;

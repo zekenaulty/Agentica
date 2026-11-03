@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "id": "agentica-proof-synchronization",
+  "scope": "agentica",
+  "kind": "practice",
+  "status": "accepted",
+  "title": "Synchronize invariant probes through an owned boundary",
+  "trigger": "event observer test synchronization manifest mutation fixture timing CI",
+  "guidance": "Drive deliberate state changes in invariant tests through a synchronous host-owned seam. Assert the mutation occurred after the pinned planning surface and before dispatch. Agentica event sinks are best-effort observers; their bounded or detached delivery cannot establish that a mutation happened before execution. Test observer delivery and failure behavior separately, and retain the original refusal and zero-effect assertions when correcting a scheduling-dependent probe.",
+  "evidence": [
+    {
+      "kind": "source_review",
+      "reference": "Agentica/Events/IEventSink.cs",
+      "revision": "2e5c39d742698df41b0a96a7959e417c81cee039",
+      "note": "Observer delivery is explicitly best-effort. Runner dispatch separately recompiles and checks the pinned tool manifest."
+    },
+    {
+      "kind": "test",
+      "reference": "Agentica.Tests/ToolSecurityManifestTests.cs",
+      "revision": "ff204a528b0d4c055a231c1f70adcf6e781a2f1f",
+      "note": "All 33 focused tests passed locally after moving the mutation into the planner callback. Explicit old/new hash, mutation, refused receipt and zero-call assertions remain. The same source was included in admitted PR39 head a03e20c and passing Windows/Linux run41666172418."
+    }
+  ],
+  "recheck": "Reinspect the current event and dispatch contracts when reliable execution hooks or manifest custody change. This development lesson is not runtime authority or a substitute for a current invariant test.",
+  "tags": ["testing", "events", "authority", "manifest", "synchronization"],
+  "recorded_on": "2026-11-03"
+}

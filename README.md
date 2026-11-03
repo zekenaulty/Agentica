@@ -28,9 +28,14 @@ Implemented reality:
 
 - `Agentica` is the central in-process runtime package.
 - `Agentica.Clients` exists as the provider SDK isolation project.
+- Five streaming provider adapters exist for OpenAI, Gemini, Anthropic, xAI and Ollama. Supplied Responses schemas and provider-compatible artist profiles are implemented; usage reports explicitly distinguish output/thinking inclusion and unknown values. Live model availability and parity remain separate qualification gates.
+- `Agentica.Mcp` provides host-bound client adapters and opt-in binding inspection. Standing bindings remain inspectable during an outage; applicability, readiness and integrity are separate, and server/schema pins are rechecked before dispatch.
 - `Agentica.Lab` is the internal lab executable for deterministic proofs, scenario harnesses, probes, Chat, orchestration experiments, benchmarks, and run inspection. It is not a supported product CLI.
 - `Agentica.Lab.Web` is the local browser Lab and reusable external-host service. Hosts bind scoped capabilities and retain world/effect ownership while the actual Agentica runner streams planning telemetry, invokes remote tools, records evidence and checks completion. See the [web kickoff guide](docs/lab-web-kickoff.md) and [browser host contract](docs/external-host-browser.md).
 - Lab Web also provides [persistent experimental chat](docs/lab-experimental-chat.md) at `/chat.html`: blank-instruction, memory-free Clean Room conversations and an explicit Agentica Harness condition, with saved model/context settings, scoped utilities and durable request/trace inspection.
+- Lab-owned durable starts, stop/adoption barriers, cumulative usage, park/wake and action recovery are admitted through [PR #42](https://github.com/zekenaulty/Agentica/pull/42). Original effects and host acceptance remain with the consuming host.
+- Optional [obligation/evidence contracts](docs/contracts/obligation-activation-v1.md) and an independently runnable [learning host](samples/Agentica.NyxLearningHost/README.md) are admitted. The host uses the real streaming planner/runner/refinement loop and independent acceptance for exact-source grounding and original-attempt reconciliation, with deterministic provider fixtures.
+- The [exact historical-evidence faculty](docs/learning/nyx-faculty-contract.md) is implemented in this source. [PR #40](https://github.com/zekenaulty/Agentica/pull/40) records its exact-head review, checks and main admission. Its actual SDK client/server proof does not install a production service or migrate Nyx.
 - `Agentica.Tests` covers runtime contracts, validation, client mapping, retry behavior, harness boundaries, real Lab subprocesses, package consumption, container contracts, and bounded/redacted logging.
 - `Agentica.Clients.Tests` provides a focused deterministic provider-adapter suite without building Lab or MCP. `Agentica.Tests` links the same source files to preserve the complete aggregate and its coverage gate.
 - Deterministic planning remains the regression baseline.
@@ -52,11 +57,12 @@ Runtime contract reference:
 - `docs/Agentica.RuntimeContracts.md`
 - `docs/Agentica.DeferredWork.md`
 - [November reconciliation and issue program](docs/reconciliation/2026-11-03/planning-reconciliation.md) ([GitHub storyboard #12](https://github.com/zekenaulty/Agentica/issues/12))
-- [Typed obligation activation direction](docs/Agentica.TypedObligationActivation.Direction.md) (approved planning direction; implementation and performance remain unproven)
+- [Qualification matrix and current execution overlay](docs/reconciliation/2026-11-03/qualification-matrix.md)
+- [Typed obligation activation direction](docs/Agentica.TypedObligationActivation.Direction.md) (approved direction; optional v1 contracts are implemented, while broader activation/reuse and performance claims remain open)
 
 Current active slice:
 
-The **Effect Truth And Ownership Closure** slice is 100% complete against its bounded exit gates. Local implementation, deterministic proof, and both hosted CI lanes are green. Public packaging, a supported CLI, and broad Lab expansion remain deferred; see the [canonical status](docs/Agentica.ProductStatus.md).
+The current work is [program #12](https://github.com/zekenaulty/Agentica/issues/12): integrate bounded contracts and host proofs, then qualify semantic matching, exact reuse and recovery. The earlier **Effect Truth And Ownership Closure** percentage describes its closed historical gates. Current parallel follow-ons are provider defaults [#10](https://github.com/zekenaulty/Agentica/issues/10), realization matching [#20](https://github.com/zekenaulty/Agentica/issues/20), exact reuse [#24](https://github.com/zekenaulty/Agentica/issues/24) and recovery comparison [#25](https://github.com/zekenaulty/Agentica/issues/25). Qualification [#26](https://github.com/zekenaulty/Agentica/issues/26) and the standalone cognition seam [#31](https://github.com/zekenaulty/Agentica/issues/31) retain their dependency and measurement gates. See the [canonical status](docs/Agentica.ProductStatus.md); no overall completion percentage or Nyx migration is claimed.
 
 ## The Goal
 
@@ -159,12 +165,12 @@ Tool Layer
   host tools
   query/read tools
   action/mutation tools
-  MCP tools through the first host-bound read-only adapter now
+  MCP tools through host-bound client adapters now
 
 Optional Boundary Adapters
   Lab host now
   LLM provider clients in Agentica.Clients now
-  MCP client adapter now; server adapter and broader parity later
+  MCP client/readiness adapter now; production server and broader parity later
   Lab event/run recorder now; reusable recorder later
 ```
 
@@ -177,8 +183,13 @@ Agentica.slnx
   Agentica/          planner/executor runtime package
     Orchestration/   incubating generic task-level orchestration contracts
   Agentica.Clients/  LLM provider SDK isolation
+  Agentica.Mcp/      host-bound MCP client adapters
   Agentica.Lab/      console proof host and host-owned harnesses
+  Agentica.Lab.Web/  browser Lab and reusable external-host service
+  Agentica.Lab.Web.Tests/  Web/storage/socket contract tests
   Agentica.Tests/    boundary and behavior tests
+  samples/Agentica.Lab.Web.FixtureHost/  isolated host fixture
+  samples/Agentica.NyxLearningHost/     independent learning host and faculty
 ```
 
 `Agentica.Clients.Tests/` is an optional focused project outside `Agentica.slnx`. Its source files are also linked into the aggregate `Agentica.Tests`, so a solution test run still executes each case once. See [capability test suites](docs/testing-capability-suites.md) for suite selection and coverage boundaries.
@@ -312,7 +323,7 @@ The current test suite proves:
 - Blocked retries create fresh `RequestOrigin.Agent` attempts with immediate previous-blocker context.
 - `Agentica.Clients` maps model JSON into Agentica plans without provider SDK types leaking into runtime contracts.
 - `RetryingLlmClient` retries transient provider failures, respects caller cancellation, and surfaces attempt-count metadata on exhaustion.
-- Initial and refinement model requests use explicit, versioned strict JSON schemas; repair requests preserve their schema and prompt identity.
+- Initial and refinement model requests use explicit, versioned schemas and host validation; their open tool-input maps request explicit best-effort provider enforcement. Repair requests preserve the schema and prompt identity.
 - The fixed Workbench/Maze benchmark rejects incomplete, duplicated, mixed, structurally inconsistent, false-success, or caller-digest-mismatched cohorts. It structurally reaggregates a trusted version-controlled cohort; it is not provider attestation or offline oracle replay.
 - MazeQuest host scenarios exercise fog-of-war state, legal actions, objective artifacts, logging, and watch output without adding maze vocabulary to `Agentica`.
 
@@ -455,7 +466,7 @@ There are two envelopes:
 
 Agentica may later be exposed through MCP as a tool such as `agentica.run`.
 
-`Agentica.Mcp` now consumes one host-approved remote tool through the official C# MCP SDK. The host pins the server identity, remote tool name, and input schema hash; remote discovery cannot grant a capability. The adapter rechecks schema before invocation and converts bounded text output into an untrusted observation and a receipt. Lab `run` and `chat` can opt into this path through [the MCP and streaming setup](docs/mcp-streaming-first-slice.md).
+`Agentica.Mcp` consumes host-approved remote tools through the official C# MCP SDK. The host pins the server identity, remote tool name, and input schema hash; remote discovery cannot grant a capability. Optional inspection preserves the installed binding while reporting current applicability/readiness/integrity. Every invocation rechecks server identity and schema, then converts bounded results into untrusted observations and receipts. Lab `run` and `chat` can opt into this path through [the MCP and streaming setup](docs/mcp-streaming-first-slice.md). The sample historical faculty exercises the actual SDK client/server under an exact source contract; production server/catalog integration remains deferred.
 
 The runtime package must not depend on MCP SDK types.
 
@@ -474,7 +485,7 @@ What matches the original goals:
 - Blocked runs can retry only through a bounded stop-reason policy; mutations require declared idempotency plus exact authorization.
 - Tool-returned identity, evidence links, timestamps, and payload structures are normalized at the runtime boundary.
 - Event sinks and report/reason observers cannot erase proof after an effect; the authoritative in-memory ledger survives their failure. Event-sink waits are bounded and circuit-broken, while reporter/reason-projector execution remains a trusted in-process callback contract.
-- LLM provider failures are retried at the client boundary before becoming runtime `PlannerUnavailable`.
+- Explicit legacy provider retries exist at the client boundary; stateless streaming preserves unknown dispatch rather than silently replaying it.
 - Lab logging creates bounded/redacted inspectable run artifacts instead of relying on console scrollback, and logging failures do not change run truth.
 - MazeQuest provides a higher-pressure host harness while keeping maze concepts outside the runtime.
 
@@ -493,8 +504,8 @@ Where the code is still behind the product goal:
 - Planning decisions are intentionally still `WorkflowPlan`/`PlanRefinement` shaped; richer model decisions such as "already complete", "cannot resume", or "ask for approval" are not first-class structured model outputs yet.
 - The opt-in Gemini Interactions path emits live activity, text, thought-summary, and terminal usage events. The legacy Gemini path still buffers generation.
 - The bounded/redacted run logger is a Lab adapter, not a general recorder API; redaction remains best-effort and serialization is not streaming-bounded.
-- MCP has a first read-only client adapter. Remote authentication, richer MCP content, mutation grants, and full server parity are still open.
-- Storage, durable run replay, global grant-id uniqueness, and host policy plugins are still adapter-level future work; the implemented one-shot approval grants are deliberately narrow in-memory runtime capabilities, not a human approval service or durable authorization store.
+- MCP has host-bound client/readiness adapters and an isolated historical SDK faculty. Broader authentication/OAuth, richer content, effectful cross-host conformance and production server parity remain open.
+- The Lab owns durable start/operation/action stores. General runtime/provider continuation, global grant-id uniqueness and broader host policy plugins remain follow-on work; the one-shot approval grants remain narrow in-memory capabilities rather than a human approval service or durable authorization store.
 
 The immediate next step is to preserve both hosted proof lanes while choosing the next explicit product slice. Completion of this bounded closure does not promote the repository beyond Incubating or authorize public package/CLI claims.
 
