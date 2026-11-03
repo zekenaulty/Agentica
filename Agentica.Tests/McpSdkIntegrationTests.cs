@@ -41,6 +41,40 @@ public sealed class McpSdkIntegrationTests
         Assert.Equal("Agentica", server.CallQuery);
     }
 
+    [Fact]
+    public async Task SDK_inspection_preserves_config_and_revalidates_the_same_pin_after_drift()
+    {
+        await using var server = new LoopbackMcpServer();
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
+        var binding = McpReadOnlyBindingFactory.Create("test-server", "search",
+            McpSchemaFingerprint.Sha256(Schema), "mcp.test.search", "Search", "Host-owned fixture binding", Schema);
+        var disconnected = await McpToolCatalogAdapter.InspectAsync(null, [binding], cancellationToken: timeout.Token);
+        Assert.Same(binding, Assert.Single(disconnected.Statuses).Binding);
+        Assert.Empty(disconnected.ReadyRegistrations); Assert.Equal(0, server.ListCount);
+        await using var transport = await SdkMcpToolTransport.ConnectHttpAsync(
+            "test-server", server.Endpoint, timeout.Token, bearerToken: "local-test-token");
+        var initial = await McpToolCatalogAdapter.InspectAsync(transport, [binding], cancellationToken: timeout.Token);
+        var registration = Assert.Single(initial.ReadyRegistrations);
+        Assert.True(Assert.Single(initial.Statuses).RuntimeReady);
+        server.InputSchemaJson = "{\"type\":\"object\"}";
+        var drifted = await McpToolCatalogAdapter.InspectAsync(transport, [binding], cancellationToken: timeout.Token);
+        Assert.Equal("mcp.schema_mismatch", Assert.Single(drifted.Statuses).ReasonCode);
+        Assert.Same(binding, drifted.Statuses[0].Binding); Assert.Empty(drifted.ReadyRegistrations);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => registration.Tool.ExecuteAsync(new(
+            "run", "step", "mcp.test.search", new Dictionary<string, object?> { ["query"] = "fixture" }), timeout.Token));
+        Assert.Equal(0, server.CallCount);
+        server.InputSchemaJson = Schema;
+        var recovered = await McpToolCatalogAdapter.InspectAsync(transport, [binding], cancellationToken: timeout.Token);
+        Assert.True(Assert.Single(recovered.Statuses).RuntimeReady);
+        Assert.Equal(binding.ExpectedInputSchemaSha256, recovered.Statuses[0].Binding.ExpectedInputSchemaSha256);
+        var result = await Assert.Single(recovered.ReadyRegistrations).Tool.ExecuteAsync(new(
+            "run", "step", "mcp.test.search", new Dictionary<string, object?> { ["query"] = "fixture" }), timeout.Token);
+        Assert.Equal(ReceiptStatus.Succeeded, result.Receipt.Status); Assert.Equal(1, server.CallCount);
+        Assert.Equal("Bearer local-test-token", server.CallAuthorization);
+        Assert.DoesNotContain("local-test-token", JsonSerializer.Serialize(recovered.Statuses), StringComparison.Ordinal);
+    }
+
     private sealed class LoopbackMcpServer : IAsyncDisposable
     {
         private readonly HttpListener _listener = new();
@@ -62,6 +96,7 @@ public sealed class McpSdkIntegrationTests
 
         public Uri Endpoint { get; }
         public int ListCount { get; private set; }
+        public string InputSchemaJson { get; set; } = Schema;
         public int CallCount { get; private set; }
         public string? CallAuthorization { get; private set; }
         public string? CallQuery { get; private set; }
@@ -138,7 +173,7 @@ public sealed class McpSdkIntegrationTests
                     break;
                 case "tools/list":
                     ListCount++;
-                    using (var schema = JsonDocument.Parse(Schema))
+                    using (var schema = JsonDocument.Parse(InputSchemaJson))
                     {
                         result = new
                         {
