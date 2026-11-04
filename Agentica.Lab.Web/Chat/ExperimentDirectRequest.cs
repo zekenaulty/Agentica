@@ -76,7 +76,8 @@ internal static class ExperimentDirectRequest
                 startOffset = item.StartOffset,
                 endOffset = item.EndOffset,
                 quote = item.Content,
-                matchReason = item.MatchReason
+                matchReason = item.MatchReason,
+                semanticCitation = item.SemanticCitation
             }).ToArray()
         }
     });

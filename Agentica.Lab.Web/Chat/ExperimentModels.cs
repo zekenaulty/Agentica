@@ -13,6 +13,7 @@ public sealed record ExperimentSettings
     public bool AmbientWebSearch { get; init; }
     public int MaxWebSearchCalls { get; init; } = 3;
     public bool ThreadRecallEnabled { get; init; }
+    public bool ThreadSemanticRecallEnabled { get; init; }
     public string ThreadRecallMode { get; init; } = "auto";
     public string ThreadRecallQuery { get; init; } = "";
     public IReadOnlyList<ExperimentRecallSelection> ThreadRecallSelections { get; init; } = [];

@@ -26,6 +26,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Agentica.Clients\Agentica.Clients.csproj" />
     <Using Include="Xunit" />
+    <Compile Include="..\Agentica.Tests\SemanticEmbeddingClientTests.cs" Link="Memory\SemanticEmbeddingClientTests.cs" />
   </ItemGroup>
 
 </Project>

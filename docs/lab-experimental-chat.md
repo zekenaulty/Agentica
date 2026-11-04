@@ -34,6 +34,11 @@ The trace retains native search actions, call identities, citations, sources and
 
 ## Thread history recall
 
+Optional [semantic conversation retrieval](scoped-semantic-memory.md#lab-usage)
+uses the core encoding/search/citation flow and a separate Lab storage adapter.
+It defaults off and uses the existing OpenAI key only after turn admission.
+Local history inspection and context preview make no embedding requests.
+
 Enable **Thread history recall** in Configure, save, and run a new turn. It defaults off independently of web search and personal memory. Enabled turns are labeled **conditioned**. The source is exclusively this conversation's completed user/assistant text before the current turn, with a frozen inclusive sequence cutoff. Reasoning, traces, tool results and other conversations are excluded.
 
 - **Auto local lookup** derives a bounded lexical query from the current user message, or uses an operator query override. It selects exact quotations without another model call.

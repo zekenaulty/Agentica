@@ -187,8 +187,17 @@ internal static class ExperimentRecallAllocator
                 var boundedQuery = ExactPrefix(query, 512);
                 effectiveQuery = boundedQuery;
                 if (boundedQuery.Length != query.Length) omissions.Add(new("", boundedQuery.Length, query.Length, "query-character-limit"));
-                var result = Retrieve(() => source.Search(new(boundedQuery, settings.ThreadRecallTopK, settings.ThreadRecallMaxCharacters,
-                    settings.ThreadRecallNeighborRadius), cancellationToken), "", 0, 0);
+                ConversationEvidenceResult? searched;
+                try
+                {
+                    searched = await source.SearchAsync(new(boundedQuery, settings.ThreadRecallTopK, settings.ThreadRecallMaxCharacters,
+                        settings.ThreadRecallNeighborRadius), cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception error) when (IsSourceUnavailable(error))
+                {
+                    searched = null;
+                }
+                var result = Retrieve(() => searched ?? throw new IOException("Historical source unavailable."), "", 0, 0);
                 if (result is not null)
                 {
                     coverage = result.Coverage; method = result.QueryMethod;
@@ -375,7 +384,8 @@ internal static class ExperimentRecallAllocator
         }
         return ranges.Select(range => new ExperimentRecallEvidence(hit.Source.SourceId, hit.Source.TurnId, hit.Source.TurnSequence,
             hit.Source.Role, hit.Source.CreatedAt, hit.Source.ContentHash, range.Start, range.End,
-            hit.Excerpt.Substring(range.Start - hit.StartOffset, range.End - range.Start), hit.MatchReason)).ToList();
+            hit.Excerpt.Substring(range.Start - hit.StartOffset, range.End - range.Start), hit.MatchReason)
+        { SemanticCitation = hit.SemanticCitation }).ToList();
     }
 
     internal static string ExactPrefix(string text, int maximum)

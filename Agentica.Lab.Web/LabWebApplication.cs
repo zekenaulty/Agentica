@@ -7,13 +7,16 @@ using Agentica.Lab.Web.Runtime;
 using Agentica.Lab.Web.Transport;
 using Agentica.Lab.Web.Chat;
 using Agentica.Lab.Web.Chat.Recall;
+using Agentica.Memory;
+using Agentica.Clients.Embeddings;
 
 namespace Agentica.Lab.Web;
 
 public static partial class LabWebApplication
 {
     public static WebApplication Create(string[] args, ILabPlannerFactory? plannerFactory = null, string? storageDirectory = null,
-        OpenAiProviderConfiguration? openAiConfiguration = null, IExperimentExecutor? experimentExecutor = null)
+        OpenAiProviderConfiguration? openAiConfiguration = null, IExperimentExecutor? experimentExecutor = null,
+        IMemoryEmbeddingProvider? memoryEmbeddingProvider = null)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -41,6 +44,11 @@ public static partial class LabWebApplication
         builder.Services.AddSingleton(new HostStartStore(Path.Combine(storageRoot, "starts")));
         builder.Services.AddSingleton<HostRunRegistry>();
         builder.Services.AddSingleton(_ => new ExperimentStore(Path.Combine(storageRoot, "chat")));
+        builder.Services.AddSingleton(services => new SemanticMemoryStorageProvider(Path.Combine(storageRoot, "chat"),
+            services.GetRequiredService<ExperimentStore>()));
+        builder.Services.AddSingleton(services => new ExperimentSemanticRecall(services.GetRequiredService<ExperimentStore>(),
+            () => services.GetRequiredService<SemanticMemoryStorageProvider>(), () => memoryEmbeddingProvider ??
+                new OpenAiEmbeddingClient(new(ExperimentSemanticRecall.Profile, openAi.Capture().ApiKey))));
         if (experimentExecutor is null) builder.Services.AddSingleton<IExperimentExecutor>(services =>
             new OpenAiExperimentExecutor(services.GetRequiredService<OpenAiProviderConfiguration>()));
         else builder.Services.AddSingleton(experimentExecutor);

@@ -1,11 +1,12 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using Agentica.Lab.Web.Providers;
+using Agentica.Lab.Web.Chat.Recall;
 
 namespace Agentica.Lab.Web.Chat;
 
 public sealed class ExperimentService(ExperimentStore store, IExperimentExecutor executor,
-    OpenAiProviderConfiguration configuration) : IHostedService, IDisposable
+    OpenAiProviderConfiguration configuration, ExperimentSemanticRecall? semanticRecall = null) : IHostedService, IDisposable
 {
     private readonly ConcurrentDictionary<string, (CancellationTokenSource Cancellation, Task Task)> _active = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource _stopping = new();
@@ -80,7 +81,8 @@ public sealed class ExperimentService(ExperimentStore store, IExperimentExecutor
         using var counterLifetime = counter as IDisposable;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stopping.Token);
         deadline.CancelAfter(TimeSpan.FromSeconds(conversation.Settings.TimeoutSeconds));
-        var source = conversation.Settings.ThreadRecallEnabled ? store.BindEvidenceSource(conversationId, head.LatestSequence) : null;
+        var source = Source(conversationId, head.LatestSequence, conversation.Settings, _ => Task.CompletedTask, allowEmbedding: false);
+        using var sourceLifetime = source as IDisposable;
         ExperimentPreparedContext prepared;
         try
         {
@@ -98,12 +100,23 @@ public sealed class ExperimentService(ExperimentStore store, IExperimentExecutor
             measurements = counter.Measurements,
             settingsRevision = conversation.SettingsRevision,
             inferenceDispatched = false,
-            turnCreated = false
+            turnCreated = false,
+            semanticRetrieval = conversation.Settings.ThreadRecallEnabled && conversation.Settings.ThreadSemanticRecallEnabled
+                ? "deferred until an admitted turn; no embedding request made" : "off"
         };
     }
 
     private IExperimentInputTokenCounter Counter(ExperimentSettings settings) => executor is IExperimentInputCounterSource source
         ? source.CreateInputTokenCounter(settings) : ExperimentByteProxyCounter.Instance;
+
+    private IConversationEvidenceSource? Source(string conversationId, int asOf, ExperimentSettings settings,
+        Func<ExperimentTraceInput, Task> trace, bool allowEmbedding = true)
+    {
+        if (!settings.ThreadRecallEnabled) return null;
+        if (!settings.ThreadSemanticRecallEnabled) return store.BindEvidenceSource(conversationId, asOf);
+        return semanticRecall?.Bind(conversationId, asOf, trace, allowEmbedding)
+            ?? throw new ExperimentException("recall.unavailable", "No semantic conversation adapter is installed; no lexical fallback was performed.");
+    }
 
     private static void ValidateContent(string content)
     {
@@ -122,7 +135,9 @@ public sealed class ExperimentService(ExperimentStore store, IExperimentExecutor
             store.Append(conversationId, turn.Id, new("turn.started", turn));
             var head = store.GetHead(conversationId);
             var window = Window(head, turn);
-            var source = turn.Settings.ThreadRecallEnabled ? store.BindEvidenceSource(conversationId, turn.Sequence - 1) : null;
+            var source = Source(conversationId, turn.Sequence - 1, turn.Settings,
+                input => { store.Append(conversationId, turn.Id, input); return Task.CompletedTask; });
+            using var sourceLifetime = source as IDisposable;
             var context = await ExperimentContextCompiler.PrepareAsync(window, turn, counter, source, deadline.Token).ConfigureAwait(false);
             store.Append(conversationId, turn.Id, new("context.manifest", context.Manifest with { HistoryPage = window.HistoryPage }));
             if (context.Recall is not null) store.Append(conversationId, turn.Id, new("context.recall", context.Recall.Manifest));
@@ -139,7 +154,10 @@ public sealed class ExperimentService(ExperimentStore store, IExperimentExecutor
                 enabledTools = turn.Settings.EnabledTools,
                 ambientWebSearch = turn.Settings.AmbientWebSearch,
                 maxWebSearchCalls = turn.Settings.MaxWebSearchCalls,
-                threadRecall = turn.Settings.ThreadRecallEnabled ? turn.Settings.ThreadRecallMode : "off"
+                threadRecall = turn.Settings.ThreadRecallEnabled ? turn.Settings.ThreadRecallMode : "off",
+                semanticRecall = turn.Settings.ThreadRecallEnabled && turn.Settings.ThreadSemanticRecallEnabled,
+                participantId = "local-owner",
+                agentId = "lab-assistant"
             }));
             var workspace = Path.Combine(store.WorkspaceRoot, conversationId);
             Directory.CreateDirectory(workspace);

@@ -39,6 +39,12 @@ Hosts own:
 - prompt/domain projections
 - long-lived domain memory
 
+The optional [`Agentica.Memory` contracts](scoped-semantic-memory.md) execute
+bounded vector encoding, retrieval, exact-source citation validation and linked
+exports. Hosts continue to own canonical memory, eligibility/admission, retention,
+model mapping and storage writes. No conversation database or memory canon is
+part of the core package.
+
 ## Request
 
 `RunRequest` is the bounded objective passed to one `AgenticaRunner` run.
