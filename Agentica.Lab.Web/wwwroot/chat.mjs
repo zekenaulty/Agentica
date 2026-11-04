@@ -82,7 +82,8 @@ export function contextCheckSummary(result, settings) {
   const quotes = result.recall?.selected ?? [];
   const characters = result.recall?.presentedCharacters ?? quotes.reduce((sum, quote) => sum + (quote.content?.length ?? 0), 0);
   const floor = settings.threadRecallEnabled ? `${settings.threadRecallRecentTurns ?? 2} complete turns configured as the protected recent floor` : 'protected recent floor off';
-  const projection = `${history} history messages retained · ${floor} · ${quotes.length} quoted passages, ${format(characters)} characters · settings revision ${result.settingsRevision}`;
+  const semantic = settings.threadRecallEnabled && settings.threadSemanticRecallEnabled ? ' · Semantic lookup deferred until an admitted turn; no embedding request made' : '';
+  const projection = `${history} history messages retained · ${floor} · ${quotes.length} quoted passages, ${format(characters)} characters · settings revision ${result.settingsRevision}${semantic}`;
   if (settings.mode === 'harness' && count == null)
     return `Harness projection valid · ${projection}. Provider token count is deferred until an actual planner request is prepared. Input projection only; no generation or turn created.`;
   if (count?.providerCount !== true || !Number.isSafeInteger(count.tokens) || count.tokens < 0 || !Number.isSafeInteger(result.manifest.inputAllowance)) {
@@ -206,7 +207,7 @@ function startChat() {
       mode: $('mode').value, model: $('model').value.trim(), reasoningEffort: $('reasoning-effort').value || null,
       instructions: instructionValue(state.conversation.settings.instructions, $('instructions').value, state.instructionsDirty), reasoningSummary: $('reasoning-summary').checked,
       ambientWebSearch: $('mode').value === 'clean-room' && $('ambient-web-search').checked,
-      threadRecallEnabled: $('thread-recall-enabled').checked, threadRecallMode: $('thread-recall-mode').value, threadRecallQuery: $('thread-recall-query').value,
+      threadRecallEnabled: $('thread-recall-enabled').checked, threadSemanticRecallEnabled: $('thread-semantic-recall-enabled').checked, threadRecallMode: $('thread-recall-mode').value, threadRecallQuery: $('thread-recall-query').value,
       threadRecallSelections: state.recallSelections.map(({ sourceId, startOffset, endOffset }) => ({ sourceId, startOffset, endOffset })),
       historyPolicy: $('history-policy').value, contextDepth: $('context-depth').value,
       ...Object.fromEntries(Object.entries(numericFields).map(([key, id]) => [key, Number($(id).value)])),
@@ -223,6 +224,7 @@ function startChat() {
     $('reasoning-summary').checked = settings.reasoningSummary; $('history-policy').value = settings.historyPolicy;
     $('ambient-web-search').checked = Boolean(settings.ambientWebSearch);
     $('thread-recall-enabled').checked = Boolean(settings.threadRecallEnabled); $('thread-recall-mode').value = settings.threadRecallMode ?? 'auto'; $('thread-recall-query').value = settings.threadRecallQuery ?? '';
+    $('thread-semantic-recall-enabled').checked = Boolean(settings.threadSemanticRecallEnabled);
     state.recallSelections = (settings.threadRecallSelections ?? []).map(selection => ({ ...selection }));
     $('context-depth').value = settings.contextDepth;
     for (const [key, id] of Object.entries(numericFields)) $(id).value = settings[key] ?? recallNumericDefaults[key] ?? (key === 'maxWebSearchCalls' ? 3 : '');
@@ -476,7 +478,10 @@ function startChat() {
       elements.recallInspector.body.textContent = recalls.length ? json(recalls.map(event => ({ sequence: event.sequence, type: event.type, callId: event.callId, data: event.data }))) : 'No recall manifest loaded. Thread recall may be off; inspect trace coverage before inferring absence.';
       elements.recallInspector.links.replaceChildren(...recalls.flatMap(event => {
         if (event.data?.payloadRef) { const load = node('button', 'button secondary', 'Load retained recall manifest'); load.type = 'button'; load.addEventListener('click', async () => { load.disabled = true; try { await retainedPayload(id, event); renderTrace(id); } catch (error) { load.disabled = false; notice(`Cannot load recall manifest: ${error.message}`); } }); return [load]; }
-        return (event.data?.selected ?? event.data?.hits ?? []).filter(evidence => evidence.sourceId).map(evidence => sourceButton(evidence.sourceId, evidence.startOffset, evidence.endOffset, `Open original · turn ${evidence.turnSequence} ${evidence.role} · UTF-16 [${evidence.startOffset}, ${evidence.endOffset})`));
+        return (event.data?.selected ?? event.data?.hits ?? []).filter(evidence => evidence.sourceId).map(evidence => {
+          const attribution = evidence.semanticCitation ? ` · ${evidence.semanticCitation.perspective}: ${evidence.semanticCitation.authorId}` : '';
+          return sourceButton(evidence.sourceId, evidence.startOffset, evidence.endOffset, `Open original · turn ${evidence.turnSequence} ${evidence.role}${attribution} · UTF-16 [${evidence.startOffset}, ${evidence.endOffset})`);
+        });
       }));
     }
     if (elements.sourceInspector.section.open) {
@@ -633,6 +638,7 @@ function startChat() {
     const enabled = $('thread-recall-enabled').checked;
     $('thread-recall-controls').hidden = !enabled; $('thread-recall-summary').textContent = enabled ? `${$('thread-recall-mode').value} · ${state.recallSelections.length} pins · this conversation only` : 'off';
     $('thread-recall-condition').textContent = !enabled ? 'Off is the baseline. Enabling recall is a conditioned experiment using only this saved conversation. Personal/governed memory stays disabled.' : $('thread-recall-mode').value === 'agent' ? 'Conditioned Harness experiment. Bind conversation.read/search explicitly below for model-directed recall; this switch does not select tools. Personal/governed memory stays disabled.' : $('thread-recall-mode').value === 'manual' ? 'Conditioned experiment using operator-pinned exact passages. Search/read actions below are local diagnostics and make no model call.' : 'Conditioned experiment using deterministic local lookup. A blank override uses the current user message; selection and omissions are receipted.';
+    if (enabled && $('thread-semantic-recall-enabled').checked && $('thread-recall-mode').value !== 'manual') $('thread-recall-condition').textContent = 'Semantic conversation retrieval uses the existing OpenAI key after turn admission. User and agent perspectives retain exact source citations. Encoding is bounded; incomplete coverage is reported. Context checks defer semantic lookup. Personal/governed memory stays disabled.';
     $('memory-recall-status').textContent = enabled ? 'Thread recall is on for this conversation only. Personal/governed memory remains disabled.' : 'Thread recall is off. Saved history remains within this conversation.';
     $('thread-recall-pins').replaceChildren(...(state.recallSelections.length ? state.recallSelections.map((selection, index) => {
       const card = node('div', 'recall-hit'); card.append(sourceButton(selection.sourceId, selection.startOffset, selection.endOffset, `${selection.sourceId} · UTF-16 [${selection.startOffset}, ${selection.endOffset})`));
@@ -645,7 +651,7 @@ function startChat() {
   async function refreshRecallCapabilityPreview() {
     if (!state.conversation) return;
     const enabled = $('thread-recall-enabled').checked;
-    const query = new URLSearchParams({ threadRecallEnabled: String(enabled), threadRecallMode: $('thread-recall-mode').value, mode: $('mode').value }); const signature = query.toString();
+    const query = new URLSearchParams({ threadRecallEnabled: String(enabled), threadSemanticRecallEnabled: String($('thread-semantic-recall-enabled').checked), threadRecallMode: $('thread-recall-mode').value, mode: $('mode').value }); const signature = query.toString();
     if (signature === capabilityPreviewSignature) return;
     capabilityPreviewSignature = signature; const revision = ++capabilityPreviewGeneration; const generation = state.generation;
     try {

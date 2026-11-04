@@ -3,7 +3,10 @@ namespace Agentica.Lab.Web.Chat.Recall;
 /// <summary>Exact historical quotation; the original role is attribution, not a live instruction role.</summary>
 public sealed record ExperimentRecallEvidence(string SourceId, string TurnId, int TurnSequence,
     string Role, DateTimeOffset CreatedAt, string ContentHash, int StartOffset, int EndOffset,
-    string Content, string MatchReason);
+    string Content, string MatchReason)
+{
+    public ConversationSemanticCitation? SemanticCitation { get; init; }
+}
 
 public sealed record ExperimentRecallOmission(string SourceId, int StartOffset, int EndOffset, string Reason);
 

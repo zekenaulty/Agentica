@@ -75,7 +75,7 @@ public static class ExperimentTools
 
     public static IReadOnlyList<ExperimentCapability> CapabilitiesFor(ExperimentSettings settings) =>
         settings.ThreadRecallEnabled ? Capabilities.Select(capability =>
-            ExperimentRecallTools.Capabilities.FirstOrDefault(historical => historical.Id == capability.Id) ?? capability).ToArray() : Capabilities;
+            ExperimentRecallTools.CapabilitiesFor(settings).FirstOrDefault(historical => historical.Id == capability.Id) ?? capability).ToArray() : Capabilities;
 
     public static ToolCatalog CreateCatalog(ExperimentExecutionContext context) =>
         ToolCatalog.Create(CreateRegistrations(context).ToArray());

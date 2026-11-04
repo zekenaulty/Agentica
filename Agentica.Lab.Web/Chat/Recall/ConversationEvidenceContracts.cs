@@ -13,6 +13,8 @@ public interface IConversationEvidenceSource
     ConversationEvidenceResult ReadNeighbors(string sourceId, int radius = 1, int maxCharacters = 8000,
         CancellationToken cancellationToken = default);
     ConversationEvidenceResult Search(ConversationEvidenceSearch query, CancellationToken cancellationToken = default);
+    Task<ConversationEvidenceResult> SearchAsync(ConversationEvidenceSearch query, CancellationToken cancellationToken = default)
+        => Task.FromResult(Search(query, cancellationToken));
 }
 
 public sealed record ConversationEvidenceSearch(string Query, int TopK = 8, int MaxCharacters = 8000,
@@ -24,7 +26,12 @@ public sealed record ConversationSourceHeader(string SourceId, string TurnId, in
 public sealed record ConversationSourcePage(IReadOnlyList<ConversationSourceHeader> Items, int? NextBeforeOrder,
     int TotalSources, int AsOfSequence);
 public sealed record ConversationEvidenceHit(ConversationSourceHeader Source, int StartOffset, int EndOffset,
-    string Excerpt, string MatchReason, IReadOnlyList<string> NeighborRefs);
+    string Excerpt, string MatchReason, IReadOnlyList<string> NeighborRefs)
+{
+    public ConversationSemanticCitation? SemanticCitation { get; init; }
+}
+public sealed record ConversationSemanticCitation(string ExportId, string ProjectionId, string ProfileId,
+    string ParticipantId, string AgentId, string AuthorId, string Perspective, double Similarity);
 public sealed record ConversationEvidenceCoverage(string Status, int AsOfSequence, int LastIndexedSequence,
     int EligibleSourceCount, int IndexedSourceCount, bool FtsAvailable, string IndexVersion, string? Reason = null);
 public sealed record ConversationEvidenceResult(string RetrievalId, string ScopeRef, int AsOfSequence,

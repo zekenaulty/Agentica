@@ -17,6 +17,12 @@ test('Harness context check reports projection-only validity without claiming me
   assert.throws(() => contextCheckSummary(result, { mode: 'clean-room' }), /unavailable/);
 });
 
+test('semantic context preview explicitly defers retrieval instead of claiming complete measured recall', () => {
+  const result = { inferenceDispatched: false, settingsRevision: 1, manifest: { tokenCount: null, selectedMessageIds: ['current'] }, recall: { selected: [], presentedCharacters: 0 } };
+  assert.match(contextCheckSummary(result, { mode: 'harness', threadRecallEnabled: true, threadSemanticRecallEnabled: true }), /Semantic lookup deferred until an admitted turn; no embedding request made/);
+  assert.doesNotMatch(contextCheckSummary(result, { mode: 'harness', threadRecallEnabled: false, threadSemanticRecallEnabled: true }), /Semantic lookup deferred/);
+});
+
 test('history pages merge chronologically without duplicates and remain bounded', () => {
   const turns = Array.from({ length: 5000 }, (_, index) => ({ id: `turn-${index + 1}`, sequence: index + 1 }));
   const latest = turns.slice(-20); const earlier = turns.slice(-40, -20);

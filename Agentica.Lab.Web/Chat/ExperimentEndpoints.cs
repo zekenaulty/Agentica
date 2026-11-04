@@ -24,11 +24,12 @@ public static class ExperimentEndpoints
         });
         group.MapGet("", (ExperimentStore store) => store.List());
         group.MapPost("", (ExperimentCreateRequest request, ExperimentService service) => service.Create(request.Title));
-        group.MapGet("/capabilities", (bool? threadRecallEnabled, string? threadRecallMode, string? mode) =>
+        group.MapGet("/capabilities", (bool? threadRecallEnabled, bool? threadSemanticRecallEnabled, string? threadRecallMode, string? mode) =>
         {
             var settings = new ExperimentSettings
             {
                 ThreadRecallEnabled = threadRecallEnabled ?? false,
+                ThreadSemanticRecallEnabled = threadSemanticRecallEnabled ?? false,
                 ThreadRecallMode = threadRecallMode ?? "auto",
                 Mode = mode ?? "clean-room"
             };

@@ -18,21 +18,29 @@ internal static class ExperimentRecallTools
             "ReadOnly", ExperimentTools.Source, Version)
     ];
 
+    internal static IReadOnlyList<ExperimentCapability> CapabilitiesFor(ExperimentSettings settings) =>
+        !settings.ThreadSemanticRecallEnabled ? Capabilities : Capabilities.Select(capability => capability.Id == ExperimentToolIds.ConversationSearch
+            ? capability with { Effect = "ExternalSideEffect", Description = "Semantic search of completed messages in this conversation at its frozen pre-turn boundary. Returns one bounded result window (offset 0 only) with participant/agent-attributed exact citations linked to stored projections. Uses the host-bound embedding profile and per-turn embedding allowance, including billable requests and local projection writes. No other conversations or governed memory. No automatic retry or lexical fallback." }
+            : capability).ToArray();
+
     internal static IReadOnlyList<ToolRegistration> CreateRegistrations(ExperimentExecutionContext context)
     {
         var budget = new CallBudget(context.Turn.Settings.ThreadRecallMaxCalls, context.Recall?.Manifest.SourceCalls ?? 0,
             context.Turn.Settings.ThreadRecallMaxCharacters, context.Recall?.Manifest.PresentedCharacters ?? 0);
-        return Capabilities.Where(capability => context.Turn.Settings.EnabledTools.Contains(capability.Id, StringComparer.Ordinal)).Select(capability =>
+        return CapabilitiesFor(context.Turn.Settings).Where(capability => context.Turn.Settings.EnabledTools.Contains(capability.Id, StringComparer.Ordinal)).Select(capability =>
         {
+            var retrySafety = context.Turn.Settings.ThreadSemanticRecallEnabled && capability.Id == ExperimentToolIds.ConversationSearch
+                ? ToolRetrySafety.Additive : ToolRetrySafety.Idempotent;
+            var effect = Enum.Parse<ToolEffect>(capability.Effect);
             var schema = capability.Id == ExperimentToolIds.ConversationSearch
-                ? ToolInputSchema.Create(Text("query", true), Integer("offset", 0, 1000), Integer("limit", 1, 20), Integer("maxCharacters", 1, 32000))
+                ? ToolInputSchema.Create(Text("query", true), Integer("offset", 0, context.Turn.Settings.ThreadSemanticRecallEnabled ? 0 : 1000), Integer("limit", 1, 20), Integer("maxCharacters", 1, 32000))
                 : ToolInputSchema.Create(Text("messageId"), Integer("beforeOrder", 0, int.MaxValue), Integer("limit", 1, 20),
                     Integer("characterOffset", 0, int.MaxValue), Integer("maxCharacters", 1, 32000), Integer("neighborRadius", 0, 2));
-            return new ToolRegistration(new ToolDescriptor(capability.Id, capability.Name, ToolKind.Query, ToolEffect.ReadOnly,
-                InputSchema: schema, Description: capability.Description, RetrySafety: ToolRetrySafety.Idempotent),
+            return new ToolRegistration(new ToolDescriptor(capability.Id, capability.Name, effect == ToolEffect.ReadOnly ? ToolKind.Query : ToolKind.Action, effect,
+                InputSchema: schema, Description: capability.Description, RetrySafety: retrySafety),
                 new BoundTool(context, capability, schema, budget),
-                new ToolSecurityDeclaration(ToolEffect.ReadOnly, [ToolDataBoundary.ConversationContent], [ToolDataBoundary.ConversationContent],
-                    ToolExternalOutputClassification.UntrustedStructuredData, ToolApprovalRequirement.None, ToolRetrySafety.Idempotent,
+                new ToolSecurityDeclaration(effect, [ToolDataBoundary.ConversationContent], [ToolDataBoundary.ConversationContent],
+                    ToolExternalOutputClassification.UntrustedStructuredData, ToolApprovalRequirement.None, retrySafety,
                     new ToolProvenance(ToolProvenanceKind.HostAuthored, ExperimentTools.Source, Version)));
         }).ToArray();
     }
@@ -112,8 +120,8 @@ internal static class ExperimentRecallTools
                 if (capability.Id == ExperimentToolIds.ConversationSearch)
                 {
                     var query = String(invocation.Input, "query");
-                    result = source.Search(new(query, Math.Min(Number(invocation.Input, "limit", context.Turn.Settings.ThreadRecallTopK), context.Turn.Settings.ThreadRecallTopK),
-                        maximum, context.Turn.Settings.ThreadRecallNeighborRadius, Number(invocation.Input, "offset", 0)), cancellationToken);
+                    result = await source.SearchAsync(new(query, Math.Min(Number(invocation.Input, "limit", context.Turn.Settings.ThreadRecallTopK), context.Turn.Settings.ThreadRecallTopK),
+                        maximum, context.Turn.Settings.ThreadRecallNeighborRadius, Number(invocation.Input, "offset", 0)), cancellationToken).ConfigureAwait(false);
                 }
                 else
                 {
@@ -232,7 +240,8 @@ internal static class ExperimentRecallTools
                 endOffset = hit.EndOffset,
                 excerpt = hit.Excerpt,
                 matchReason = hit.MatchReason,
-                neighborRefs = hit.NeighborRefs
+                neighborRefs = hit.NeighborRefs,
+                semanticCitation = hit.SemanticCitation
             }).ToArray(),
             nextOffset = result.NextOffset,
             truncated = result.Truncated || trimmedForTool || trimmedByEvidence,

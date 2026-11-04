@@ -15,7 +15,7 @@
       "note": "Observer delivery is explicitly best-effort. Runner dispatch separately recompiles and checks the pinned tool manifest."
     },
     {
-      "kind": "test",
+      "kind": "offline_test",
       "reference": "Agentica.Tests/ToolSecurityManifestTests.cs",
       "revision": "ff204a528b0d4c055a231c1f70adcf6e781a2f1f",
       "note": "All 33 focused tests passed locally after moving the mutation into the planner callback. Explicit old/new hash, mutation, refused receipt and zero-call assertions remain. The same source was included in admitted PR39 head a03e20c and passing Windows/Linux run41666172418."

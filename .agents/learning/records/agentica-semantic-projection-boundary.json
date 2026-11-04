@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "agentica-semantic-projection-boundary",
+  "scope": "agentica",
+  "kind": "practice",
+  "status": "accepted",
+  "title": "Execute semantic retrieval through source-linked core contracts and host storage",
+  "trigger": "semantic memory embedding vectors conversation retrieval citation storage mapping",
+  "guidance": "Core can own bounded embedding, ranking, exact-source citation validation and linked export execution while hosts retain canonical state, eligibility, admission, retention, storage models and writes. Bind real participant and agent identities separately from roles; pin the complete vector profile and re-resolve canonical text after ranking. Validate actual bounded collection enumeration rather than trusting provider Count. In Lab, admit the turn before paid embedding work, declare semantic search as an external additive effect, preserve Off/preview no-call paths and latch uncertain work without hidden retry. Verify the complete existing planner-search-read-refine-answer loop and durable reopen, not only vector math or tool exposure.",
+  "evidence": [
+    {
+      "kind": "user_instruction",
+      "reference": "Owner request in Agentica Online: core execution and logic, linked export to host storage model mapping",
+      "note": "Owner confirmed login was a typo for logic. Persistence remains outside the package."
+    },
+    {
+      "kind": "source_review",
+      "reference": "docs/scoped-semantic-memory.md",
+      "note": "Core, client adapter, Lab mapper/provider and fresh canonical citation boundaries; no memory admission or companion ontology imported."
+    },
+    {
+      "kind": "offline_test",
+      "reference": "docs/implementation/scoped-semantic-memory/qualification.md",
+      "note": "104 core/provider and44 host cases passed; actual existing loop, SQLite reopen, Unicode source coordinates, actor isolation and preview/failure paths. No live semantic-quality claim."
+    }
+  ],
+  "recheck": "Recheck profile, actor binding, retention ownership, effect declarations and complete host acceptance whenever another host or embedding provider adopts the contracts. Offline transport tests do not establish live provider quality or cost.",
+  "tags": ["memory", "embeddings", "citations", "host-boundary", "agentic-loop"],
+  "recorded_on": "2026-11-03"
+}
