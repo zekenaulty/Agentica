@@ -201,6 +201,10 @@ jobs:
         shell: pwsh
         run: ./eng/Verify-Packages.ps1
 
+      - name: Qualify the packed A5 embedding consumer
+        shell: pwsh
+        run: ./eng/Verify-ProviderConsumer.ps1
+
       - name: Build the pinned Lab container
         run: docker build --file Agentica.Lab/Dockerfile --tag agentica-lab:ci .
 

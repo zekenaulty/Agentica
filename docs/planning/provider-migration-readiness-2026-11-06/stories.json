@@ -1,0 +1,561 @@
+{
+  "schema_version": 1,
+  "plan_id": "agentica-provider-readiness-2026-11-06",
+  "plan_file": "PLAN.md",
+  "plan_revision": "1.1",
+  "alignment_file": "BRIDGE-ALIGNMENT.md",
+  "status": "published",
+  "source_commit": "cb9154dacb327880585d518d66ee24773b8cc1b9",
+  "source_bridge_review_commit": "187b203c45d316e8f166dcb1cbd239e5a564a321",
+  "implementation_scope": "Agentica repository and Agentica-owned workspaces",
+  "goal_status": "not_created",
+  "publication_body_contract": {
+    "source": "PLAN.md",
+    "story_selector": "Exact heading identified by each story plan_anchor; include its entire section.",
+    "shared_sections": [
+      "1. Decision requested",
+      "4. Architecture and invariants",
+      "7. Acceptance matrix and stopping rules",
+      "10. Bridge handoff and external completion gate"
+    ],
+    "metadata_fields": [
+      "id",
+      "title",
+      "priority",
+      "dependencies",
+      "paths",
+      "outcome",
+      "agent_hours",
+      "evidence_level",
+      "source_commit"
+    ],
+    "rule": "Retain stable P01-P09 identifiers and relevant Bridge crosswalk references. A manifest-only issue body is invalid. Withhold an incomplete issue, repair its missing body/sections and retry idempotently; retain created identities and continue independent valid work.",
+    "approved_plan_sha256": "5073ff144965ea79559faeca165c2ab6c6545195e56cb97db135823f6befd206"
+  },
+  "epic": {
+    "id": "PROVIDER-READINESS",
+    "title": "Provider-only host adoption: attempt evidence, durable continuation and streaming conformance",
+    "parent_issue_url": "https://github.com/zekenaulty/Agentica/issues/12",
+    "issue_url": "https://github.com/zekenaulty/Agentica/issues/47",
+    "publication_action": "created",
+    "idempotency_marker": "<!-- agentica-plan:2026-11-06:PROVIDER-READINESS -->",
+    "issue_number": 47,
+    "github_issue_id": 6251966736
+  },
+  "estimate": {
+    "unit": "hours",
+    "combined_active_agent_hours": {
+      "low": 20,
+      "high": 33
+    },
+    "parallel_elapsed_working_hours": {
+      "low": 9,
+      "high": 16
+    },
+    "contingency_elapsed_hours": {
+      "low": 2,
+      "high": 5
+    },
+    "excludes": [
+      "approval wait",
+      "external Bridge implementation",
+      "production rollout",
+      "extended network/provider outage"
+    ]
+  },
+  "related_open_issues": [
+    10,
+    24,
+    25,
+    26,
+    31
+  ],
+  "completed_prerequisite_issues": [
+    21,
+    22,
+    23,
+    45
+  ],
+  "live_verification_budget_proposal": {
+    "scope": "Isolated P09 proof only; not Nyx production, historical reindex or production defaults.",
+    "provider": "OpenAI",
+    "max_physical_inference_attempts": 6,
+    "max_native_input_count_requests": 8,
+    "max_admitted_input_tokens_per_inference": 8000,
+    "max_configured_output_tokens_per_inference": 8192,
+    "max_total_usd": 5,
+    "pricing_rule": "Verify current model/count pricing and reserve conservatively before dispatch; missing required pricing blocks live work only.",
+    "other_live_providers": "deferred_by_owner",
+    "credential_rule": "Reuse existing credentials; no key creation or global credential changes."
+  },
+  "bridge_alignment": {
+    "status": "approved_and_published",
+    "initial_cutover": "Conversational Nyx offline; OpenAI-only inference and embeddings; zero new Google model calls including recovery, fallback, diagnostics and preparatory query encoding.",
+    "routing": "Host operation/phase assignment then task default then bundle default; captured resolved bundle and independent embedding profiles; current eligibility/authority remains checked.",
+    "cloud": "Required external PM16 native TypeScript Worker phase after principal Bridge/reindex; no C# service dependency.",
+    "embedding_scope": "Existing OpenAiEmbeddingClient with Bridge-owned admitted/observed HttpClient transport; new LLM contracts do not implicitly cover IMemoryEmbeddingProvider.",
+    "reindex": "Required external PM12-PM14 source/version coverage and coherent activation; excluded from Agentica effort and P09 proof budget.",
+    "sources": [
+      {
+        "name": "nyx-openai-migration-final-plan.pdf",
+        "pages": 7,
+        "sha256": "ac13e501220dc10db9aa296d9c13cc4e8e11e145b610359770632753c187096f"
+      },
+      {
+        "name": "nyx-provider-migration-story-plan.pdf",
+        "pages": 14,
+        "sha256": "5bd37e151d468f8b53143ee8e234cb92e2040026f7f91fe4a6a6da27792b3e3e"
+      }
+    ],
+    "handoffs": [
+      {
+        "id": "A1",
+        "stories": [
+          "P01",
+          "P02"
+        ],
+        "bridge_consumers": [
+          "PM04",
+          "PM05",
+          "PM06"
+        ],
+        "issue_urls": [
+          "https://github.com/zekenaulty/Agentica/issues/48",
+          "https://github.com/zekenaulty/Agentica/issues/49"
+        ]
+      },
+      {
+        "id": "A2",
+        "stories": [
+          "P05"
+        ],
+        "bridge_consumers": [
+          "PM04",
+          "PM06",
+          "PM15"
+        ],
+        "issue_urls": [
+          "https://github.com/zekenaulty/Agentica/issues/52"
+        ]
+      },
+      {
+        "id": "A3",
+        "stories": [
+          "P03"
+        ],
+        "bridge_consumers": [
+          "PM03",
+          "PM04",
+          "PM05",
+          "PM06"
+        ],
+        "issue_urls": [
+          "https://github.com/zekenaulty/Agentica/issues/50"
+        ]
+      },
+      {
+        "id": "A4",
+        "stories": [
+          "P06"
+        ],
+        "bridge_consumers": [
+          "PM08"
+        ],
+        "issue_urls": [
+          "https://github.com/zekenaulty/Agentica/issues/53"
+        ]
+      },
+      {
+        "id": "A5",
+        "stories": [
+          "P08",
+          "P09"
+        ],
+        "bridge_consumers": [
+          "PM11",
+          "PM12",
+          "PM13",
+          "PM14"
+        ],
+        "existing_client": "Agentica.Clients/Embeddings/OpenAiEmbeddingClient.cs",
+        "issue_urls": [
+          "https://github.com/zekenaulty/Agentica/issues/55",
+          "https://github.com/zekenaulty/Agentica/issues/56"
+        ]
+      },
+      {
+        "id": "A6",
+        "stories": [
+          "P04",
+          "P08",
+          "P09"
+        ],
+        "bridge_consumers": [
+          "PM17",
+          "PM18"
+        ],
+        "issue_urls": [
+          "https://github.com/zekenaulty/Agentica/issues/51",
+          "https://github.com/zekenaulty/Agentica/issues/55",
+          "https://github.com/zekenaulty/Agentica/issues/56"
+        ]
+      }
+    ]
+  },
+  "stories": [
+    {
+      "id": "P01",
+      "epic": "PROVIDER-READINESS",
+      "title": "Define retained provider-attempt evidence and compatibility contracts",
+      "priority": "p0",
+      "dependencies": [],
+      "related_issues": [
+        22
+      ],
+      "paths": [
+        "Agentica.Clients/Llm/",
+        "Agentica.Clients.Tests/",
+        "docs/contracts/"
+      ],
+      "outcome": "Expose bounded immutable observed attempt facts on success, exceptions and cancellation while retaining existing entrypoints.",
+      "plan_anchor": "p01--retained-provider-attempt-evidence-and-compatibility-contracts",
+      "agent_hours": {
+        "low": 2,
+        "high": 3
+      },
+      "evidence_level": [
+        "contract",
+        "offline"
+      ],
+      "workflow_state": "todo",
+      "claim_owner": null,
+      "workspace": null,
+      "publication_action": "created",
+      "issue_url": "https://github.com/zekenaulty/Agentica/issues/48",
+      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P01 -->",
+      "issue_number": 48,
+      "github_issue_id": 6251967938
+    },
+    {
+      "id": "P02",
+      "epic": "PROVIDER-READINESS",
+      "title": "Preserve outcomes and single-attempt semantics across provider adapters",
+      "priority": "p0",
+      "dependencies": [
+        "P01"
+      ],
+      "related_issues": [
+        10,
+        22
+      ],
+      "paths": [
+        "Agentica.Clients/OpenAI/",
+        "Agentica.Clients/Gemini/",
+        "Agentica.Clients/Anthropic/",
+        "Agentica.Clients/Xai/",
+        "Agentica.Clients/Ollama/",
+        "Agentica.Clients.Tests/"
+      ],
+      "outcome": "All provider families retain observed evidence through relevant terminal paths and expose one physical inference dispatch per admitted attempt.",
+      "plan_anchor": "p02--outcome-retention-and-physical-attempt-control",
+      "agent_hours": {
+        "low": 3,
+        "high": 5
+      },
+      "evidence_level": [
+        "offline_transport"
+      ],
+      "workflow_state": "todo",
+      "claim_owner": null,
+      "workspace": null,
+      "publication_action": "created",
+      "issue_url": "https://github.com/zekenaulty/Agentica/issues/49",
+      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P02 -->",
+      "issue_number": 49,
+      "github_issue_id": 6251968499
+    },
+    {
+      "id": "P03",
+      "epic": "PROVIDER-READINESS",
+      "title": "Add immutable request preparation and host-owned admission",
+      "priority": "p0",
+      "dependencies": [
+        "P01"
+      ],
+      "related_issues": [],
+      "paths": [
+        "Agentica.Clients/Llm/",
+        "Agentica.Clients/",
+        "Agentica.Lab.Web/Chat/ExperimentProviderTransport.cs",
+        "Agentica.Lab.Web/Chat/OpenAiExperimentInputTokenCounter.cs",
+        "Agentica.Clients.Tests/"
+      ],
+      "outcome": "A provider-only host admits an exact effective request and preserves opaque captured operation/route references, with count work separately identified, before one inference dispatch.",
+      "plan_anchor": "p03--prepared-requests-and-host-owned-admission",
+      "agent_hours": {
+        "low": 3,
+        "high": 5
+      },
+      "evidence_level": [
+        "offline_transport",
+        "durable_host_fixture"
+      ],
+      "workflow_state": "todo",
+      "claim_owner": null,
+      "workspace": null,
+      "publication_action": "created",
+      "issue_url": "https://github.com/zekenaulty/Agentica/issues/50",
+      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P03 -->",
+      "issue_number": 50,
+      "github_issue_id": 6251969312
+    },
+    {
+      "id": "P04",
+      "epic": "PROVIDER-READINESS",
+      "title": "Report effective provider capabilities and controls",
+      "priority": "p1",
+      "dependencies": [
+        "P01"
+      ],
+      "related_issues": [
+        10,
+        23
+      ],
+      "paths": [
+        "Agentica.Clients/Llm/",
+        "Agentica.Clients/",
+        "Agentica.Clients.Tests/",
+        "docs/"
+      ],
+      "outcome": "Report configured and effective options, supported capability states, evidence basis and nonsecret configuration identity without silently downgrading requests.",
+      "plan_anchor": "p04--effective-configuration-and-capability-reporting",
+      "agent_hours": {
+        "low": 2,
+        "high": 3
+      },
+      "evidence_level": [
+        "offline_contract",
+        "capability_matrix"
+      ],
+      "workflow_state": "todo",
+      "claim_owner": null,
+      "workspace": null,
+      "publication_action": "created",
+      "issue_url": "https://github.com/zekenaulty/Agentica/issues/51",
+      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P04 -->",
+      "issue_number": 51,
+      "github_issue_id": 6251969858
+    },
+    {
+      "id": "P05",
+      "epic": "PROVIDER-READINESS",
+      "title": "Add bounded durable exchange for existing native-continuation carriers",
+      "priority": "p0",
+      "dependencies": [
+        "P01",
+        "P02"
+      ],
+      "related_issues": [
+        25
+      ],
+      "paths": [
+        "Agentica.Clients/Llm/LlmNativeContinuation.cs",
+        "Agentica.Clients/",
+        "Agentica.Clients.Tests/"
+      ],
+      "outcome": "Every existing native carrier can round-trip through an explicit sensitive versioned codec; incompatible state leaves host episode recovery intact.",
+      "plan_anchor": "p05--durable-native-continuation-exchange",
+      "agent_hours": {
+        "low": 3,
+        "high": 5
+      },
+      "evidence_level": [
+        "offline_codec",
+        "process_reopen"
+      ],
+      "workflow_state": "todo",
+      "claim_owner": null,
+      "workspace": null,
+      "publication_action": "created",
+      "issue_url": "https://github.com/zekenaulty/Agentica/issues/52",
+      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P05 -->",
+      "issue_number": 52,
+      "github_issue_id": 6251970400
+    },
+    {
+      "id": "P06",
+      "epic": "PROVIDER-READINESS",
+      "title": "Promote OpenAI native search and citation streaming from Lab",
+      "priority": "p1",
+      "dependencies": [
+        "P01",
+        "P03"
+      ],
+      "related_issues": [],
+      "paths": [
+        "Agentica.Clients/OpenAI/",
+        "Agentica.Clients/Llm/",
+        "Agentica.Lab.Web/Chat/OpenAiExperimentExecutor.cs",
+        "Agentica.Lab.Web/Chat/OpenAiWebSearchTool.cs",
+        "Agentica.Clients.Tests/"
+      ],
+      "outcome": "Shared clients expose opt-in native search, typed activity, sources and annotations while preserving existing ambient and explicit Lab behavior.",
+      "plan_anchor": "p06--shared-openai-native-search-and-source-streaming",
+      "agent_hours": {
+        "low": 2,
+        "high": 3
+      },
+      "evidence_level": [
+        "offline_transport",
+        "lab_browser"
+      ],
+      "workflow_state": "todo",
+      "claim_owner": null,
+      "workspace": null,
+      "publication_action": "created",
+      "issue_url": "https://github.com/zekenaulty/Agentica/issues/53",
+      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P06 -->",
+      "issue_number": 53,
+      "github_issue_id": 6251971133
+    },
+    {
+      "id": "P07",
+      "epic": "PROVIDER-READINESS",
+      "title": "Adopt shared provider contracts in Lab chat and harness paths",
+      "priority": "p1",
+      "dependencies": [
+        "P02",
+        "P03",
+        "P04",
+        "P05",
+        "P06"
+      ],
+      "related_issues": [
+        45
+      ],
+      "paths": [
+        "Agentica.Lab.Web/Chat/",
+        "Agentica.Lab.Web/LabWebApplication.cs",
+        "Agentica.Lab.Web.Tests/"
+      ],
+      "outcome": "Existing persistent clean-room chat and actual Agentica harness use shared provider admission, outcome and search paths with live inspectable activity.",
+      "plan_anchor": "p07--lab-adoption-and-live-observability",
+      "agent_hours": {
+        "low": 1,
+        "high": 2
+      },
+      "evidence_level": [
+        "isolated_lab",
+        "browser"
+      ],
+      "workflow_state": "todo",
+      "claim_owner": null,
+      "workspace": null,
+      "publication_action": "created",
+      "issue_url": "https://github.com/zekenaulty/Agentica/issues/54",
+      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P07 -->",
+      "issue_number": 54,
+      "github_issue_id": 6251971699
+    },
+    {
+      "id": "P08",
+      "epic": "PROVIDER-READINESS",
+      "title": "Qualify a packed provider-only host through the complete recovery loop",
+      "priority": "p0",
+      "dependencies": [
+        "P02",
+        "P03",
+        "P04",
+        "P05",
+        "P06"
+      ],
+      "related_issues": [
+        21,
+        22,
+        26
+      ],
+      "paths": [
+        "eng/Verify-Packages.ps1",
+        "eng/provider-consumer/",
+        "Agentica.Clients.Tests/",
+        "docs/"
+      ],
+      "outcome": "An independent packed consumer completes host-owned multi-call recovery with captured operation/retrieval bindings and qualifies the existing embedding client's admitted/observed transport seam.",
+      "plan_anchor": "p08--packed-provider-only-consumer-and-complete-recovery-loop",
+      "agent_hours": {
+        "low": 3,
+        "high": 5
+      },
+      "evidence_level": [
+        "packed_consumer",
+        "durable_host_fixture"
+      ],
+      "workflow_state": "todo",
+      "claim_owner": null,
+      "workspace": null,
+      "publication_action": "created",
+      "issue_url": "https://github.com/zekenaulty/Agentica/issues/55",
+      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P08 -->",
+      "issue_number": 55,
+      "github_issue_id": 6251972404
+    },
+    {
+      "id": "P09",
+      "epic": "PROVIDER-READINESS",
+      "title": "Complete release proof, bounded live OpenAI proof and Bridge handoff",
+      "priority": "p0",
+      "dependencies": [
+        "P07",
+        "P08"
+      ],
+      "related_issues": [
+        10,
+        12
+      ],
+      "paths": [
+        "docs/Agentica.ProductStatus.md",
+        "docs/",
+        "eng/",
+        ".github/workflows/ci.yml"
+      ],
+      "outcome": "Reviewed main merges have exact CI/package/Lab/live evidence and an A1-A6 handoff aligned with Bridge's offline OpenAI-only cutover, required reindex and external native TypeScript Cloud phase.",
+      "plan_anchor": "p09--release-proof-bounded-live-openai-qualification-and-handoff",
+      "agent_hours": {
+        "low": 1,
+        "high": 2
+      },
+      "evidence_level": [
+        "windows_linux_ci",
+        "isolated_lab",
+        "live_openai",
+        "external_handoff_only"
+      ],
+      "workflow_state": "todo",
+      "claim_owner": null,
+      "workspace": null,
+      "publication_action": "created",
+      "issue_url": "https://github.com/zekenaulty/Agentica/issues/56",
+      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P09 -->",
+      "issue_number": 56,
+      "github_issue_id": 6251972988
+    }
+  ],
+  "approval": {
+    "date": "2026-11-06",
+    "timezone": "America/Chicago",
+    "source": "Owner instruction in current Codex chat: approval granted; create GitHub issues.",
+    "scope": "Approved v1.1 program and epic/story publication; execution goal remains a subsequent explicit step."
+  },
+  "publication": {
+    "date": "2026-11-06",
+    "timezone": "America/Chicago",
+    "approved_source_commit": "b1b09d8a2d722b9572017cb560de90d0de28ddf1",
+    "approved_plan_sha256": "5073ff144965ea79559faeca165c2ab6c6545195e56cb97db135823f6befd206",
+    "epic_and_story_count": 10,
+    "native_parent_program_issue": 12,
+    "native_story_child_count": 9,
+    "native_blocking_dependency_count": 19,
+    "remote_structure_verified": true,
+    "record_file": "PUBLICATION.md"
+  }
+}
