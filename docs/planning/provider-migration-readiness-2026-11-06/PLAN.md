@@ -3,6 +3,7 @@
 - **Date:** 2026-11-06
 - **Version:** 1.1 — reconciled with Bridge's final packet and Lumina's catch-up; ready for owner review
 - **Approval:** owner approved on 2026-11-06 and requested GitHub issue publication; execution goal not yet created
+- **Publication:** epic [#47](https://github.com/zekenaulty/Agentica/issues/47), stories #48–#56; see [verified publication record](PUBLICATION.md)
 - **Implementation scope:** Agentica repository and Agentica-owned workspaces
 - **Baseline:** `cb9154dacb327880585d518d66ee24773b8cc1b9`
 
@@ -114,17 +115,17 @@ P01–P06's new inference interfaces are LLM contracts. They do not implicitly e
 
 All keys are local planning identifiers. No GitHub issue number is implied.
 
-| Key | Priority | Story | Merge dependencies | Agent-hours |
-| --- | --- | --- | --- | ---: |
-| P01 | P0 | Define retained provider-attempt evidence and compatibility contracts | None | 2–3 |
-| P02 | P0 | Preserve outcomes and single-attempt semantics across provider adapters | P01 | 3–5 |
-| P03 | P0 | Add immutable request preparation and host admission | P01 | 3–5 |
-| P04 | P1 | Report effective controls and provider capabilities | P01 | 2–3 |
-| P05 | P0 | Add bounded durable exchange for existing native-continuation carriers | P01, P02 | 3–5 |
-| P06 | P1 | Promote OpenAI native search and citation streaming from Lab | P01, P03 | 2–3 |
-| P07 | P1 | Adopt shared contracts in Lab's existing chat and harness paths | P02–P06 | 1–2 |
-| P08 | P0 | Qualify a packed provider-only host through the complete recovery loop | P02–P06 | 3–5 |
-| P09 | P0 | Complete release proof, bounded live OpenAI proof and Bridge handoff | P07, P08 | 1–2 |
+| Key | Priority | Story | Merge dependencies | Agent-hours | Issue |
+| --- | --- | --- | --- | ---: | --- |
+| P01 | P0 | Define retained provider-attempt evidence and compatibility contracts | None | 2–3 | [#48](https://github.com/zekenaulty/Agentica/issues/48) |
+| P02 | P0 | Preserve outcomes and single-attempt semantics across provider adapters | P01 | 3–5 | [#49](https://github.com/zekenaulty/Agentica/issues/49) |
+| P03 | P0 | Add immutable request preparation and host admission | P01 | 3–5 | [#50](https://github.com/zekenaulty/Agentica/issues/50) |
+| P04 | P1 | Report effective controls and provider capabilities | P01 | 2–3 | [#51](https://github.com/zekenaulty/Agentica/issues/51) |
+| P05 | P0 | Add bounded durable exchange for existing native-continuation carriers | P01, P02 | 3–5 | [#52](https://github.com/zekenaulty/Agentica/issues/52) |
+| P06 | P1 | Promote OpenAI native search and citation streaming from Lab | P01, P03 | 2–3 | [#53](https://github.com/zekenaulty/Agentica/issues/53) |
+| P07 | P1 | Adopt shared contracts in Lab's existing chat and harness paths | P02–P06 | 1–2 | [#54](https://github.com/zekenaulty/Agentica/issues/54) |
+| P08 | P0 | Qualify a packed provider-only host through the complete recovery loop | P02–P06 | 3–5 | [#55](https://github.com/zekenaulty/Agentica/issues/55) |
+| P09 | P0 | Complete release proof, bounded live OpenAI proof and Bridge handoff | P07, P08 | 1–2 | [#56](https://github.com/zekenaulty/Agentica/issues/56) |
 
 ### P01 — Retained provider-attempt evidence and compatibility contracts
 

@@ -4,7 +4,7 @@
   "plan_file": "PLAN.md",
   "plan_revision": "1.1",
   "alignment_file": "BRIDGE-ALIGNMENT.md",
-  "status": "approved_publication_pending",
+  "status": "published",
   "source_commit": "cb9154dacb327880585d518d66ee24773b8cc1b9",
   "source_bridge_review_commit": "187b203c45d316e8f166dcb1cbd239e5a564a321",
   "implementation_scope": "Agentica repository and Agentica-owned workspaces",
@@ -36,9 +36,11 @@
     "id": "PROVIDER-READINESS",
     "title": "Provider-only host adoption: attempt evidence, durable continuation and streaming conformance",
     "parent_issue_url": "https://github.com/zekenaulty/Agentica/issues/12",
-    "issue_url": null,
-    "publication_action": "create_authorized",
-    "idempotency_marker": "<!-- agentica-plan:2026-11-06:PROVIDER-READINESS -->"
+    "issue_url": "https://github.com/zekenaulty/Agentica/issues/47",
+    "publication_action": "created",
+    "idempotency_marker": "<!-- agentica-plan:2026-11-06:PROVIDER-READINESS -->",
+    "issue_number": 47,
+    "github_issue_id": 6251966736
   },
   "estimate": {
     "unit": "hours",
@@ -87,7 +89,7 @@
     "credential_rule": "Reuse existing credentials; no key creation or global credential changes."
   },
   "bridge_alignment": {
-    "status": "approved_for_agentica_issue_publication",
+    "status": "approved_and_published",
     "initial_cutover": "Conversational Nyx offline; OpenAI-only inference and embeddings; zero new Google model calls including recovery, fallback, diagnostics and preparatory query encoding.",
     "routing": "Host operation/phase assignment then task default then bundle default; captured resolved bundle and independent embedding profiles; current eligibility/authority remains checked.",
     "cloud": "Required external PM16 native TypeScript Worker phase after principal Bridge/reindex; no C# service dependency.",
@@ -117,7 +119,10 @@
           "PM05",
           "PM06"
         ],
-        "issue_urls": []
+        "issue_urls": [
+          "https://github.com/zekenaulty/Agentica/issues/48",
+          "https://github.com/zekenaulty/Agentica/issues/49"
+        ]
       },
       {
         "id": "A2",
@@ -129,7 +134,9 @@
           "PM06",
           "PM15"
         ],
-        "issue_urls": []
+        "issue_urls": [
+          "https://github.com/zekenaulty/Agentica/issues/52"
+        ]
       },
       {
         "id": "A3",
@@ -142,7 +149,9 @@
           "PM05",
           "PM06"
         ],
-        "issue_urls": []
+        "issue_urls": [
+          "https://github.com/zekenaulty/Agentica/issues/50"
+        ]
       },
       {
         "id": "A4",
@@ -152,7 +161,9 @@
         "bridge_consumers": [
           "PM08"
         ],
-        "issue_urls": []
+        "issue_urls": [
+          "https://github.com/zekenaulty/Agentica/issues/53"
+        ]
       },
       {
         "id": "A5",
@@ -167,7 +178,10 @@
           "PM14"
         ],
         "existing_client": "Agentica.Clients/Embeddings/OpenAiEmbeddingClient.cs",
-        "issue_urls": []
+        "issue_urls": [
+          "https://github.com/zekenaulty/Agentica/issues/55",
+          "https://github.com/zekenaulty/Agentica/issues/56"
+        ]
       },
       {
         "id": "A6",
@@ -180,7 +194,11 @@
           "PM17",
           "PM18"
         ],
-        "issue_urls": []
+        "issue_urls": [
+          "https://github.com/zekenaulty/Agentica/issues/51",
+          "https://github.com/zekenaulty/Agentica/issues/55",
+          "https://github.com/zekenaulty/Agentica/issues/56"
+        ]
       }
     ]
   },
@@ -209,12 +227,14 @@
         "contract",
         "offline"
       ],
-      "workflow_state": "approved",
+      "workflow_state": "todo",
       "claim_owner": null,
       "workspace": null,
-      "publication_action": "create_authorized",
-      "issue_url": null,
-      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P01 -->"
+      "publication_action": "created",
+      "issue_url": "https://github.com/zekenaulty/Agentica/issues/48",
+      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P01 -->",
+      "issue_number": 48,
+      "github_issue_id": 6251967938
     },
     {
       "id": "P02",
@@ -245,12 +265,14 @@
       "evidence_level": [
         "offline_transport"
       ],
-      "workflow_state": "approved",
+      "workflow_state": "todo",
       "claim_owner": null,
       "workspace": null,
-      "publication_action": "create_authorized",
-      "issue_url": null,
-      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P02 -->"
+      "publication_action": "created",
+      "issue_url": "https://github.com/zekenaulty/Agentica/issues/49",
+      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P02 -->",
+      "issue_number": 49,
+      "github_issue_id": 6251968499
     },
     {
       "id": "P03",
@@ -278,12 +300,14 @@
         "offline_transport",
         "durable_host_fixture"
       ],
-      "workflow_state": "approved",
+      "workflow_state": "todo",
       "claim_owner": null,
       "workspace": null,
-      "publication_action": "create_authorized",
-      "issue_url": null,
-      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P03 -->"
+      "publication_action": "created",
+      "issue_url": "https://github.com/zekenaulty/Agentica/issues/50",
+      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P03 -->",
+      "issue_number": 50,
+      "github_issue_id": 6251969312
     },
     {
       "id": "P04",
@@ -313,12 +337,14 @@
         "offline_contract",
         "capability_matrix"
       ],
-      "workflow_state": "approved",
+      "workflow_state": "todo",
       "claim_owner": null,
       "workspace": null,
-      "publication_action": "create_authorized",
-      "issue_url": null,
-      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P04 -->"
+      "publication_action": "created",
+      "issue_url": "https://github.com/zekenaulty/Agentica/issues/51",
+      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P04 -->",
+      "issue_number": 51,
+      "github_issue_id": 6251969858
     },
     {
       "id": "P05",
@@ -347,12 +373,14 @@
         "offline_codec",
         "process_reopen"
       ],
-      "workflow_state": "approved",
+      "workflow_state": "todo",
       "claim_owner": null,
       "workspace": null,
-      "publication_action": "create_authorized",
-      "issue_url": null,
-      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P05 -->"
+      "publication_action": "created",
+      "issue_url": "https://github.com/zekenaulty/Agentica/issues/52",
+      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P05 -->",
+      "issue_number": 52,
+      "github_issue_id": 6251970400
     },
     {
       "id": "P06",
@@ -381,12 +409,14 @@
         "offline_transport",
         "lab_browser"
       ],
-      "workflow_state": "approved",
+      "workflow_state": "todo",
       "claim_owner": null,
       "workspace": null,
-      "publication_action": "create_authorized",
-      "issue_url": null,
-      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P06 -->"
+      "publication_action": "created",
+      "issue_url": "https://github.com/zekenaulty/Agentica/issues/53",
+      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P06 -->",
+      "issue_number": 53,
+      "github_issue_id": 6251971133
     },
     {
       "id": "P07",
@@ -418,12 +448,14 @@
         "isolated_lab",
         "browser"
       ],
-      "workflow_state": "approved",
+      "workflow_state": "todo",
       "claim_owner": null,
       "workspace": null,
-      "publication_action": "create_authorized",
-      "issue_url": null,
-      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P07 -->"
+      "publication_action": "created",
+      "issue_url": "https://github.com/zekenaulty/Agentica/issues/54",
+      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P07 -->",
+      "issue_number": 54,
+      "github_issue_id": 6251971699
     },
     {
       "id": "P08",
@@ -458,12 +490,14 @@
         "packed_consumer",
         "durable_host_fixture"
       ],
-      "workflow_state": "approved",
+      "workflow_state": "todo",
       "claim_owner": null,
       "workspace": null,
-      "publication_action": "create_authorized",
-      "issue_url": null,
-      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P08 -->"
+      "publication_action": "created",
+      "issue_url": "https://github.com/zekenaulty/Agentica/issues/55",
+      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P08 -->",
+      "issue_number": 55,
+      "github_issue_id": 6251972404
     },
     {
       "id": "P09",
@@ -496,12 +530,14 @@
         "live_openai",
         "external_handoff_only"
       ],
-      "workflow_state": "approved",
+      "workflow_state": "todo",
       "claim_owner": null,
       "workspace": null,
-      "publication_action": "create_authorized",
-      "issue_url": null,
-      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P09 -->"
+      "publication_action": "created",
+      "issue_url": "https://github.com/zekenaulty/Agentica/issues/56",
+      "idempotency_marker": "<!-- agentica-plan:2026-11-06:P09 -->",
+      "issue_number": 56,
+      "github_issue_id": 6251972988
     }
   ],
   "approval": {
@@ -509,5 +545,17 @@
     "timezone": "America/Chicago",
     "source": "Owner instruction in current Codex chat: approval granted; create GitHub issues.",
     "scope": "Approved v1.1 program and epic/story publication; execution goal remains a subsequent explicit step."
+  },
+  "publication": {
+    "date": "2026-11-06",
+    "timezone": "America/Chicago",
+    "approved_source_commit": "b1b09d8a2d722b9572017cb560de90d0de28ddf1",
+    "approved_plan_sha256": "5073ff144965ea79559faeca165c2ab6c6545195e56cb97db135823f6befd206",
+    "epic_and_story_count": 10,
+    "native_parent_program_issue": 12,
+    "native_story_child_count": 9,
+    "native_blocking_dependency_count": 19,
+    "remote_structure_verified": true,
+    "record_file": "PUBLICATION.md"
   }
 }

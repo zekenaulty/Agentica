@@ -2,7 +2,8 @@
 
 - **Date:** 2026-11-06
 - **Revision:** 1.1, companion to [PLAN.md](PLAN.md) and [stories.json](stories.json)
-- **Status:** owner approved Agentica plan/issue publication on 2026-11-06; issue publication is in progress and execution goal is not yet created
+- **Status:** owner approved on 2026-11-06; epic #47 and P01–P09 issues #48–#56 are published; execution goal is not yet created
+- **Publication:** [verified issue index and dependencies](PUBLICATION.md)
 - **Agentica code baseline:** `cb9154dacb327880585d518d66ee24773b8cc1b9`
 - **Bridge reviewed code baseline:** `187b203c45d316e8f166dcb1cbd239e5a564a321`
 
@@ -27,12 +28,12 @@ These are stable planning references. Add actual issue URLs and enabling commit/
 
 | Bridge reference | Agentica producer | Exact delivered boundary | Bridge ownership |
 | --- | --- | --- | --- |
-| A1: unsuccessful-call evidence/usage | P01 + P02 | Observed identifiers, nullable usage, semantics, uncertainty and terminal classification on supported exits | Durable accounting, host acceptance, retries and objective continuation |
-| A2: durable native continuation | P05 | Bounded versioned explicit sensitive export/import for existing carriers; compatibility result | Encryption, scope, persistence, retention and evidence-based episode reconstruction |
-| A3: prepared/single-attempt inference | P03 using P01/P02 | Immutable effective request identity, host admission hook and physical-attempt boundary | Operation resolver, authorization, journal, cumulative reservation and retry policy |
-| A4: native search/source activity | P06; producer cases in P08 | Reuse Lab's existing OpenAI options/activity/sources/annotations | Existing search semantics, source validation/storage and UI; a qualified narrow adapter is an available integration choice |
-| A5: existing embedding client | Existing `OpenAiEmbeddingClient`; isolated P08 proof and P09 handoff | Exact profile/input/vector contract, success usage and classified errors; host-observed HTTP injection seam | Job/query/source mapping, admission, observed failure usage, retry/exposure and historical indexing |
-| A6: producer/package qualification | P04 + P08 + P09 | Effective capabilities, packed consumer evidence, exact artifact pins and limits | Actual Nyx consumer qualification and installed acceptance |
+| A1: unsuccessful-call evidence/usage | [P01 / #48](https://github.com/zekenaulty/Agentica/issues/48) + [P02 / #49](https://github.com/zekenaulty/Agentica/issues/49) | Observed identifiers, nullable usage, semantics, uncertainty and terminal classification on supported exits | Durable accounting, host acceptance, retries and objective continuation |
+| A2: durable native continuation | [P05 / #52](https://github.com/zekenaulty/Agentica/issues/52) | Bounded versioned explicit sensitive export/import for existing carriers; compatibility result | Encryption, scope, persistence, retention and evidence-based episode reconstruction |
+| A3: prepared/single-attempt inference | [P03 / #50](https://github.com/zekenaulty/Agentica/issues/50) using [P01 / #48](https://github.com/zekenaulty/Agentica/issues/48)/[P02 / #49](https://github.com/zekenaulty/Agentica/issues/49) | Immutable effective request identity, host admission hook and physical-attempt boundary | Operation resolver, authorization, journal, cumulative reservation and retry policy |
+| A4: native search/source activity | [P06 / #53](https://github.com/zekenaulty/Agentica/issues/53); producer cases in [P08 / #55](https://github.com/zekenaulty/Agentica/issues/55) | Reuse Lab's existing OpenAI options/activity/sources/annotations | Existing search semantics, source validation/storage and UI; a qualified narrow adapter is an available integration choice |
+| A5: existing embedding client | Existing `OpenAiEmbeddingClient`; isolated [P08 / #55](https://github.com/zekenaulty/Agentica/issues/55) proof and [P09 / #56](https://github.com/zekenaulty/Agentica/issues/56) handoff | Exact profile/input/vector contract, success usage and classified errors; host-observed HTTP injection seam | Job/query/source mapping, admission, observed failure usage, retry/exposure and historical indexing |
+| A6: producer/package qualification | [P04 / #51](https://github.com/zekenaulty/Agentica/issues/51) + [P08 / #55](https://github.com/zekenaulty/Agentica/issues/55) + [P09 / #56](https://github.com/zekenaulty/Agentica/issues/56) | Effective capabilities, packed consumer evidence, exact artifact pins and limits | Actual Nyx consumer qualification and installed acceptance |
 
 Deliver enabling artifacts incrementally. PM04 needs A1/A2/A3, not the whole Agentica program. P08's isolated A5 fixture can be published before unrelated search/Lab cases finish. Keep producer proof, consumer proof and installed proof distinct.
 
