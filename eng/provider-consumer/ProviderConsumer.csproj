@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <AgenticaPackageVersion Condition="'$(AgenticaPackageVersion)' == ''">0.1.0-research.1</AgenticaPackageVersion>
+    <GoogleConsumerVersion Condition="'$(GoogleConsumerVersion)' == ''">1.13.0</GoogleConsumerVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Agentica.Clients" Version="$(AgenticaPackageVersion)" />
+    <!-- Bridge's reviewed SDK level: this consumer must resolve alongside it. -->
+    <PackageReference Include="Google.GenAI" Version="$(GoogleConsumerVersion)" />
+  </ItemGroup>
+</Project>
