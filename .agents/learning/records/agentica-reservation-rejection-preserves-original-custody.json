@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "id": "agentica-reservation-rejection-preserves-original-custody",
+  "scope": "agentica",
+  "kind": "technical",
+  "status": "accepted",
+  "title": "A rejected duplicate reservation cannot rewrite the original attempt",
+  "trigger": "provider embedding attempt duplicate reservation rejection journal evidence cancellation custody",
+  "guidance": "Mark a consumer as owning an attempt record only after its reservation succeeds. Failure or cancellation cleanup may update only that owned record. A second consumer rejected for a duplicate attempt ID must send no request and preserve the original attempt's acceptance, usage and dispatch evidence. Keep pre-dispatch admission failure distinct from uncertainty after forwarding. The accepted example is an offline in-memory host; a durable or concurrent journal requires its own atomic ownership and replay qualification.",
+  "evidence": [
+    {
+      "kind": "source_review",
+      "reference": "eng/provider-consumer/EmbeddingAttempt.cs",
+      "revision": "535fb9a216cae92d3ac6fd1a3847d1487a52f8af",
+      "note": "The local ownership flag is set after journal Reserve succeeds; failure cleanup updates only an owned reservation. Required admission precedes forwarding."
+    },
+    {
+      "kind": "offline_test",
+      "reference": "eng/provider-consumer/Program.cs and eng/Verify-ProviderConsumer.ps1",
+      "revision": "535fb9a216cae92d3ac6fd1a3847d1487a52f8af",
+      "note": "15 packed-consumer A5 scenarios, including a second consumer over the same journal/attempt ID, passed with SDK 10.0.302. No paid provider, durable process recovery, concurrent journal, full P08 loop or installed Bridge proof."
+    }
+  ],
+  "recheck": "Requalify atomic reservation ownership, error cleanup and cancellation races whenever replacing the journal, changing handler retries/redirects or introducing concurrency. This record does not establish persistent replay protection or physical-dispatch guarantees for an arbitrary production transport.",
+  "tags": ["provider", "embeddings", "reservation", "duplicates", "custody", "evidence", "cancellation"],
+  "recorded_on": "2026-11-06"
+}

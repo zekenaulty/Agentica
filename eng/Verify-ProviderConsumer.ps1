@@ -17,7 +17,11 @@ $consumer = Join-Path $runRoot 'consumer'
 $packageCache = Join-Path $runRoot 'packages'
 $sourceRoot = Join-Path $PSScriptRoot 'provider-consumer'
 $previousCliHome = $env:DOTNET_CLI_HOME
+$previousCertificateGeneration = $env:DOTNET_GENERATE_ASPNET_CERTIFICATE
+$previousTelemetryOptOut = $env:DOTNET_CLI_TELEMETRY_OPTOUT
 $env:DOTNET_CLI_HOME = Join-Path $runRoot 'cli-home'
+$env:DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'
+$env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 
 Push-Location $repositoryRoot
 try {
@@ -98,5 +102,7 @@ try {
 }
 finally {
     $env:DOTNET_CLI_HOME = $previousCliHome
+    $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = $previousCertificateGeneration
+    $env:DOTNET_CLI_TELEMETRY_OPTOUT = $previousTelemetryOptOut
     Pop-Location
 }

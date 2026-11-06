@@ -19,8 +19,9 @@ packages. A read-only global cache may seed third-party dependencies. NuGet sour
 mapping reserves the two exact Agentica IDs for the new local feed. Output remains
 available for review; no cleanup of other workspaces or packages occurs.
 The script verifies an already provisioned SDK; it does not download/install one.
-It gives the CLI a run-local home and restores the caller's process environment on
-exit. Only the three named consumer source files and `global.json` are copied;
+It gives the CLI a run-local home, disables first-use HTTPS certificate generation
+and CLI telemetry, and restores the caller's process environment on exit.
+Only the three named consumer source files and `global.json` are copied;
 native continuation exports and private captures are outside that copy list.
 
 ## Host embedding example
