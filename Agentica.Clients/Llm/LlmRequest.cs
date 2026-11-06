@@ -12,4 +12,12 @@ public sealed record LlmRequest(
 {
     [JsonIgnore]
     public LlmInputCompilationReceipt? InputCompilationReceipt { get; init; }
+
+    /// <summary>
+    /// Optional single-attempt observation holder. It retains observed evidence even
+    /// when ordinary caller cancellation prevents returning a response. It does not
+    /// authorize dispatch or replace a host's durable attempt journal.
+    /// </summary>
+    [JsonIgnore]
+    public LlmAttemptCapture? AttemptCapture { get; init; }
 }

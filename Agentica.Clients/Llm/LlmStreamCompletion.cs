@@ -19,6 +19,8 @@ internal static class LlmStreamCompletion
         }
 
         LlmResponse? completed = null;
+        var evidenceAtEntry = request.AttemptCapture?.Latest;
+        LlmAttemptEvidence? observedEvidence = null;
         var observerHealthy = true;
         void Report(LlmStreamEvent item)
         {
@@ -33,6 +35,25 @@ internal static class LlmStreamCompletion
                 // completion or mask the provider failure; stop using it for this call.
                 observerHealthy = false;
             }
+        }
+
+        LlmAttemptEvidence? FailureEvidence(LlmAttemptOutcome outcome, string reasonCode,
+            LlmAttemptEvidence? exceptionEvidence = null)
+        {
+            // A capture already populated at entry can belong to a previous invocation.
+            var captureEvidence = evidenceAtEntry is null ? request.AttemptCapture?.Latest : null;
+            var evidence = exceptionEvidence ?? captureEvidence ?? observedEvidence ?? completed?.AttemptEvidence;
+            if (completed?.AttemptEvidence is not { } completionEvidence) return evidence;
+            var corrected = request.AttemptCapture?.TryCorrectOwnedCompletion(completionEvidence, outcome, reasonCode);
+            if (exceptionEvidence is { Outcome: not LlmAttemptOutcome.Succeeded }) return exceptionEvidence;
+            if (corrected is not null) return corrected;
+            // A producer may already have published a later terminal failure during disposal.
+            if (captureEvidence is not null && ReferenceEquals(captureEvidence.References, completionEvidence.References) &&
+                captureEvidence.Outcome is not (LlmAttemptOutcome.InProgress or LlmAttemptOutcome.Succeeded))
+                return captureEvidence;
+            // No supplied capture is necessary to retain a completed response's facts
+            // on a wrapper-generated LlmClientException. This snapshot is detached.
+            return LlmAttemptCapture.CorrectCompletionSnapshot(completionEvidence, outcome, reasonCode);
         }
 
         Report(new LlmStreamEvent(LlmStreamEventKind.Started));
@@ -50,33 +71,46 @@ internal static class LlmStreamCompletion
                 if (item.Kind == LlmStreamEventKind.Completed)
                 {
                     completed = item.Response ?? throw Incomplete("missing_terminal_response");
+                    observedEvidence = completed.AttemptEvidence ?? item.AttemptEvidence ?? observedEvidence;
                 }
                 else
                 {
+                    observedEvidence = item.AttemptEvidence ?? observedEvidence;
                     Report(item);
                 }
             }
             if (completed is null) throw Incomplete("stream_incomplete");
             Report(new LlmStreamEvent(LlmStreamEventKind.Completed,
-                Response: completed));
+                Response: completed)
+            { AttemptEvidence = completed.AttemptEvidence });
             delivered = true;
             return completed;
         }
         catch (OperationCanceledException)
         {
-            Report(new LlmStreamEvent(LlmStreamEventKind.Cancelled));
+            Report(new LlmStreamEvent(LlmStreamEventKind.Cancelled)
+            {
+                AttemptEvidence = FailureEvidence(LlmAttemptOutcome.Cancelled,
+                cancellationToken.IsCancellationRequested ? "caller_cancelled" : "operation_cancelled")
+            });
             throw;
         }
         catch (LlmClientException exception)
         {
+            var reason = exception.ErrorClass is "data_after_completion" or "missing_terminal_response" or "stream_incomplete"
+                ? exception.ErrorClass : "stream_failure";
+            var evidence = FailureEvidence(LlmAttemptOutcome.Failed, reason, exception.AttemptEvidence);
+            if (evidence is not null) exception.RetainAttemptEvidence(evidence, completed?.AttemptEvidence);
             Report(new LlmStreamEvent(LlmStreamEventKind.Failed,
-                exception.ErrorClass ?? "provider_failure"));
+                exception.ErrorClass ?? "provider_failure")
+            { AttemptEvidence = evidence });
             throw;
         }
         catch
         {
             Report(new LlmStreamEvent(LlmStreamEventKind.Failed,
-                "stream_failure"));
+                "stream_failure")
+            { AttemptEvidence = FailureEvidence(LlmAttemptOutcome.Failed, "stream_failure") });
             throw;
         }
         finally

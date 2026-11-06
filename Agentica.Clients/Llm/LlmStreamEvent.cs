@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Agentica.Clients.Llm;
 
 public enum LlmStreamEventKind
@@ -15,4 +17,9 @@ public enum LlmStreamEventKind
 public sealed record LlmStreamEvent(
     LlmStreamEventKind Kind,
     string? Text = null,
-    LlmResponse? Response = null);
+    LlmResponse? Response = null)
+{
+    /// <summary>Optional observed attempt facts; UI delivery remains best effort.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public LlmAttemptEvidence? AttemptEvidence { get; init; }
+}

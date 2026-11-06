@@ -2,6 +2,10 @@
 
 This is a compact reference for packages and hosts that want to build on Agentica without depending on Lab harnesses.
 
+Provider-only consumers can use the additive
+[provider attempt evidence contracts](contracts/provider-attempt-evidence.md)
+without constructing a runner or planning request.
+
 Agentica is the bounded proof engine:
 
 ```text
