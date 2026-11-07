@@ -10,6 +10,11 @@ if (args is ["--resume", var statePath, var nativeMode])
     await RecoveryCases.ResumeProcess(statePath, nativeMode);
     return;
 }
+if (args is ["--return-before-accept", var pendingStatePath])
+{
+    await RecoveryCases.ReturnBeforeAcceptProcess(pendingStatePath);
+    return;
+}
 
 var cases = new (string Name, Func<Task> Run)[]
 {

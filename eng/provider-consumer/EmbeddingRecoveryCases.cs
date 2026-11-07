@@ -5,12 +5,13 @@ using System.Text.Json;
 
 namespace Agentica.ProviderConsumer;
 
-internal sealed class DurableEmbeddingJournal(string path) : IEmbeddingAttemptJournal
+internal sealed class DurableEmbeddingJournal(string path, RetainedEmbeddingAdmission? retainedAdmission = null) : IEmbeddingAttemptJournal
 {
     public Dictionary<string, AttemptEvidence> Read() => File.Exists(path)
         ? JsonSerializer.Deserialize<Dictionary<string, AttemptEvidence>>(File.ReadAllBytes(path))! : new();
     public void Reserve(AttemptEvidence evidence)
     {
+        retainedAdmission?.Validate(evidence);
         var state = Read();
         if (!state.TryAdd(evidence.AttemptId, evidence)) throw new InvalidOperationException("embedding_duplicate_attempt");
         Save(state);
@@ -31,6 +32,20 @@ internal sealed class DurableEmbeddingJournal(string path) : IEmbeddingAttemptJo
             file.Flush(flushToDisk: true);
         }
         File.Move(temporary, path, overwrite: true);
+    }
+}
+
+internal sealed class RetainedEmbeddingAdmission(AttemptEvidence retained,
+    Func<string> requiredProfile, Func<IReadOnlyList<SourceReference>> liveSources, Func<bool> eligible)
+{
+    public void Validate(AttemptEvidence proposed)
+    {
+        var profile = requiredProfile();
+        var sources = liveSources();
+        if (!eligible() || retained.ProfileId != profile || proposed.ProfileId != profile ||
+            !retained.Sources.SequenceEqual(sources) || !proposed.Sources.SequenceEqual(sources) ||
+            retained.ScopeId != proposed.ScopeId || retained.Purpose != proposed.Purpose)
+            throw new InvalidOperationException("retained_embedding_profile_or_source_ineligible");
     }
 }
 
@@ -72,13 +87,39 @@ internal static class EmbeddingRecoveryCases
         Check.Equal(0, retainedWire.Calls);
         var changedMemory = new MemoryEmbeddingProfile("openai", "text-embedding-3-small", "memory.configuration.v2", 3,
             "memory.document.v2", "memory.query.v2");
-        Check.ThrowsSync<InvalidOperationException>(() => ValidateRetained(original, changedMemory.ProfileId,
-            inputs.Select(input => new SourceReference(input.SourceId, input.Revision)).ToArray(), eligible: true));
-        Check.ThrowsSync<InvalidOperationException>(() => ValidateRetained(original, bundle.Memory.ProfileId,
-            [new("user-message", "revision-2"), new("agent-message", "revision-7")], eligible: true));
-        Check.ThrowsSync<InvalidOperationException>(() => ValidateRetained(original, bundle.Memory.ProfileId,
-            original.Sources, eligible: false));
-        ValidateRetained(original, bundle.Memory.ProfileId, original.Sources, eligible: true);
+        var currentProfile = bundle.Memory.ProfileId;
+        IReadOnlyList<SourceReference> currentSources = original.Sources;
+        var currentEligibility = true;
+        var admission = new RetainedEmbeddingAdmission(original, () => currentProfile, () => currentSources, () => currentEligibility);
+        var guardedJournal = new DurableEmbeddingJournal(path, admission);
+        foreach (var reason in new[] { "changed-profile", "stale-revision", "ineligible" })
+        {
+            currentProfile = bundle.Memory.ProfileId;
+            currentSources = original.Sources;
+            currentEligibility = true;
+            using var deniedWire = new EmbeddingTransport();
+            using var denied = new EmbeddingAttempt("denied-" + reason, "memory.encode", "alpha", bundle.Memory,
+                MemoryEmbeddingPurpose.Document, inputs, guardedJournal, deniedWire);
+            // Mutate live policy after capturing the request. Required reservation rechecks it
+            // at the real EmbeddingAttempt transport boundary, before any physical POST.
+            if (reason == "changed-profile") currentProfile = changedMemory.ProfileId;
+            if (reason == "stale-revision") currentSources = [new("user-message", "revision-2"), new("agent-message", "revision-7")];
+            if (reason == "ineligible") currentEligibility = false;
+            await Check.Throws<InvalidOperationException>(() => denied.ExecuteAsync());
+            Check.Equal(0, deniedWire.Calls);
+            Check.That(!guardedJournal.Read().ContainsKey("denied-" + reason), "rejected retained source receives no reservation");
+            Check.Equal(JsonSerializer.Serialize(original), JsonSerializer.Serialize(guardedJournal.Read()["memory-encode"]));
+        }
+        currentProfile = bundle.Memory.ProfileId;
+        currentSources = original.Sources;
+        currentEligibility = true;
+        using var eligibleWire = new EmbeddingTransport();
+        using (var eligibleAttempt = new EmbeddingAttempt("retained-source-admitted", "memory.encode", "alpha", bundle.Memory,
+            MemoryEmbeddingPurpose.Document, inputs, guardedJournal, eligibleWire))
+        {
+            await eligibleAttempt.ExecuteAsync();
+            Check.Equal(1, eligibleWire.Calls);
+        }
         using var queryWire = new EmbeddingTransport(singleInput: true);
         using (var query = new EmbeddingAttempt("conversation-query", "conversation.query", "alpha", bundle.Conversation,
             MemoryEmbeddingPurpose.Query, [new("query", "query-revision-1", "synthetic query")], reopened, queryWire))
@@ -87,18 +128,9 @@ internal static class EmbeddingRecoveryCases
             Check.Equal(bundle.Conversation.ProfileId, result.ProfileId);
             Check.Equal(1, queryWire.Calls);
         }
-        Check.Equal(2, reopened.Read().Count);
+        Check.Equal(3, reopened.Read().Count);
         Check.Equal(MemoryEmbeddingPurpose.Query, reopened.Read()["conversation-query"].Purpose);
         Check.Equal(1L, reopened.Read()["memory-encode"].InputTokens);
-    }
-
-    // Host eligibility is rechecked independently of the retained profile identity. An old
-    // vector/profile being present does not admit a changed, deleted or ineligible source.
-    private static void ValidateRetained(AttemptEvidence retained, string requiredProfile,
-        IReadOnlyList<SourceReference> liveSources, bool eligible)
-    {
-        if (!eligible || retained.ProfileId != requiredProfile || !retained.Sources.SequenceEqual(liveSources))
-            throw new InvalidOperationException("retained_embedding_profile_or_source_ineligible");
     }
 
     private sealed class EmbeddingTransport(bool singleInput = false) : HttpMessageHandler

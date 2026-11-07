@@ -45,6 +45,23 @@ internal sealed class RecoveryTransport(EpisodeStore store, EpisodeState state, 
                 Check.Equal(authored[index].Content, input[index].GetProperty("content").GetString());
             }
             if (state.AcceptedTranscript.Count > 0) state.ReconstructedEvidenceSends++;
+            if (state.AcceptedTranscript.Count > 0 && expectedRequest.StructuredOutput?.JsonSchema == BridgeContractFixtures.Foreground)
+            {
+                using var projection = JsonDocument.Parse(authored[0].Content);
+                var accepted = projection.RootElement.GetProperty("accepted");
+                Check.Equal(state.AcceptedTranscript.Count, accepted.GetArrayLength());
+                for (var index = 0; index < state.AcceptedTranscript.Count; index++)
+                {
+                    var original = state.AcceptedTranscript[index];
+                    Check.Equal(original.Author.ToString(), accepted[index].GetProperty("author").GetString());
+                    Check.Equal(original.ProviderRole.ToString(), accepted[index].GetProperty("provider_role").GetString());
+                    Check.Equal(original.Id, accepted[index].GetProperty("Id").GetString());
+                    Check.Equal(original.Revision, accepted[index].GetProperty("Revision").GetString());
+                    Check.Equal(original.SourceAttemptId, accepted[index].GetProperty("SourceAttemptId").GetString());
+                }
+                Check.That(accepted.EnumerateArray().Any(item => item.GetProperty("author").GetString() == "Host" &&
+                    item.GetProperty("provider_role").GetString() == "User"), "Host semantic author survives user envelope");
+            }
         }
         else if (expectedRequest?.NativeContinuation is not null)
         {

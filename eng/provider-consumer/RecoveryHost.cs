@@ -10,7 +10,10 @@ namespace Agentica.ProviderConsumer;
 internal sealed record CapturedRoute(string Operation, string Phase, string Provider, string Model, string Fingerprint);
 internal sealed record CapturedBundle(string Id, CapturedRoute Foreground, CapturedRoute Evaluation,
     CapturedRoute Document, MemoryEmbeddingProfile Memory, MemoryEmbeddingProfile Conversation);
-internal sealed record HostSource(string Id, string Revision, LlmMessageRole Author, string Text);
+internal enum SemanticAuthor { User, Assistant, Host }
+internal sealed record HostSource(string Id, string Revision, SemanticAuthor Author, string Text);
+internal sealed record HostEvidence(string Id, string Revision, SemanticAuthor Author,
+    LlmMessageRole ProviderRole, string Content, string SourceAttemptId);
 internal sealed record HostAttempt(LlmPreparedRequestDescriptor Descriptor, decimal Reserved,
     LlmAttemptEvidence? Evidence = null, string Acceptance = "pending", string? Failure = null,
     decimal? ObservedFixtureCost = null);
@@ -28,9 +31,9 @@ internal sealed class EpisodeState
     public Dictionary<string, string> Items { get; set; } = new() { ["item-a"] = "pending", ["item-b"] = "pending" };
     public List<string> Obligations { get; set; } = ["item-a", "item-b"];
     public List<HostSource> Sources { get; set; } =
-        [new("participant-message", "revision-1", LlmMessageRole.User, "Synthetic participant asks to accept eligible items."),
-         new("agent-message", "revision-1", LlmMessageRole.Assistant, "Synthetic prior agent claim; host state verifies completion.")];
-    public List<LlmMessage> AcceptedTranscript { get; set; } = [];
+        [new("participant-message", "revision-1", SemanticAuthor.User, "Synthetic participant asks to accept eligible items."),
+         new("agent-message", "revision-1", SemanticAuthor.Assistant, "Synthetic prior agent claim; host state verifies completion.")];
+    public List<HostEvidence> AcceptedTranscript { get; set; } = [];
     public Dictionary<string, HostAttempt> Attempts { get; set; } = new();
     public List<ReplacementDecision> Replacements { get; set; } = [];
     public List<HostToolReceipt> Tools { get; set; } = [];
@@ -131,9 +134,9 @@ internal sealed class DurableAdmission(EpisodeStore store, EpisodeState state, C
             throw new InvalidOperationException("captured_scope_route_bundle_mismatch");
         if (route.Provider != "openai") throw new InvalidOperationException("transition_permits_zero_google_model_calls");
         if (state.Attempts.ContainsKey(refs.AttemptId)) throw new InvalidOperationException("duplicate_attempt");
-        var unresolved = state.Attempts.Where(pair => pair.Value.Acceptance is "unknown" or "pending").Select(pair => pair.Key).ToArray();
-        if (unresolved.Any(id => id != replacementOf && !state.Replacements.Any(decision => decision.OriginalId == id &&
-                state.Attempts.TryGetValue(decision.ReplacementId, out var successor) && successor.Acceptance == "accepted")) ||
+        var unresolved = state.Attempts.Where(pair => NeedsReconciliation(state, pair.Key)).Select(pair => pair.Key).ToArray();
+        if (unresolved.Length > 0 && (replacementOf is null || !unresolved.Contains(replacementOf, StringComparer.Ordinal)) ||
+            unresolved.Any(id => !state.Replacements.Any(decision => decision.OriginalId == id && decision.ReplacementId == refs.AttemptId)) ||
             replacementOf is not null && !state.Replacements.Any(decision => decision.OriginalId == replacementOf && decision.ReplacementId == refs.AttemptId))
             throw new InvalidOperationException("original_attempt_requires_explicit_reconciliation");
         if (state.Attempts.Count >= state.MaximumAttempts || state.Attempts.Values.Sum(attempt => attempt.Reserved) + 0.01m > state.MaximumReservation)
@@ -145,6 +148,14 @@ internal sealed class DurableAdmission(EpisodeStore store, EpisodeState state, C
         Reserved = true;
         return ValueTask.CompletedTask;
     }
+
+    // Every paid, unaccepted outcome needs host reconciliation, including known failure,
+    // rejected host parsing and a delivered response lost before acceptance. A returned flag
+    // alone cannot restore its proposal/native bytes or authorize another paid inference.
+    public static bool NeedsReconciliation(EpisodeState state, string attemptId) =>
+        state.Attempts[attemptId].Acceptance is not ("accepted" or "host-validated-fixture") &&
+        !state.Replacements.Any(decision => decision.OriginalId == attemptId &&
+            state.Attempts.TryGetValue(decision.ReplacementId, out var successor) && successor.Acceptance == "accepted");
 }
 
 internal sealed class RecoveryHost(EpisodeStore store, EpisodeState state)
@@ -172,8 +183,8 @@ internal sealed class RecoveryHost(EpisodeStore store, EpisodeState state)
             {
                 kind = "host-accepted-evidence-projection", sourceCut = BridgeContractFixtures.SourceCut,
                 sources = state.Sources.Select(source => new { source.Id, source.Revision, author = source.Author.ToString(), source.Text }),
-                accepted = state.AcceptedTranscript.Select((message, index) => new
-                { id = "accepted-" + index, author = message.Role.ToString(), message.Content })
+                accepted = state.AcceptedTranscript.Select(message => new
+                { message.Id, message.Revision, author = message.Author.ToString(), provider_role = message.ProviderRole.ToString(), message.Content, message.SourceAttemptId })
             })));
         }
         messages.Add(new(LlmMessageRole.User, context));
@@ -258,8 +269,11 @@ internal sealed class RecoveryHost(EpisodeStore store, EpisodeState state)
             state.Obligations.Remove(id);
             state.Tools.Add(new("effect-" + id, id, state.Scope, before, ++state.Version));
         }
-        state.AcceptedTranscript.Add(new(LlmMessageRole.Assistant, response.Text));
-        state.AcceptedTranscript.Add(new(LlmMessageRole.User, JsonSerializer.Serialize(new { host_result = "verified", version = state.Version, remaining = state.Obligations.Count })));
+        state.AcceptedTranscript.Add(new("proposal-" + attemptId, "delivered-v1", SemanticAuthor.Assistant,
+            LlmMessageRole.Assistant, response.Text, attemptId));
+        state.AcceptedTranscript.Add(new("host-observation-" + attemptId, "host-state-v" + state.Version,
+            SemanticAuthor.Host, LlmMessageRole.User,
+            JsonSerializer.Serialize(new { host_result = "verified", version = state.Version, remaining = state.Obligations.Count }), attemptId));
         state.Attempts[attemptId] = state.Attempts[attemptId] with { Acceptance = "accepted" };
         if (response.NativeContinuation is not null)
         {
