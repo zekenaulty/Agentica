@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "id": "agentica-optional-inspection-cannot-own-provider-outcome",
+  "scope": "agentica",
+  "kind": "technical",
+  "status": "accepted",
+  "title": "Optional native inspection cannot own provider completion or external outcome retention",
+  "trigger": "Lab shared provider adoption raw SSE observer decoder retention budget cancellation typed search outcome native payload",
+  "guidance": "Keep provider parsing and attempt capture authoritative for client outcomes. Optional raw inspection may omit an oversized event, fail delivery or disable its strict decoder without invalidating a terminal response accepted by the shared parser. Required host admission and request journals still fail closed before dispatch. Persist typed external search outcomes separately from structural attempt evidence on failure and cancellation; bound host exports and report original counts and truncation instead of duplicating large source payloads into every conversation row. Generic structural failure codes must not replace a more specific client error classification.",
+  "evidence": [
+    {
+      "kind": "test",
+      "reference": "Agentica.Lab.Web.Tests/ExperimentExecutorTests.cs:Optional_inspection_decoder_cannot_reject_a_comment_ignored_by_the_shared_parser",
+      "revision": "b6d587b32943a4a01c8c5f21c098e0e1dbfdce10",
+      "note": "The actual shared client completes valid terminal SSE with an invalid UTF-8 comment; optional inspection is marked unavailable."
+    },
+    {
+      "kind": "test",
+      "reference": "Agentica.Lab.Web.Tests/ExperimentExecutorTests.cs:Failed_or_cancelled_search_retains_typed_sources_even_when_native_inspection_is_unavailable",
+      "revision": "b6d587b32943a4a01c8c5f21c098e0e1dbfdce10",
+      "note": "Two host cases retain typed sources/citations after known terminal failure or cancellation while native inspection throws."
+    },
+    {
+      "kind": "test",
+      "reference": "Agentica.Lab.Web.Tests/ExperimentExecutorTests.cs:Saved_search_exports_bound_conversation_rows_and_report_the_original_reference_coverage",
+      "revision": "b6d587b32943a4a01c8c5f21c098e0e1dbfdce10",
+      "note": "A 100-source result keeps bounded saved snapshots with original counts and explicit host truncation."
+    },
+    {
+      "kind": "source_review",
+      "reference": "Agentica.Lab.Web/Chat/ExperimentProviderTransport.cs",
+      "revision": "b6d587b32943a4a01c8c5f21c098e0e1dbfdce10",
+      "note": "Required prepared admission is separate from optional raw inspection; bounded typed search exports and structural outcome capture use distinct host channels."
+    }
+  ],
+  "recheck": "Recheck when raw telemetry gains required journal authority, provider parsing/decoding changes, or host output storage/retention policy changes. These are synthetic provider/host proofs, not account/model judgement, installed Bridge or production qualification.",
+  "tags": [
+    "provider",
+    "streaming",
+    "telemetry",
+    "cancellation",
+    "search",
+    "retention",
+    "evidence"
+  ],
+  "recorded_on": "2026-11-06"
+}
