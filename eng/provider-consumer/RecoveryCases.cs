@@ -32,7 +32,8 @@ internal static class RecoveryCases
             ("authenticated_native_envelope_rejects_scope_and_ciphertext_changes", NativeAuthentication),
             ("host_completion_and_tool_validation_reject_model_claims", HostAcceptance),
             ("durable_embedding_profile_source_revision_and_reopen", EmbeddingRecoveryCases.Run),
-            ("retained_google_unknown_uses_explicit_openai_successor_only", ProviderTransition)
+            ("retained_google_unknown_uses_explicit_openai_successor_only", ProviderTransition),
+            ("fresh_process_returned_before_accept_parks_until_explicit_successor", ReturnedBeforeAccept)
         };
         foreach (var item in cases)
         {
@@ -53,10 +54,10 @@ internal static class RecoveryCases
         var state = store.Read();
         state.ReopenedProcessId = Environment.ProcessId;
         if (state.Completed) { store.Save(state); Console.WriteLine("host-already-accepted"); return; }
-        if (state.Attempts.Values.Any(attempt => attempt.Acceptance is "unknown" or "pending"))
+        if (state.Attempts.Keys.Any(id => DurableAdmission.NeedsReconciliation(state, id)))
         {
             store.Save(state);
-            Console.WriteLine("host-original-unknown-preserved");
+            Console.WriteLine("host-unaccepted-paid-outcome-preserved");
             return;
         }
         var host = new RecoveryHost(store, state);
@@ -77,6 +78,20 @@ internal static class RecoveryCases
         if (!ReferenceEquals(native, reopened)) native?.Dispose();
         Check.That(state.Completed, "host full loop completion");
         Console.WriteLine("host-objective-accepted");
+    }
+
+    public static async Task ReturnBeforeAcceptProcess(string path)
+    {
+        var store = new EpisodeStore(path);
+        var state = store.Read();
+        state.ReopenedProcessId = Environment.ProcessId;
+        var host = new RecoveryHost(store, state);
+        using var native = host.ReopenNative("matching");
+        var response = await host.Call("delivered-before-crash", native: native);
+        response.NativeContinuation?.Dispose();
+        // Exit this process with a durable delivered-but-unaccepted outcome. Its proposal
+        // and capsule are intentionally unavailable after this simulated crash window.
+        Console.WriteLine("host-returned-without-accepting");
     }
 
     private static async Task CompleteLoop(string mode)
@@ -111,6 +126,11 @@ internal static class RecoveryCases
         Check.That(reopened.StreamActivities >= 3 && reopened.StreamDeltas == 3, "actual streaming iterations");
         Check.Equal(mode == "matching" ? 2 : 1, reopened.NativeReplaySends);
         Check.Equal(mode == "matching" ? 0 : 1, reopened.ReconstructedEvidenceSends);
+        var hostObservations = reopened.AcceptedTranscript.Where(item => item.Id.StartsWith("host-observation-", StringComparison.Ordinal)).ToArray();
+        Check.Equal(3, hostObservations.Length);
+        Check.That(hostObservations.All(item => item.Author == SemanticAuthor.Host && item.ProviderRole == LlmMessageRole.User &&
+                item.Revision.StartsWith("host-state-v", StringComparison.Ordinal) && item.SourceAttemptId.Length > 0),
+            "durable Host authorship independent from provider role");
         foreach (var attempt in reopened.Attempts.Values)
         {
             Check.Equal(LlmOutputTokenSemantics.IncludesThinking, attempt.Evidence!.Usage!.OutputTokenSemantics);
@@ -191,10 +211,26 @@ internal static class RecoveryCases
         Check.That(evidence.Outcome != LlmAttemptOutcome.Succeeded, "refusal not accepted delivery");
         Check.Equal(1, state.PhysicalSends.Values.Sum());
         Check.Equal(0, state.Tools.Count);
-        await Check.Throws<LlmClientException>(() => host.Call("http-failed", FixtureBehavior.HttpFailure));
+        Check.That((await Child(store.Path, "matching")).Contains("host-unaccepted-paid-outcome-preserved", StringComparison.Ordinal), "refusal reopen parks");
+        await Check.Throws<LlmClientException>(() => host.Call("implicit-refusal-retry"));
+        state.Replacements.Add(new("refused", "http-failed", "host explicitly authorizes a distinct bounded successor after retained refusal"));
+        store.Save(state);
+        await Check.Throws<LlmClientException>(() => host.Call("http-failed", FixtureBehavior.HttpFailure, replacementOf: "refused"));
         Check.Equal(429, state.Attempts["http-failed"].Evidence!.HttpStatusCode);
         Check.Equal<LlmUsage?>(null, state.Attempts["http-failed"].Evidence!.Usage); // Error body was not parsed as usage.
         Check.Equal(2, state.PhysicalSends.Values.Sum());
+        Check.That((await Child(store.Path, "matching")).Contains("host-unaccepted-paid-outcome-preserved", StringComparison.Ordinal), "known HTTP failure reopen parks");
+        // Reconcile each retained failed outcome explicitly; one successor may account for
+        // both without deleting their independent reservations or observed evidence.
+        state.Replacements.Add(new("refused", "after-known-failures", "host retains refusal and authorizes a new bounded successor"));
+        state.Replacements.Add(new("http-failed", "after-known-failures", "host retains HTTP failure and authorizes the same new successor"));
+        store.Save(state);
+        var recovered = await host.Call("after-known-failures", replacementOf: "http-failed");
+        using (recovered.NativeContinuation) host.Accept("after-known-failures", recovered);
+        Check.Equal(3, state.Attempts.Count);
+        Check.Equal(0.03m, state.Attempts.Values.Sum(attempt => attempt.Reserved));
+        Check.Equal("failed", state.Attempts["refused"].Acceptance);
+        Check.Equal("failed", state.Attempts["http-failed"].Acceptance);
     }
 
     private static async Task CancellationRace()
@@ -209,6 +245,7 @@ internal static class RecoveryCases
         Check.Equal(0.000025m, attempt.ObservedFixtureCost);
         Check.Equal(1, state.PhysicalSends.Values.Sum());
         Check.Equal(0, state.Tools.Count);
+        Check.That((await Child(store.Path, "matching")).Contains("host-unaccepted-paid-outcome-preserved", StringComparison.Ordinal), "cancelled delivery reopen parks");
     }
 
     private static async Task InvalidHostSchema()
@@ -224,6 +261,7 @@ internal static class RecoveryCases
         Check.Equal(11, store.Read().Attempts["invalid-host-json"].Evidence!.Usage!.PromptTokens);
         Check.Equal(0, state.Tools.Count);
         Check.That(!state.Completed, "parse failure cannot fulfill objective");
+        Check.That((await Child(store.Path, "matching")).Contains("host-unaccepted-paid-outcome-preserved", StringComparison.Ordinal), "host parse rejection reopen parks");
     }
 
     private static async Task MissingUsage()
@@ -326,8 +364,8 @@ internal static class RecoveryCases
         using var agentProjection = JsonDocument.Parse(authors[2].Content);
         Check.Equal("Assistant", agentProjection.RootElement.GetProperty("author").GetString());
         Check.Equal("participant-message", state.Sources[0].Id);
-        Check.Equal(LlmMessageRole.User, state.Sources[0].Author);
-        Check.Equal(LlmMessageRole.Assistant, state.Sources[1].Author);
+        Check.Equal(SemanticAuthor.User, state.Sources[0].Author);
+        Check.Equal(SemanticAuthor.Assistant, state.Sources[1].Author);
         using var unsupported = JsonDocument.Parse(BridgeContractFixtures.Document);
         Check.That(unsupported.RootElement.GetProperty("required").GetArrayLength() == 3, "document strict required citations");
     }
@@ -433,6 +471,47 @@ internal static class RecoveryCases
         Check.Equal(oldBundle.Conversation.ProfileId, reopened.Bundle.Conversation.ProfileId);
     }
 
+    private static async Task ReturnedBeforeAccept()
+    {
+        var (store, state, host) = New("returned-crash-window");
+        var first = await host.Call("accepted-before-crash");
+        using (first.NativeContinuation) host.Accept("accepted-before-crash", first);
+        var oldAcceptedCapsule = state.NativeEnvelope;
+        var writer = await Child(store.Path, "matching", returnBeforeAccept: true);
+        Check.That(writer.Contains("host-returned-without-accepting", StringComparison.Ordinal), "separate writer process delivered response");
+        var delivered = store.Read();
+        var returnedAttempt = delivered.Attempts["delivered-before-crash"];
+        Check.Equal("returned", returnedAttempt.Acceptance);
+        Check.Equal("completed", returnedAttempt.Evidence!.ProviderStatus);
+        Check.Equal(11, returnedAttempt.Evidence.Usage!.PromptTokens);
+        Check.That(delivered.ReopenedProcessId != Environment.ProcessId, "delivery occurred in a fresh process");
+        Check.Equal(2, delivered.PhysicalSends.Values.Sum());
+        Check.Equal(1, delivered.Tools.Count);
+        Check.Equal(oldAcceptedCapsule, delivered.NativeEnvelope);
+        var reader = await Child(store.Path, "matching");
+        Check.That(reader.Contains("host-unaccepted-paid-outcome-preserved", StringComparison.Ordinal), "second fresh process parks returned-before-Accept");
+        var parked = store.Read();
+        Check.Equal(2, parked.PhysicalSends.Values.Sum());
+        Check.Equal(1, parked.Tools.Count);
+        Check.Equal(JsonSerializer.Serialize(returnedAttempt), JsonSerializer.Serialize(parked.Attempts["delivered-before-crash"]));
+        Check.Equal(oldAcceptedCapsule, parked.NativeEnvelope);
+        var recovery = new RecoveryHost(store, parked);
+        await Check.Throws<LlmClientException>(() => recovery.Call("silent-reinference"));
+        Check.Equal(2, parked.Attempts.Count);
+        parked.Replacements.Add(new("delivered-before-crash", "explicit-returned-successor",
+            "delivered proposal/native are unavailable; explicitly reconstruct accepted host evidence with a distinct successor"));
+        parked.Transitions.Add("returned-unaccepted parked -> explicit accepted-evidence reconstruction; original paid attempt retained");
+        store.Save(parked);
+        var replacement = await recovery.Call("explicit-returned-successor", replacementOf: "delivered-before-crash");
+        using (replacement.NativeContinuation) recovery.Accept("explicit-returned-successor", replacement);
+        var completion = await recovery.Call("explicit-returned-completion");
+        using (completion.NativeContinuation) recovery.Accept("explicit-returned-completion", completion);
+        Check.That(parked.Completed, "explicit returned-outcome recovery completes objective");
+        Check.Equal(0.04m, parked.Attempts.Values.Sum(attempt => attempt.Reserved));
+        Check.Equal(JsonSerializer.Serialize(returnedAttempt), JsonSerializer.Serialize(parked.Attempts["delivered-before-crash"]));
+        Check.Equal(4, parked.PhysicalSends.Values.Sum());
+    }
+
     private static CapturedBundle ChangedSettings(EpisodeState state) => state.Bundle with
     {
         Id = "bundle-v2", Foreground = state.Bundle.Foreground with { Model = "fixture-gpt-next", Fingerprint = "route:foreground:v2" }
@@ -446,12 +525,14 @@ internal static class RecoveryCases
         return (store, state, new(store, state));
     }
 
-    private static async Task<string> Child(string statePath, string nativeMode)
+    private static async Task<string> Child(string statePath, string nativeMode, bool returnBeforeAccept = false)
     {
         var executable = Environment.GetEnvironmentVariable("AGENTICA_PROVIDER_CONSUMER_DOTNET") ?? "dotnet";
         var info = new ProcessStartInfo(executable) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         info.ArgumentList.Add(Assembly.GetExecutingAssembly().Location);
-        info.ArgumentList.Add("--resume"); info.ArgumentList.Add(statePath); info.ArgumentList.Add(nativeMode);
+        info.ArgumentList.Add(returnBeforeAccept ? "--return-before-accept" : "--resume");
+        info.ArgumentList.Add(statePath);
+        if (!returnBeforeAccept) info.ArgumentList.Add(nativeMode);
         using var child = Process.Start(info) ?? throw new InvalidOperationException("child_process_start_failed");
         var output = child.StandardOutput.ReadToEndAsync();
         var error = child.StandardError.ReadToEndAsync();

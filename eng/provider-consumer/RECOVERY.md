@@ -35,12 +35,13 @@ claim equivalent private reasoning or bypass OpenAI's native-history guard.
 
 ## Recovery and budget custody
 
-The 19 P08 scenarios cover the four fresh-process loops; failed journal write;
+The 20 P08 scenarios cover the four fresh-process loops; failed journal write;
 lost response; refusal/HTTP failure; cancellation raced with provider success;
 host schema failure after usage; missing usage; captured route/profile changes;
 live policy; wrong bindings/duplicate attempt; representative Bridge contracts;
 shared search; capsule authentication; false completion/effect proposals; durable
-embedding reopen; and an explicit retained-Google-to-OpenAI successor transition.
+embedding reopen; an explicit retained-Google-to-OpenAI successor transition; and
+the returned-before-Accept process crash window.
 
 A lost original parks on fresh reopen. It receives no automatic retry. A recorded
 host decision permits a distinct replacement attempt; accepted successor evidence
@@ -49,6 +50,15 @@ remain unchanged. Cumulative attempts and reservations survive reopen. A separat
 transition imports synthetic historical Google uncertainty, retains its exact
 operation/route/bundle/reservation, and finishes through OpenAI with **zero new
 Google inference or embedding calls**.
+
+Every unaccepted paid outcome requires reconciliation, including delivered-but-
+unaccepted, refusal/HTTP failure, cancellation and host parsing rejection. A durable
+returned flag without the proposal/native bytes is not enough to continue. The
+returned-before-Accept regression has one child process deliver a response and exit
+without acceptance, then a second child reopen and park it. No new inference or
+older-capsule replay occurs. An explicit successor decision for each unresolved
+original permits accepted-evidence reconstruction while retaining original facts
+and reservations. Known failures likewise park; they do not imply retry authority.
 
 Provider status, client delivery and host acceptance are separate. OpenAI's output
 counter includes reasoning. Decimal **synthetic fixture rates** charge generated
@@ -71,7 +81,11 @@ profiles are independent and unaffected by unrelated text-route edits.
 
 All 15 original A5 scenarios remain. The new embedding case adds a durable host
 journal, reopen/duplicate preservation, separate document/query profiles and exact
-retained-profile/source-revision/eligibility rejection before transport. It consumes
+retained-profile/source-revision/eligibility rejection before transport. Those live
+checks execute inside the actual embedding journal reservation reached by the
+EmbeddingAttempt HTTP path; the tests mutate live policy after capturing the
+request, prove zero physical POSTs and no reservation on rejection, and retain a
+positive eligible-source case. It consumes
 the existing OpenAiEmbeddingClient and builds no index, backfill or scheduler.
 Bridge PM11 still owns its actual adapter/mapping/paid custody; PM12–PM14 own
 canonical eligibility, maintenance and exact source/version coverage. New LLM
@@ -98,7 +112,10 @@ BridgeContractFixtures was reviewed read-only against
 
 Paths are under apps/companion. These are transport projections, not imports of
 Bridge's entire dynamic compiler/parser or its current product state. Source authors
-stay explicit in host evidence. Bridge must qualify its actual contracts at its
+stay explicit in host evidence. Host observations have their own Host semantic
+author, stable source ID and host-state revision independently of the provider's
+User envelope role. Fallback wire assertions preserve that distinction alongside
+participant User and agent Assistant evidence. Bridge must qualify its actual contracts at its
 own current reviewed cut, including future drift.
 
 The dedicated search case uses OpenAiWebSearch.CreateRequest, required native
