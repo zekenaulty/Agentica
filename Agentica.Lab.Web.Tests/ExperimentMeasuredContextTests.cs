@@ -148,7 +148,7 @@ public sealed class ExperimentMeasuredContextTests
         var finalBytes = counter.Requests.Single(bytes => Hash(bytes) == prepared.Manifest.TokenCount.RequestHash);
         Assert.Equal(finalBytes.Length, prepared.Manifest.WireBytes);
         using var final = JsonDocument.Parse(finalBytes);
-        Assert.Equal(turn.UserText, final.RootElement.GetProperty("input").EnumerateArray().Last().GetProperty("content")[1].GetProperty("text").GetString());
+        Assert.Equal(turn.UserText, final.RootElement.GetProperty("input").EnumerateArray().Last().GetProperty("content").GetString());
     }
 
     [Fact]
@@ -226,9 +226,10 @@ public sealed class ExperimentMeasuredContextTests
     };
     private static int EvidenceCharacters(JsonElement request)
     {
-        var content = request.GetProperty("input").EnumerateArray().Last().GetProperty("content");
-        if (content.ValueKind != JsonValueKind.Array) return 0;
-        using var quotation = JsonDocument.Parse(content[0].GetProperty("text").GetString()!);
+        var inputs = request.GetProperty("input").EnumerateArray().ToArray();
+        if (inputs.Length < 2 || inputs[^2].GetProperty("content").GetString() is not { } text ||
+            !text.StartsWith("{\"historicalThreadEvidence\":", StringComparison.Ordinal)) return 0;
+        using var quotation = JsonDocument.Parse(text);
         return quotation.RootElement.GetProperty("historicalThreadEvidence").GetProperty("evidence")
             .EnumerateArray().Sum(item => item.GetProperty("quote").GetString()!.Length);
     }

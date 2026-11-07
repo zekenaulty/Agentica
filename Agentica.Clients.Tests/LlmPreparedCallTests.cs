@@ -24,6 +24,9 @@ public sealed class LlmPreparedCallTests
         using var handler = new CaptureHandler();
         using var http = new HttpClient(handler);
         using var prepared = Prepare(mode, Request(), References(), http);
+        var report = Assert.IsType<LlmConfigurationReport>(prepared.ConfigurationReport);
+        Assert.Equal(prepared.Descriptor.ConfigurationIdentity, report.ConfigurationIdentity);
+        Assert.Equal(prepared.Descriptor.ModelId, report.EffectiveModelId);
         var admission = new Admission(descriptor =>
         {
             Assert.Equal(0, handler.Sends);
@@ -262,6 +265,10 @@ public sealed class LlmPreparedCallTests
         using var prepared = LlmCallPreparation.Prepare(Request() with { ModelId = "" }, options,
             References(), "scope-1", http);
         Assert.Equal("fixture-default", prepared.Descriptor.ModelId);
+        var report = Assert.IsType<LlmConfigurationReport>(prepared.ConfigurationReport);
+        Assert.Equal("", report.RequestedModelId);
+        Assert.Equal("fixture-default", report.EffectiveModelId);
+        Assert.Equal(prepared.Descriptor.ConfigurationIdentity, report.ConfigurationIdentity);
 
         var error = await Assert.ThrowsAsync<LlmClientException>(() => prepared.GenerateAsync(new Admission()));
 
@@ -270,6 +277,31 @@ public sealed class LlmPreparedCallTests
         Assert.Same(prepared.Capture.Latest, error.AttemptEvidence);
         using var body = JsonDocument.Parse(handler.Bodies.Single());
         Assert.Equal("fixture-default", body.RootElement.GetProperty("model").GetString());
+    }
+
+    [Fact]
+    public async Task Defaulted_model_native_followup_binds_effective_configuration_and_preserves_requested_report()
+    {
+        using var handler = new CaptureHandler();
+        using var http = new HttpClient(handler);
+        var options = new OpenAiResponsesClientOptions("fixture-secret-key", "fixture-default", Endpoint);
+        using var native = new LlmNativeContinuation("openai", "fixture-default", "",
+            """[{"type":"reasoning","encrypted_content":"bound-default-private-cipher"}]""");
+        var request = Request() with { ModelId = "", NativeContinuation = native };
+        var originalReport = LlmConfigurationReports.Describe(request, options);
+        using var binding = LlmNativeContinuationBinding.FromRequest(originalReport, request);
+        var exported = LlmNativeContinuationCodec.ExportSensitive(native, binding);
+        using var payload = exported.SensitivePayload;
+        Assert.True(exported.Succeeded, exported.Rejection.ToString());
+
+        using var prepared = LlmCallPreparation.Prepare(request, options, References(), "scope-1", http);
+
+        var report = Assert.IsType<LlmConfigurationReport>(prepared.ConfigurationReport);
+        Assert.Equal("", report.RequestedModelId);
+        Assert.Equal(originalReport.ConfigurationIdentity, report.ConfigurationIdentity);
+        await Assert.ThrowsAsync<LlmClientException>(() => prepared.GenerateAsync(new Admission()));
+        Assert.Equal(1, handler.Sends);
+        Assert.Contains("bound-default-private-cipher", Encoding.UTF8.GetString(handler.Bodies.Single()), StringComparison.Ordinal);
     }
 
     [Fact]

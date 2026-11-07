@@ -2,6 +2,8 @@ using System.Text.Json.Serialization;
 
 namespace Agentica.Clients.Llm;
 
+public enum OpenAiHistoryMode { NativeContinuation, TranscriptOnly }
+
 public sealed record LlmRequest(
     string ModelId,
     IReadOnlyList<LlmMessage> Messages,
@@ -10,6 +12,9 @@ public sealed record LlmRequest(
     IReadOnlyDictionary<string, string>? Metadata = null,
     [property: JsonIgnore] LlmNativeContinuation? NativeContinuation = null)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public OpenAiHistoryMode OpenAiHistoryMode { get; init; }
+
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public LlmWebSearchOptions? WebSearch { get; init; }
 
@@ -26,4 +31,14 @@ public sealed record LlmRequest(
 
     [JsonIgnore]
     internal LlmPreparedDispatch? PreparedDispatch { get; init; }
+}
+
+internal static class LlmHistoryModeGuard
+{
+    internal static void RequireNativeMode(LlmRequest request, string provider)
+    {
+        if (request.OpenAiHistoryMode != OpenAiHistoryMode.NativeContinuation)
+            throw new LlmClientException(provider, "OpenAI transcript history mode is unsupported by this route.",
+                errorKind: LlmClientErrorKind.BadRequest, errorClass: "unsupported_history_mode");
+    }
 }

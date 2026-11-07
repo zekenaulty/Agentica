@@ -259,7 +259,15 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
 
     internal Dictionary<string, object?> BuildRequestBody(LlmRequest request, string modelId)
     {
-        if (request.Messages.Any(message => message.Role is LlmMessageRole.Assistant or LlmMessageRole.Tool))
+        if (!Enum.IsDefined(request.OpenAiHistoryMode))
+            throw Failure("unsupported_history_mode", LlmClientErrorKind.BadRequest);
+        var transcriptOnly = request.OpenAiHistoryMode == OpenAiHistoryMode.TranscriptOnly;
+        if (transcriptOnly && _providerName != ProviderName)
+            throw Failure("unsupported_history_mode", LlmClientErrorKind.BadRequest);
+        if (transcriptOnly && request.NativeContinuation is not null)
+            throw Failure("transcript_continuation_conflict", LlmClientErrorKind.BadRequest);
+        if (request.Messages.Any(message => message.Role == LlmMessageRole.Tool) ||
+            !transcriptOnly && request.Messages.Any(message => message.Role == LlmMessageRole.Assistant))
             throw Failure("native_history_required", LlmClientErrorKind.BadRequest);
         if (request.GenerationOptions?.Temperature is not null)
             throw Failure("unsupported_temperature", LlmClientErrorKind.BadRequest);
@@ -271,7 +279,7 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
             throw Failure("unsupported_thinking_budget", LlmClientErrorKind.BadRequest);
         var instruction = string.Join("\n\n", request.Messages
             .Where(message => message.Role is LlmMessageRole.System or LlmMessageRole.Developer)
-            .Select(message => message.Content).Where(content => !string.IsNullOrWhiteSpace(content)));
+            .Select(message => message.Content).Where(content => transcriptOnly ? content.Length != 0 : !string.IsNullOrWhiteSpace(content)));
         var userMessages = request.Messages.Where(message => message.Role == LlmMessageRole.User)
             .Where(message => !string.IsNullOrWhiteSpace(message.Content)).ToArray();
         if (userMessages.Length == 0) throw Failure("empty_input", LlmClientErrorKind.BadRequest);
@@ -285,8 +293,12 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
             using var history = JsonDocument.Parse(continuation.HistoryStepsJson);
             input.AddRange(history.RootElement.EnumerateArray().Select(item => (object)item.Clone()));
         }
-        foreach (var user in userMessages)
-            input.Add(new { role = "user", content = user.Content });
+        if (transcriptOnly)
+            input.AddRange(request.Messages.Where(message => message.Role is LlmMessageRole.User or LlmMessageRole.Assistant)
+                .Select(message => (object)new { role = message.Role == LlmMessageRole.User ? "user" : "assistant", content = message.Content }));
+        else
+            foreach (var user in userMessages)
+                input.Add(new { role = "user", content = user.Content });
         if (JsonSerializer.Serialize(input).Length > LlmNativeContinuation.MaxPayloadCharacters)
             throw Failure("continuation_too_large", LlmClientErrorKind.BadRequest);
 
@@ -306,7 +318,7 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
             body["include"] = new[] { "web_search_call.action.sources" };
         }
         if (instruction.Length > 0) body["instructions"] = instruction;
-        if (_includeEncryptedReasoning)
+        if (_includeEncryptedReasoning && !transcriptOnly)
             body["include"] = request.WebSearch is null
                 ? new[] { "reasoning.encrypted_content" }
                 : new[] { "reasoning.encrypted_content", "web_search_call.action.sources" };
@@ -361,7 +373,7 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
     private LlmNativeContinuation? CreateContinuation(
         LlmRequest request, string modelId, JsonElement output)
     {
-        if (output.GetArrayLength() == 0) return null;
+        if (request.OpenAiHistoryMode == OpenAiHistoryMode.TranscriptOnly || output.GetArrayLength() == 0) return null;
         foreach (var item in output.EnumerateArray())
         {
             if (GetString(item, "type") == "reasoning" &&

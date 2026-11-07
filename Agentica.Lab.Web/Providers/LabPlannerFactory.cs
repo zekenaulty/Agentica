@@ -24,19 +24,22 @@ public sealed class LabPlannerFactory : ILabPlannerFactory, IDisposable
     private readonly bool _useStatelessPlanRepair;
     private readonly bool _inputBudgetOwnedByChatTransport;
     private readonly int? _compiledInputCharacterLimit;
+    private readonly Func<ILlmStreamingClient, ILlmStreamingClient>? _decorateClient;
     private bool _disposed;
 
     public LabPlannerFactory(HttpClient? httpClient = null, Func<string, string?>? environment = null,
         OpenAiProviderConfiguration? openAiConfiguration = null, bool useStatelessPlanRepair = false,
-        bool inputBudgetOwnedByChatTransport = false, int? compiledInputCharacterLimit = null)
+        bool inputBudgetOwnedByChatTransport = false, int? compiledInputCharacterLimit = null,
+        Func<ILlmStreamingClient, ILlmStreamingClient>? decorateClient = null)
     {
         _ownsHttpClient = httpClient is null;
-        _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+        _httpClient = httpClient ?? new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromMinutes(10) };
         _environment = environment ?? Environment.GetEnvironmentVariable;
         _openAiConfiguration = openAiConfiguration ?? new OpenAiProviderConfiguration(_environment);
         _useStatelessPlanRepair = useStatelessPlanRepair;
         _inputBudgetOwnedByChatTransport = inputBudgetOwnedByChatTransport;
         _compiledInputCharacterLimit = compiledInputCharacterLimit;
+        _decorateClient = decorateClient;
     }
 
     public IWorkflowPlanner Create(ProviderSettings settings, Action<LlmStreamEvent> onStreamEvent)
@@ -75,6 +78,7 @@ public sealed class LabPlannerFactory : ILabPlannerFactory, IDisposable
             "ollama" => new OllamaLlmClient(new(OllamaEndpoint(), model), _httpClient),
             _ => throw new ArgumentException("Unsupported provider.", nameof(settings))
         };
+        if (_decorateClient is not null) client = _decorateClient(client);
         return new LlmWorkflowPlanner(client, new LlmPlannerOptions(
             ModelId: model,
             GenerationOptions: new LlmGenerationOptions(MaxOutputTokens: settings.MaxOutputTokens, Thinking: thinking),

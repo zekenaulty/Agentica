@@ -126,7 +126,8 @@ public static class LlmCallPreparation
             // Keep the caller's requested model distinct from the frozen effective
             // default. The captured options resolve the same wire model at dispatch.
             return new(client(snapshot), snapshot with { ModelId = request.ModelId },
-                descriptor, body, endpoint, protocol, transportBinding);
+                descriptor, body, endpoint, protocol, transportBinding,
+                configuration with { RequestedModelId = request.ModelId });
         }
         catch { snapshot.NativeContinuation?.Dispose(); throw; }
     }

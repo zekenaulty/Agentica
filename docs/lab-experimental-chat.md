@@ -32,6 +32,41 @@ Ambient search initially applies to direct Clean Room responses; Harness uses th
 
 The trace retains native search actions, call identities, citations, sources and reported usage. Assistant citations with unambiguous ASCII offsets are clickable inline; Unicode or invalid offsets retain source links without guessing placement. Explicit tool citations stay with their tool source evidence because their character offsets refer to the search answer. URLs are limited to HTTP(S). Referenced web content is untrusted external evidence, and a citation establishes attribution rather than truth. Search is provider-assisted retrieval, not a background browsing service.
 
+## Shared prepared provider calls
+
+Direct chat, planner/repair calls and explicit search all consume the shared
+`LlmCallPreparation` / `LlmPreparedCall` path. Lab freezes exact request bytes and
+configuration, measures the same full body through `OpenAiInputTokenCounter`,
+and completes its required turn-owned admission before inference dispatch.
+Count operations have separate identities and capacity; a count failure does
+not dispatch generation or silently substitute a byte estimate. Cache entries
+identify the complete exact generation body, including model and options.
+
+Clean Room explicitly selects `OpenAiHistoryMode.TranscriptOnly`: ordered visible
+user and assistant roles, exact nonempty instructions, no native continuation
+input/output, and no provider conversation reference. Harness keeps the existing
+exact private native carrier within its planning session. The carrier remains
+undisplayed and is discarded at the run boundary; reopening a chat still uses
+its visible transcript. The shared native binding checks apply during preparation.
+
+The HTTP observer retains redacted source records for inspection; it does not
+parse a second competing terminal answer or decide completion. Optional native
+telemetry delivery failures are reported separately and cannot erase shared
+provider outcomes. Required admission/request-journal failures prevent inference.
+
+Each turn's usage export includes bounded attempt evidence even on late stream
+failure or cancellation: received usage and provider terminal status stay known,
+missing usage stays unknown, and dispatched unresolved calls are identified for
+inspection without automatic retry. Typed external search outcomes are exported
+separately from structural attempt receipts, including on failure/cancellation.
+Saved search snapshots share a 1 MiB per-turn allowance allocated against the
+configured call ceiling; original counts and explicit host-retention truncation
+identify omitted source/query detail. Conversation rows do not duplicate the full
+raw event stream. Provider completion, client delivery and
+host acceptance remain distinct. The real Agentica runner still selects bound
+tools, observes their receipts, refines and accepts a response artifact; its
+outcome records completion evidence, blockers and residual chat obligations.
+
 ## Thread history recall
 
 Optional [semantic conversation retrieval](scoped-semantic-memory.md#lab-usage)
@@ -45,7 +80,7 @@ Enable **Thread history recall** in Configure, save, and run a new turn. It defa
 - **Operator-pinned passages** uses saved source IDs and UTF-16 end-exclusive ranges. Search, inspect the original, then pin a passage. Optional neighbors preserve chronology and attribution.
 - **Agent-directed** requires Harness mode and explicit `conversation.search` / `conversation.read` bindings. The actual Agentica loop searches, reads returned source IDs, refines and answers. These same capability IDs advertise historical scope as version 2; recall off retains version 1's supplied-context scope.
 
-Controls bound cumulative quotation characters per turn (prefetch plus delivered tool quotations), hits, neighbor radius, source calls and the protected recent-turn floor. Current input, exact custom instructions and that floor take precedence over optional recall. Selected spans shrink against the existing complete-request admission gate, with explicit omissions; there is no automatic summary or model downgrade. In Direct mode, quotations are attributed historical data in a separate input text part alongside the unchanged current message. They are not replayed as new dialogue or injected system instructions.
+Controls bound cumulative quotation characters per turn (prefetch plus delivered tool quotations), hits, neighbor radius, source calls and the protected recent-turn floor. Current input, exact custom instructions and that floor take precedence over optional recall. Selected spans shrink against the existing complete-request admission gate, with explicit omissions; there is no automatic summary or model downgrade. In Direct mode, quotations are attributed historical data in a dedicated user input immediately before the unchanged current user message. Their original source roles remain in the quoted evidence; they are never promoted to system instructions.
 
 The recall inspector records scope/cutoff, source head, index coverage/version, query method, candidate/inspection counts, exact selected ranges/hashes, omissions and the consumer. It measures presentation, not model attention or accepted truth. Source buttons open bounded original readback and allow jumping to the saved turn. Missing/restricted sources are unavailable; partial search coverage does not establish absence.
 
@@ -59,7 +94,8 @@ Opening a conversation fetches its newest 20 turns. Load earlier pages or jump t
 | --- | --- |
 | Lab Web `Chat/ExperimentStore` | SQLite schema/version, conversation configuration and transcript, partial/terminal turn evidence, source payloads and normalized trace |
 | Lab Web context compiler | Scope-before-budget selection of this conversation's complete dialogue, explicit omission manifest, no memory binding |
-| Lab Web executor/transport | Exact direct Responses mapping; observed HTTP for direct and planner calls; call/input admission before dispatch; normalized events and allowed native records |
+| Shared provider clients | Exact preparation, Responses request/terminal parsing, input-count protocol, typed outcomes and native search/citation normalization |
+| Lab Web executor/transport | Turn-owned call/input admission and request journal before dispatch; observed HTTP for direct, planner/repair and search calls; allowed native inspection and host acceptance |
 | Existing Agentica core | Harness planning, deterministic validation, tool/effect policy, canonical evidence, refinement, continuation, completion |
 | Existing provider configuration | Server-only credential reuse; model/effort defaults for new conversations; existing provider settings UI |
 | Nyx Lab, read-only donor | Trace partitioning, durable partial capture, paging, context-depth and investigation/evidence patterns |

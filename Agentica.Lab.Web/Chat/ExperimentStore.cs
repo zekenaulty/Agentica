@@ -31,6 +31,7 @@ public sealed partial class ExperimentStore : IDisposable
             }.ToString();
             using var connection = Open();
             InitializeHistorySchema(connection);
+            InitializeInputCountSchema(connection);
             // No replay after a process died around dispatch. Preserve partial output and unknown usage.
             foreach (var (conversationId, turnId) in RunningTurnIdentities())
             {

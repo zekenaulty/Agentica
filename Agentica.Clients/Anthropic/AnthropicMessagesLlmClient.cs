@@ -238,6 +238,7 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
 
     internal static Dictionary<string, object?> BuildRequestBody(LlmRequest request, string modelId)
     {
+        LlmHistoryModeGuard.RequireNativeMode(request, ProviderName);
         if (request.Messages.Any(message => message.Role is LlmMessageRole.Assistant or LlmMessageRole.Tool))
             throw Failure("native_history_required", LlmClientErrorKind.BadRequest);
         if (request.GenerationOptions?.Temperature is not null)

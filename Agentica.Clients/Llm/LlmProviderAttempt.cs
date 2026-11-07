@@ -11,6 +11,8 @@ internal static class LlmProviderAttempt
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var recorder = LlmAttemptRecorder.Start(request, providerName, modelId);
+        if (request.OpenAiHistoryMode != OpenAiHistoryMode.NativeContinuation && providerName != "openai")
+            throw Failure(recorder, providerName, "OpenAI transcript mode is unsupported by this route.", "unsupported_history_mode");
         if (request.WebSearch is not null && providerName != "openai")
             throw Failure(recorder, providerName, "Provider-native web search is not implemented for this route.", "unsupported_web_search");
         IAsyncEnumerator<LlmStreamEvent>? enumerator = null;

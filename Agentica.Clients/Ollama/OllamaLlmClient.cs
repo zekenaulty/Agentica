@@ -220,6 +220,7 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
 
     internal static Dictionary<string, object?> BuildRequestBody(LlmRequest request, string model)
     {
+        LlmHistoryModeGuard.RequireNativeMode(request, ProviderName);
         if (request.Messages.Any(message =>
             message.Role is LlmMessageRole.Assistant or LlmMessageRole.Tool))
         {

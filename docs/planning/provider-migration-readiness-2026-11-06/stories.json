@@ -303,14 +303,16 @@
         "offline_transport",
         "durable_host_fixture"
       ],
-      "workflow_state": "review",
+      "workflow_state": "complete",
       "claim_owner": "root",
       "workspace": "roadmap-reconciliation/Agentica",
       "publication_action": "created",
       "issue_url": "https://github.com/zekenaulty/Agentica/issues/50",
       "idempotency_marker": "<!-- agentica-plan:2026-11-06:P03 -->",
       "issue_number": 50,
-      "github_issue_id": 6251969312
+      "github_issue_id": 6251969312,
+      "implementation_pr_url": "https://github.com/zekenaulty/Agentica/pull/61",
+      "merge_commit": "a26e8d8cfbd7e3d6772d5e74c9c014c33b1cf9e7"
     },
     {
       "id": "P04",
@@ -376,14 +378,16 @@
         "offline_codec",
         "process_reopen"
       ],
-      "workflow_state": "review",
+      "workflow_state": "complete",
       "claim_owner": "root",
       "workspace": "roadmap-reconciliation/Agentica",
       "publication_action": "created",
       "issue_url": "https://github.com/zekenaulty/Agentica/issues/52",
       "idempotency_marker": "<!-- agentica-plan:2026-11-06:P05 -->",
       "issue_number": 52,
-      "github_issue_id": 6251970400
+      "github_issue_id": 6251970400,
+      "implementation_pr_url": "https://github.com/zekenaulty/Agentica/pull/61",
+      "merge_commit": "a26e8d8cfbd7e3d6772d5e74c9c014c33b1cf9e7"
     },
     {
       "id": "P06",
@@ -412,14 +416,16 @@
         "offline_transport",
         "lab_browser"
       ],
-      "workflow_state": "review",
+      "workflow_state": "complete",
       "claim_owner": "root",
       "workspace": "roadmap-reconciliation/Agentica",
       "publication_action": "created",
       "issue_url": "https://github.com/zekenaulty/Agentica/issues/53",
       "idempotency_marker": "<!-- agentica-plan:2026-11-06:P06 -->",
       "issue_number": 53,
-      "github_issue_id": 6251971133
+      "github_issue_id": 6251971133,
+      "implementation_pr_url": "https://github.com/zekenaulty/Agentica/pull/61",
+      "merge_commit": "a26e8d8cfbd7e3d6772d5e74c9c014c33b1cf9e7"
     },
     {
       "id": "P07",
@@ -493,14 +499,15 @@
         "packed_consumer",
         "durable_host_fixture"
       ],
-      "workflow_state": "in_progress",
+      "workflow_state": "review",
       "claim_owner": "packed_recovery_host",
       "workspace": "provider-recovery-consumer/Agentica",
       "publication_action": "created",
       "issue_url": "https://github.com/zekenaulty/Agentica/issues/55",
       "idempotency_marker": "<!-- agentica-plan:2026-11-06:P08 -->",
       "issue_number": 55,
-      "github_issue_id": 6251972404
+      "github_issue_id": 6251972404,
+      "implementation_pr_url": "https://github.com/zekenaulty/Agentica/pull/62"
     },
     {
       "id": "P09",

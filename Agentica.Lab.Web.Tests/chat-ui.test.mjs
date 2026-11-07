@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import './chat-markdown.test.mjs';
-import { actionErrorMessage, appendTraceWindow, catalogSelection, citationPresentation, classifyEvent, contextCheckSummary, depthPresets, exactSourceSelection, familyModelCatalog, instructionValue, isTerminal, knownFamilyModelIds, mergeTrace, mergeTurnPages, safeHttpUrl, summarizeTrace, validateSettings } from '../Agentica.Lab.Web/wwwroot/chat.mjs';
+import { actionErrorMessage, appendTraceWindow, catalogSelection, citationPresentation, classifyEvent, contextCheckSummary, depthPresets, exactSourceSelection, familyModelCatalog, instructionValue, isTerminal, knownFamilyModelIds, mergeTrace, mergeTurnPages, safeHttpUrl, summarizeTrace, usageLabel, validateSettings } from '../Agentica.Lab.Web/wwwroot/chat.mjs';
 
 test('explicit context check displays provider tokens and evidence without using byte estimates', () => {
   const result = { inferenceDispatched: false, settingsRevision: 7, manifest: { inputAllowance: 62976, estimatedInputUnits: 999999, selectedMessageIds: ['u1', 'a1', 'u2', 'a2', 'current'], tokenCount: { tokens: 62600, method: 'openai.responses.input_tokens', providerCount: true } }, recall: { selected: [{ content: 'exact quote' }], presentedCharacters: 11 } };
@@ -232,4 +232,18 @@ test('interrupted, failed and incomplete statuses end execution without implying
   for (const status of ['running', 'queued', 'pending', 'cancelling']) assert.equal(isTerminal(status), false);
   for (const status of ['completed', 'failed', 'interrupted', 'cancelled', 'incomplete', 'indeterminate']) assert.equal(isTerminal(status), true);
   assert.equal(classifyEvent({ type: 'turn.failed' }), 'error');
+});
+
+
+test('retained attempts expose known failed-call usage without inventing unknown usage or adding reasoning twice', () => {
+  const label = usageLabel({ attempts: [
+    { Usage: { PromptTokens: 12, CompletionTokens: 8, ThinkingTokens: 3, OutputTokenSemantics: 1 }, ProviderStatus: 'completed', Outcome: 4 },
+    { Usage: null, Outcome: 4 }
+  ] });
+  assert.match(label, /12 observed input/); assert.match(label, /8 observed output/); assert.match(label, /3 observed reasoning/);
+  assert.match(label, /1 attempt with usage unknown/); assert.doesNotMatch(label, /11 observed output/);
+  assert.match(usageLabel({ attempts: [{ usage: null }] }), /usage unknown/);
+  const rejected = usageLabel({ attempts: [{ DispatchCertainty: 0, Usage: null }] });
+  assert.match(rejected, /not dispatched/); assert.doesNotMatch(rejected, /usage unknown/);
+  assert.match(usageLabel({ provider: { input_tokens: 12, output_tokens: 8 } }), /12 input tokens/);
 });

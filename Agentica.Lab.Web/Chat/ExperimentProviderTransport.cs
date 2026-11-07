@@ -4,17 +4,22 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using Agentica.Clients.Llm;
 
 namespace Agentica.Lab.Web.Chat;
 
 /// <summary>Turn-owned HTTP admission and inspection, including the planner's repair calls.</summary>
 internal sealed class ExperimentProviderTransport : HttpMessageHandler
 {
-    internal static readonly HttpRequestOptionsKey<Func<string, JsonElement, Task>> NativeObserverOption = new("Agentica.Experiment.NativeObserver");
-    internal static readonly HttpRequestOptionsKey<string> PurposeOption = new("Agentica.Experiment.RequestPurpose");
     private readonly HttpClient _inner;
+    private readonly ExperimentBorrowedTransportBinding _binding;
     private readonly ExperimentExecutionContext _context;
-    private readonly Func<string, JsonElement, Task>? _nativeObserver;
+    private readonly Dictionary<string, (string CallId, string Purpose)> _admitted = new(StringComparer.Ordinal);
+    private readonly List<LlmAttemptEvidence> _attempts = [];
+    private readonly List<JsonElement> _searchOutcomes = [];
+    private readonly object _gate = new();
+    private int _prepared;
+    private int _reservedCalls;
     private int _calls;
     private string? _credential;
     private IExperimentInputTokenCounter? _counter;
@@ -24,105 +29,256 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
     public string? AdmissionFailure { get; private set; }
     public string? ProviderErrorCode { get; private set; }
     public string? ProviderErrorMessage { get; private set; }
+    public bool TelemetryDeliveryFailed { get; private set; }
     public string? RedactText(string? text) => text is null ? null : Redact(text, _credential);
 
-    public ExperimentProviderTransport(HttpClient inner, ExperimentExecutionContext context,
-        Func<string, JsonElement, Task>? nativeObserver = null)
+    public ExperimentProviderTransport(HttpClient inner, ExperimentExecutionContext context)
     {
         _inner = inner;
+        _binding = new(inner);
         _context = context;
-        _nativeObserver = nativeObserver;
     }
 
-    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    public IReadOnlyList<JsonElement> Attempts { get { lock (_gate) return _attempts.Select(item => Sanitize(JsonSerializer.SerializeToElement(item), _credential)).ToArray(); } }
+
+    public IReadOnlyList<JsonElement> SearchOutcomes { get { lock (_gate) return _searchOutcomes.ToArray(); } }
+
+    internal LlmAttemptReferences NextReferences(string purpose)
     {
+        AdmissionFailure = null; ProviderErrorCode = null; ProviderErrorMessage = null;
+        return new(_context.Turn.Id + "-attempt-" + Interlocked.Increment(ref _prepared),
+            "lab.chat", purpose, routeFingerprint: _binding.Identity, executionBundleReference: _context.Turn.Id + ":settings:" + _context.Turn.SettingsRevision);
+    }
+
+    internal ILlmCallAdmission Admission(LlmPreparedCall prepared, string purpose) => new TurnAdmission(this, prepared, purpose);
+
+    internal async Task RecordOutcomeAsync(LlmAttemptEvidence? evidence, LlmWebSearchEvidence? search)
+    {
+        if (evidence is null) return;
+        JsonElement? searchSnapshot = null;
+        lock (_gate)
+        {
+            _attempts.Add(evidence);
+            if (search is not null)
+            {
+                searchSnapshot = RetainSearchOutcome(evidence.References.AttemptId, search);
+                _searchOutcomes.Add(searchSnapshot.Value);
+            }
+            if (evidence.DispatchCertainty == LlmDispatchCertainty.NotDispatched)
+            {
+                var unused = _admitted.FirstOrDefault(item => item.Value.CallId == evidence.References.AttemptId);
+                if (unused.Key is not null && _admitted.Remove(unused.Key)) _reservedCalls--;
+            }
+        }
+        if (search is not null)
+        {
+            try
+            {
+                await _context.Trace(new("provider.web-search.outcome", new
+                {
+                    snapshot = searchSnapshot,
+                    hostAcceptance = "separate; partial search evidence does not establish a completed turn"
+                }, evidence.References.AttemptId)).ConfigureAwait(false);
+            }
+            catch (Exception error) when (error is not (OutOfMemoryException or AccessViolationException))
+            { TelemetryDeliveryFailed = true; }
+        }
+        // This bounded structural record contains no private native capsule or output.
+        try
+        {
+            await _context.Trace(new("provider.attempt", new
+            {
+                evidence = Sanitize(JsonSerializer.SerializeToElement(evidence), _credential),
+                recoveryState = evidence.DispatchCertainty == LlmDispatchCertainty.NotDispatched ? "not-dispatched"
+                : evidence.ProviderStatus is "completed" or "failed" or "incomplete" ? "provider-terminal-observed"
+                : "dispatched-unresolved; do not automatically retry",
+                hostAcceptance = "separate; inspect turn or harness outcome"
+            }, evidence.References.AttemptId)).ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is not (OutOfMemoryException or AccessViolationException))
+        { TelemetryDeliveryFailed = true; }
+    }
+
+    private JsonElement RetainSearchOutcome(string callId, LlmWebSearchEvidence search)
+    {
+        // Saved turn rows are returned with conversation pages. Share a 1 MiB
+        // ceiling across the maximum admitted calls instead of duplicating MBs
+        // of external references into each visible turn indefinitely.
+        var maximum = 1_048_576 / _context.Turn.Settings.MaxProviderCalls;
+        var calls = search.Calls.ToArray(); var sources = search.Sources.ToArray(); var citations = search.Citations.ToArray();
+        var truncated = false; var removedQueries = false;
+        while (true)
+        {
+            var snapshot = Sanitize(JsonSerializer.SerializeToElement(new
+            {
+                callId,
+                evidence = new LlmWebSearchEvidence(calls, sources, citations, search.ReferencesTruncated || truncated),
+                hostRetentionTruncated = truncated,
+                observed = new { calls = search.Calls.Count, completedCalls = search.CompletedCalls, sources = search.Sources.Count, citations = search.Citations.Count }
+            }), _credential);
+            if (snapshot.GetRawText().Length <= maximum) return snapshot;
+            truncated = true;
+            if (citations.Length != 0) citations = citations.Take(citations.Length / 2).ToArray();
+            else if (sources.Length != 0) sources = sources.Take(sources.Length / 2).ToArray();
+            else if (!removedQueries)
+            {
+                calls = calls.Select(item => new LlmWebSearchCall(item.CallId, item.OutputIndex, item.Status, item.ActionType)).ToArray();
+                removedQueries = true;
+            }
+            else calls = calls.Take(calls.Length / 2).ToArray();
+        }
+    }
+
+    private void ValidateBinding()
+    {
+        try { _binding.Validate(); }
+        catch (ExperimentException error) { AdmissionFailure = error.Code; throw; }
+    }
+
+    private async ValueTask AdmitAsync(LlmPreparedCall prepared, string purpose,
+        LlmPreparedRequestDescriptor descriptor, CancellationToken cancellationToken)
+    {
+        ValidateBinding();
+        if (descriptor != prepared.Descriptor) throw new InvalidOperationException("Prepared admission identity changed.");
         var settings = _context.Turn.Settings;
-        if (Calls >= settings.MaxProviderCalls)
+        var callId = descriptor.References.AttemptId;
+        LatestCallId = callId;
+        bool reserved;
+        lock (_gate)
+        {
+            reserved = _calls + _reservedCalls < settings.MaxProviderCalls;
+            if (reserved) _reservedCalls++;
+        }
+        if (!reserved)
         {
             AdmissionFailure = "provider.call_limit";
-            await _context.Trace(new("provider.admission.denied", new { code = AdmissionFailure, providerCalls = Calls, limit = settings.MaxProviderCalls })).ConfigureAwait(false);
-            throw new ExperimentException("provider.call_limit", "The configured provider-call limit was reached. No further request was dispatched.");
+            await _context.Trace(new("provider.admission.denied", new { code = AdmissionFailure, providerCalls = Calls, limit = settings.MaxProviderCalls }, callId)).ConfigureAwait(false);
+            throw new ExperimentException(AdmissionFailure, "The configured provider-call limit was reached. No further request was dispatched.");
         }
-        var call = Calls + 1;
-        var callId = _context.Turn.Id + "-call-" + call;
-        LatestCallId = callId;
-        var bytes = request.Content is null ? [] : await request.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
-        _credential = request.Headers.Authorization?.Parameter;
-        var body = JsonSerializer.Deserialize<JsonElement>(bytes);
-        var allowance = ExperimentDirectRequest.InputAllowance(settings);
-        if (Encoding.UTF8.GetCharCount(bytes) > settings.MaxInputCharacters)
+        byte[] bytes = [];
+        var armed = false;
+        try
         {
+            bytes = prepared.CopySensitiveRequestBody();
+            using var document = JsonDocument.Parse(bytes);
+            var body = document.RootElement;
+            var allowance = ExperimentDirectRequest.InputAllowance(settings);
+            if (descriptor.SerializedCharacters > settings.MaxInputCharacters)
+            {
+                await _context.Trace(new("provider.request", new
+                {
+                    body = Sanitize(body, _credential),
+                    hash = descriptor.BodyHash["sha256:".Length..],
+                    wireBytes = bytes.Length,
+                    serializedCharacters = descriptor.SerializedCharacters,
+                    inputAllowance = allowance,
+                    inputTokens = (int?)null,
+                    estimator = "not counted; request character limit failed first",
+                    dispatchState = "prepared; character-denied",
+                    instructionsOmitted = !body.TryGetProperty("instructions", out _)
+                }, callId)).ConfigureAwait(false);
+                AdmissionFailure = "context.wire_limit";
+                throw new ExperimentException(AdmissionFailure, "The complete provider request exceeds the configured character limit. No generation request was dispatched.");
+            }
+            if (_counter is null)
+            {
+                throw new InvalidOperationException("The turn-owned input counter must be attached before shared admission.");
+            }
+            ExperimentTokenCount measurement;
+            try { measurement = await _counter.CountAsync(bytes, cancellationToken).ConfigureAwait(false); }
+            catch (ExperimentException error) { AdmissionFailure = error.Code; throw; }
+            if (measurement.RequestHash != descriptor.BodyHash["sha256:".Length..])
+            {
+                AdmissionFailure = "context.token_count_invalid";
+                throw new ExperimentException(AdmissionFailure, "The input measurement does not identify the exact prepared request. No generation request was dispatched.");
+            }
             await _context.Trace(new("provider.request", new
             {
                 body = Sanitize(body, _credential),
-                hash = Convert.ToHexStringLower(SHA256.HashData(bytes)),
+                hash = descriptor.BodyHash["sha256:".Length..],
+                continuity = purpose == "web-search-query" ? "query-only; no conversation history or custom instructions"
+                    : settings.Mode == "clean-room" ? "transcript-only" : "harness-compiled-input; native state limited to this run",
+                purpose,
+                dispatchState = "prepared",
+                mode = settings.Mode,
+                method = "POST",
+                url = descriptor.TransportEndpoint,
+                estimatedInputUnits = measurement.Tokens,
+                inputTokens = measurement.ProviderCount ? measurement.Tokens : (int?)null,
+                tokenCount = measurement,
                 wireBytes = bytes.Length,
-                serializedCharacters = Encoding.UTF8.GetCharCount(bytes),
                 inputAllowance = allowance,
-                inputTokens = (int?)null,
-                estimator = "not counted; request character limit failed first",
-                dispatchState = "prepared; character-denied",
-                instructionsOmitted = !body.TryGetProperty("instructions", out _)
+                estimator = measurement.Method,
+                instructionsOmitted = !body.TryGetProperty("instructions", out _),
+                prepared = descriptor
             }, callId)).ConfigureAwait(false);
-            AdmissionFailure = "context.wire_limit";
-            throw new ExperimentException("context.wire_limit", "The complete provider request exceeds the configured character limit. No generation request was dispatched.");
+            if (measurement.Tokens > allowance)
+            {
+                AdmissionFailure = "context.wire_limit";
+                throw new ExperimentException(AdmissionFailure, $"The complete provider request has {measurement.Tokens} input tokens, exceeding the {allowance}-token allowance. No generation request was dispatched.");
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            ValidateBinding();
+            await _context.Trace(new("provider.dispatch", new
+            {
+                status = "admitted; awaiting single send",
+                providerCalls = Calls + 1,
+                borrowedTransportIdentity = _binding.Identity
+            }, callId)).ConfigureAwait(false);
+            ValidateBinding();
+            lock (_gate)
+                if (!_admitted.TryAdd(descriptor.BodyHash, (callId, purpose)))
+                    throw new InvalidOperationException("An equal prepared request already owns an unused reservation.");
+                else armed = true;
         }
-        if (_counter is null)
+        finally
         {
-            _counter = _context.InputTokenCounter ?? new OpenAiExperimentInputTokenCounter(_inner,
-                _credential ?? throw new ExperimentException("provider.not_configured", "The provider credential is unavailable."), settings.MaxProviderCalls + 32);
-            _ownsCounter = _context.InputTokenCounter is null;
+            if (!armed) lock (_gate) _reservedCalls--;
+            CryptographicOperations.ZeroMemory(bytes);
         }
-        var measurement = await _counter.CountAsync(bytes, cancellationToken).ConfigureAwait(false);
-        var estimate = measurement.Tokens;
-        var purpose = request.Options.TryGetValue(PurposeOption, out var requestPurpose) ? requestPurpose : settings.Mode;
-        await _context.Trace(new("provider.request", new
-        {
-            body = Sanitize(body, _credential),
-            hash = Convert.ToHexStringLower(SHA256.HashData(bytes)),
-            continuity = purpose == "web-search-query" ? "query-only; no conversation history or custom instructions"
-                : settings.Mode == "clean-room" ? "transcript-only" : "harness-compiled-input; native state limited to this run",
-            purpose,
-            dispatchState = "prepared",
-            mode = settings.Mode,
-            method = request.Method.Method,
-            url = request.RequestUri?.GetLeftPart(UriPartial.Path),
-            estimatedInputUnits = estimate,
-            inputTokens = measurement.ProviderCount ? measurement.Tokens : (int?)null,
-            tokenCount = measurement,
-            wireBytes = bytes.Length,
-            inputAllowance = allowance,
-            estimator = measurement.Method,
-            instructionsOmitted = !body.TryGetProperty("instructions", out _)
-        }, callId)).ConfigureAwait(false);
-        if (estimate > allowance)
-        {
-            AdmissionFailure = "context.wire_limit";
-            throw new ExperimentException("context.wire_limit", $"The complete provider request has {estimate} input tokens, exceeding the {allowance}-token allowance (window {settings.ContextWindowTokens} minus output {settings.MaxOutputTokens} minus safety 4096). Instructions, tools and schemas are included. No generation request was dispatched.");
-        }
+    }
 
-        // HttpClient marks its request as sent before entering this handler. Forward a detached
-        // message through the shared client; do not mutate or resend that marked instance.
-        using var forwarded = new HttpRequestMessage(request.Method, request.RequestUri)
+    internal void AttachCounter(IExperimentInputTokenCounter counter, bool ownsCounter, string credential)
+    { _counter = counter; _ownsCounter = ownsCounter; _credential = credential; }
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        ValidateBinding();
+        var bytes = request.Content is null ? [] : await request.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+        var hash = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(bytes));
+        (string CallId, string Purpose) reservation;
+        lock (_gate)
         {
-            Version = request.Version,
-            VersionPolicy = request.VersionPolicy,
-            Content = new ByteArrayContent(bytes)
-        };
+            if (!_admitted.Remove(hash, out reservation))
+                throw new InvalidOperationException("A chat provider request cannot bypass exact prepared admission.");
+            _reservedCalls--;
+            _calls++;
+        }
+        LatestCallId = reservation.CallId;
+        if (request.Method != HttpMethod.Post || request.RequestUri != Agentica.Clients.OpenAI.OpenAiResponsesClientOptions.DefaultEndpoint)
+            throw new InvalidOperationException("Unexpected chat provider route.");
+        using var forwarded = new HttpRequestMessage(request.Method, request.RequestUri)
+        { Version = request.Version, VersionPolicy = request.VersionPolicy, Content = new ByteArrayContent(bytes) };
         foreach (var header in request.Headers) forwarded.Headers.TryAddWithoutValidation(header.Key, header.Value);
         if (request.Content is not null)
             foreach (var header in request.Content.Headers) forwarded.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
-        Interlocked.Increment(ref _calls);
-        await _context.Trace(new("provider.dispatch", new { status = "dispatching", providerCalls = Calls }, callId)).ConfigureAwait(false);
+        ValidateBinding();
         var response = await _inner.SendAsync(forwarded, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
-            await ErrorAsync(response, callId, cancellationToken).ConfigureAwait(false);
-        if (response.IsSuccessStatusCode && response.Content.Headers.ContentType?.MediaType == "text/event-stream")
         {
-            var observer = request.Options.TryGetValue(NativeObserverOption, out var selectedObserver) ? selectedObserver : _nativeObserver;
-            response.Content = new InspectedContent(response.Content, item => ObserveAsync(callId, item, observer));
+            try { await ErrorAsync(response, reservation.CallId, cancellationToken).ConfigureAwait(false); }
+            catch (Exception error) when (error is not (OutOfMemoryException or AccessViolationException))
+            { TelemetryDeliveryFailed = true; }
         }
+        if (response.IsSuccessStatusCode && response.Content.Headers.ContentType?.MediaType == "text/event-stream")
+            response.Content = new InspectedContent(response.Content, item => ObserveSafelyAsync(reservation.CallId, item), () => TelemetryDeliveryFailed = true);
         return response;
+    }
+
+    private sealed class TurnAdmission(ExperimentProviderTransport owner, LlmPreparedCall prepared, string purpose) : ILlmCallAdmission
+    {
+        public ValueTask AdmitAsync(LlmPreparedRequestDescriptor request, CancellationToken cancellationToken) =>
+            owner.AdmitAsync(prepared, purpose, request, cancellationToken);
     }
 
     protected override void Dispose(bool disposing)
@@ -184,7 +340,18 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
         return value.Length <= maximumCharacters ? value : value[..maximumCharacters] + " [truncated]";
     }
 
-    private async Task ObserveAsync(string callId, JsonElement item, Func<string, JsonElement, Task>? observer)
+    private async Task ObserveSafelyAsync(string callId, JsonElement item)
+    {
+        try { await ObserveAsync(callId, item).ConfigureAwait(false); }
+        catch (Exception error) when (error is not (OutOfMemoryException or AccessViolationException))
+        {
+            // Native inspection is optional telemetry. Shared provider parsing still
+            // determines terminal evidence, and required admission remains fail-closed.
+            TelemetryDeliveryFailed = true;
+        }
+    }
+
+    private async Task ObserveAsync(string callId, JsonElement item)
     {
         var type = String(item, "type") ?? "unknown";
         var itemId = String(item, "item_id") ?? (item.TryGetProperty("item", out var native) ? String(native, "id") : null);
@@ -206,7 +373,10 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
         }
         else
             await _context.Trace(new("provider.item", new { type, visibility = "private-reasoning-not-retained" }, callId, itemId)).ConfigureAwait(false);
-        if (observer is not null) await observer(callId, Sanitize(item, _credential)).ConfigureAwait(false);
+        if ((type is "response.output_item.added" or "response.output_item.done") &&
+            item.TryGetProperty("item", out var searchItem) && String(searchItem, "type") == "web_search_call")
+            await _context.Trace(new("provider.web-search", new { phase = type, item = Sanitize(searchItem, _credential) }, callId,
+                String(searchItem, "id"))).ConfigureAwait(false);
     }
 
     private JsonElement PrivateReasoningMetadata(JsonElement item, string type)
@@ -266,11 +436,11 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
     {
         private readonly HttpContent _inner;
         private readonly Lazy<Task<Stream>> _stream;
-        public InspectedContent(HttpContent inner, Func<JsonElement, Task> observer)
+        public InspectedContent(HttpContent inner, Func<JsonElement, Task> observer, Action omitted)
         {
             _inner = inner;
             foreach (var header in inner.Headers) Headers.TryAddWithoutValidation(header.Key, header.Value);
-            _stream = new(async () => new InspectionStream(await inner.ReadAsStreamAsync().ConfigureAwait(false), observer));
+            _stream = new(async () => new InspectionStream(await inner.ReadAsStreamAsync().ConfigureAwait(false), observer, omitted));
         }
         protected override Task<Stream> CreateContentReadStreamAsync() => _stream.Value;
         protected override Task<Stream> CreateContentReadStreamAsync(CancellationToken cancellationToken) => _stream.Value;
@@ -281,25 +451,45 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
     }
 
     /// <summary>Incremental SSE observer. It does not buffer or delay the completed response.</summary>
-    private sealed class InspectionStream(Stream inner, Func<JsonElement, Task> observer) : Stream
+    private sealed class InspectionStream(Stream inner, Func<JsonElement, Task> observer, Action omitted) : Stream
     {
         private const int MaximumEventCharacters = 1_048_576;
         private readonly Decoder _decoder = new UTF8Encoding(false, true).GetDecoder();
         private readonly StringBuilder _line = new();
         private readonly StringBuilder _data = new();
         private bool _ended;
+        private bool _skipEvent;
+        private bool _inspectionDisabled;
+        private int _lineCharacters;
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             var count = await inner.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            if (_inspectionDisabled) return count;
             var chars = new char[Encoding.UTF8.GetMaxCharCount(count)];
-            var length = _decoder.GetChars(buffer.Span[..count], chars, count == 0);
+            int length;
+            try { length = _decoder.GetChars(buffer.Span[..count], chars, count == 0); }
+            catch (DecoderFallbackException)
+            {
+                _inspectionDisabled = true;
+                _line.Clear(); _data.Clear();
+                omitted();
+                return count; // Shared decoding and parsing govern the original bytes.
+            }
             for (var i = 0; i < length; i++)
             {
                 var ch = chars[i];
                 if (ch == '\n') await LineAsync().ConfigureAwait(false);
-                else if (ch != '\r') _line.Append(ch);
+                else if (ch != '\r')
+                {
+                    _lineCharacters++;
+                    if (!_skipEvent) _line.Append(ch);
+                }
                 if (_line.Length + _data.Length > MaximumEventCharacters)
-                    throw new ExperimentException("provider.event_limit", "A provider event exceeded the retained event limit.");
+                {
+                    _skipEvent = true;
+                    _line.Clear(); _data.Clear();
+                    omitted(); // Display retention cannot invalidate a shared provider outcome.
+                }
             }
             if (count == 0 && !_ended)
             {
@@ -311,8 +501,16 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
         }
         private async Task LineAsync()
         {
+            var empty = _lineCharacters == 0;
+            _lineCharacters = 0;
+            if (_skipEvent)
+            {
+                if (empty) _skipEvent = false;
+                _line.Clear();
+                return;
+            }
             var line = _line.ToString(); _line.Clear();
-            if (line.Length == 0) await EventAsync().ConfigureAwait(false);
+            if (empty) await EventAsync().ConfigureAwait(false);
             else if (line.StartsWith("data:", StringComparison.Ordinal))
             {
                 if (_data.Length != 0) _data.Append('\n');
@@ -324,8 +522,12 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
             if (_data.Length == 0) return;
             var data = _data.ToString(); _data.Clear();
             if (data == "[DONE]") return;
-            using var document = JsonDocument.Parse(data);
-            await observer(document.RootElement.Clone()).ConfigureAwait(false);
+            try
+            {
+                using var document = JsonDocument.Parse(data);
+                await observer(document.RootElement.Clone()).ConfigureAwait(false);
+            }
+            catch (JsonException) { omitted(); } // The shared parser still validates the original bytes.
         }
         public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
             ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();

@@ -351,6 +351,7 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
 
     internal static Dictionary<string, object?> BuildRequestBody(LlmRequest request, string modelId)
     {
+        LlmHistoryModeGuard.RequireNativeMode(request, GeminiLlmClient.ProviderName);
         if (request.GenerationOptions?.Temperature is not null)
         {
             throw Failure("unsupported_temperature", LlmClientErrorKind.BadRequest);

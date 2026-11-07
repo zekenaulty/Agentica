@@ -54,8 +54,9 @@ public sealed class LlmPreparedCall : IDisposable
 
     internal LlmPreparedCall(ILlmStreamingClient client, LlmRequest request,
         LlmPreparedRequestDescriptor descriptor, byte[] body, Uri endpoint, string protocol,
-        LlmPreparedTransportBinding? transportBinding = null)
+        LlmPreparedTransportBinding? transportBinding = null, LlmConfigurationReport? configurationReport = null)
     {
+        ConfigurationReport = configurationReport;
         _client = client;
         _request = request;
         Descriptor = descriptor;
@@ -67,6 +68,7 @@ public sealed class LlmPreparedCall : IDisposable
     }
 
     public LlmPreparedRequestDescriptor Descriptor { get; }
+    public LlmConfigurationReport? ConfigurationReport { get; }
     [JsonIgnore] public LlmAttemptCapture Capture { get; }
     internal Uri Endpoint => _endpoint;
 

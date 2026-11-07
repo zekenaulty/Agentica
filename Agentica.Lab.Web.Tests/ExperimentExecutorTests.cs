@@ -143,7 +143,7 @@ public sealed class ExperimentExecutorTests
         Assert.Equal("reasoning-1", privateSource.GetProperty("item_id").GetString());
         Assert.True(privateSource.GetProperty("contentRedacted").GetBoolean());
         Assert.False(privateSource.TryGetProperty("text", out _));
-        Assert.Contains("reasoning_tokens", JsonSerializer.Serialize(result.Usage), StringComparison.Ordinal);
+        Assert.Contains("ThinkingTokens", JsonSerializer.Serialize(result.Usage), StringComparison.Ordinal);
         var retained = JsonSerializer.Serialize(probe.Events);
         Assert.DoesNotContain("opaque-secret", retained, StringComparison.Ordinal);
         Assert.DoesNotContain("private-thought", retained, StringComparison.Ordinal);
@@ -248,6 +248,10 @@ public sealed class ExperimentExecutorTests
         Assert.NotEmpty(outcome.GetProperty("plans").EnumerateArray());
         Assert.NotEmpty(outcome.GetProperty("refinements").EnumerateArray());
         Assert.NotEmpty(outcome.GetProperty("frames").EnumerateArray());
+        Assert.NotEmpty(outcome.GetProperty("CompletionEvidence").EnumerateArray());
+        Assert.Empty(outcome.GetProperty("residualObligations").EnumerateArray());
+        Assert.Empty(outcome.GetProperty("blockers").EnumerateArray());
+        Assert.Equal(2, JsonSerializer.SerializeToElement(result.Usage).GetProperty("attempts").GetArrayLength());
         Assert.Contains(probe.Events, item => item.Type == "harness.event");
         Assert.Equal(2, probe.Events.Count(item => item.Type == "provider.request"));
         Assert.Contains("Workflow", handler.Bodies[0], StringComparison.OrdinalIgnoreCase);
@@ -494,6 +498,202 @@ public sealed class ExperimentExecutorTests
         Assert.Equal("https://api.openai.com/v1/models", Assert.Single(handler.Urls));
     }
 
+    [Fact]
+    public async Task Late_stream_error_retains_terminal_usage_without_accepting_a_completed_turn()
+    {
+        using var handler = new Handler(_ => Stream(TextResponse("Terminal text") + Event(new { type = "error" })));
+        using var http = new HttpClient(handler);
+        using var executor = new OpenAiExperimentExecutor(Configuration(), http);
+        var probe = new Probe(new ExperimentSettings());
+        var result = await executor.ExecuteAsync(probe.Context, TestContext.Current.CancellationToken);
+        Assert.Equal("failed", result.Status);
+        var evidence = Assert.Single(JsonSerializer.SerializeToElement(result.Usage).GetProperty("attempts").EnumerateArray());
+        Assert.Equal("completed", evidence.GetProperty("ProviderStatus").GetString());
+        Assert.Equal(12, evidence.GetProperty("Usage").GetProperty("PromptTokens").GetInt32());
+        Assert.Equal(3, evidence.GetProperty("Usage").GetProperty("ThinkingTokens").GetInt32());
+        Assert.Equal((int)LlmAttemptOutcome.Failed, evidence.GetProperty("Outcome").GetInt32());
+        Assert.Single(handler.Bodies);
+        Assert.DoesNotContain(probe.Events, item => item.Type == "provider.continuity");
+    }
+
+    [Fact]
+    public async Task Cancellation_after_observed_terminal_preserves_known_usage_and_separate_host_outcome()
+    {
+        using var pending = new WaitingStream(TextResponse("Observed terminal"));
+        using var handler = new Handler(_ =>
+        {
+            var content = new StreamContent(pending);
+            content.Headers.ContentType = new("text/event-stream");
+            return new(HttpStatusCode.OK) { Content = content };
+        });
+        using var http = new HttpClient(handler);
+        using var executor = new OpenAiExperimentExecutor(Configuration(), http);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var probe = new Probe(new ExperimentSettings());
+        var execution = executor.ExecuteAsync(probe.Context, cancellation.Token);
+        await pending.Waiting.Task.WaitAsync(cancellation.Token);
+        cancellation.Cancel();
+        var result = await execution;
+        Assert.Equal("cancelled", result.Status);
+        var evidence = Assert.Single(JsonSerializer.SerializeToElement(result.Usage).GetProperty("attempts").EnumerateArray());
+        Assert.Equal("completed", evidence.GetProperty("ProviderStatus").GetString());
+        Assert.Equal(12, evidence.GetProperty("Usage").GetProperty("PromptTokens").GetInt32());
+        Assert.Equal((int)LlmAttemptOutcome.Cancelled, evidence.GetProperty("Outcome").GetInt32());
+        Assert.Equal((int)LlmDispatchCertainty.ResponseObserved, evidence.GetProperty("DispatchCertainty").GetInt32());
+        Assert.Single(handler.Bodies);
+        Assert.DoesNotContain(probe.Events, item => item.Type == "provider.continuity");
+    }
+
+    [Fact]
+    public async Task Required_request_journal_failure_prevents_inference_but_optional_native_telemetry_failure_does_not()
+    {
+        using var handler = new Handler(_ => Stream(TextResponse("Answer")));
+        using var http = new HttpClient(handler);
+        using var executor = new OpenAiExperimentExecutor(Configuration(), http);
+        var denied = new Probe(new ExperimentSettings());
+        var deniedResult = await executor.ExecuteAsync(denied.Context with
+        {
+            Trace = item => item.Type == "provider.request" ? throw new IOException("synthetic journal unavailable") : denied.Context.Trace(item)
+        }, TestContext.Current.CancellationToken);
+        Assert.Equal("failed", deniedResult.Status);
+        Assert.Empty(handler.Bodies);
+        var rejected = Assert.Single(JsonSerializer.SerializeToElement(deniedResult.Usage).GetProperty("attempts").EnumerateArray());
+        Assert.Equal((int)LlmDispatchCertainty.NotDispatched, rejected.GetProperty("DispatchCertainty").GetInt32());
+
+        var observed = new Probe(new ExperimentSettings());
+        var observedResult = await executor.ExecuteAsync(observed.Context with
+        {
+            Trace = item => item.Type == "provider.record" ? throw new IOException("synthetic UI trace unavailable") : observed.Context.Trace(item)
+        }, TestContext.Current.CancellationToken);
+        Assert.Equal("completed", observedResult.Status);
+        Assert.Equal("Answer", observedResult.AssistantText);
+        Assert.True(JsonSerializer.SerializeToElement(observedResult.Usage).GetProperty("telemetryDeliveryFailed").GetBoolean());
+        Assert.Single(handler.Bodies);
+    }
+
+    [Fact]
+    public async Task Oversized_private_inspection_item_does_not_discard_shared_terminal_evidence()
+    {
+        var terminal = Event(new
+        {
+            type = "response.completed",
+            response = new
+            {
+                id = "large-native-response",
+                status = "completed",
+                output = new object[]
+                {
+                    new { type = "reasoning", encrypted_content = new string('x', 1_100_000) },
+                    new { type = "message", role = "assistant", content = new[] { new { type = "output_text", text = "Bounded visible answer" } } }
+                },
+                usage = new { input_tokens = 31, output_tokens = 8 }
+            }
+        });
+        using var handler = new Handler(_ => Stream(terminal));
+        using var http = new HttpClient(handler);
+        using var executor = new OpenAiExperimentExecutor(Configuration(), http);
+        var probe = new Probe(new ExperimentSettings());
+        var result = await executor.ExecuteAsync(probe.Context, TestContext.Current.CancellationToken);
+        Assert.Equal("completed", result.Status);
+        Assert.Equal("Bounded visible answer", result.AssistantText);
+        var usage = JsonSerializer.SerializeToElement(result.Usage);
+        Assert.True(usage.GetProperty("telemetryDeliveryFailed").GetBoolean());
+        Assert.Equal(31, Assert.Single(usage.GetProperty("attempts").EnumerateArray()).GetProperty("Usage").GetProperty("PromptTokens").GetInt32());
+        Assert.DoesNotContain("encrypted_content", JsonSerializer.Serialize(probe.Events), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Failed_or_cancelled_search_retains_typed_sources_even_when_native_inspection_is_unavailable(bool cancel)
+    {
+        using var pending = new WaitingStream(WebResponse("Sourced terminal answer"));
+        using var handler = new Handler(_ =>
+        {
+            if (!cancel) return Stream(WebResponse("Sourced terminal answer") + Event(new { type = "error" }));
+            var content = new StreamContent(pending);
+            content.Headers.ContentType = new("text/event-stream");
+            return new(HttpStatusCode.OK) { Content = content };
+        });
+        using var http = new HttpClient(handler);
+        using var executor = new OpenAiExperimentExecutor(Configuration(), http);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var probe = new Probe(new ExperimentSettings { AmbientWebSearch = true });
+        var execution = executor.ExecuteAsync(probe.Context with
+        {
+            Trace = item => item.Type == "provider.record" ? throw new IOException("synthetic optional inspection unavailable") : probe.Context.Trace(item)
+        }, cancellation.Token);
+        if (cancel)
+        {
+            await pending.Waiting.Task.WaitAsync(cancellation.Token);
+            cancellation.Cancel();
+        }
+        var result = await execution;
+        Assert.Equal(cancel ? "cancelled" : "failed", result.Status);
+        var saved = Assert.Single(JsonSerializer.SerializeToElement(result.Usage).GetProperty("webSearchOutcomes").EnumerateArray());
+        Assert.NotEmpty(saved.GetProperty("callId").GetString()!);
+        var search = saved.GetProperty("evidence");
+        Assert.Equal("https://example.org/evidence", Assert.Single(search.GetProperty("Sources").EnumerateArray()).GetProperty("Url").GetString());
+        Assert.NotEmpty(search.GetProperty("Citations").EnumerateArray());
+        Assert.Contains(probe.Events, item => item.Type == "provider.web-search.outcome");
+        Assert.DoesNotContain(probe.Events, item => item.Type == "provider.citations");
+        Assert.Single(handler.Bodies);
+    }
+
+    [Fact]
+    public async Task Optional_inspection_decoder_cannot_reject_a_comment_ignored_by_the_shared_parser()
+    {
+        var bytes = Encoding.UTF8.GetBytes(TextResponse("Valid terminal answer")).Concat(new byte[] { (byte)':', 0xff, (byte)'\n', (byte)'\n' }).ToArray();
+        using var handler = new Handler(_ =>
+        {
+            var content = new ByteArrayContent(bytes);
+            content.Headers.ContentType = new("text/event-stream");
+            return new(HttpStatusCode.OK) { Content = content };
+        });
+        using var http = new HttpClient(handler);
+        using var executor = new OpenAiExperimentExecutor(Configuration(), http);
+        var probe = new Probe(new ExperimentSettings());
+        var result = await executor.ExecuteAsync(probe.Context, TestContext.Current.CancellationToken);
+        Assert.Equal("completed", result.Status);
+        Assert.Equal("Valid terminal answer", result.AssistantText);
+        Assert.True(JsonSerializer.SerializeToElement(result.Usage).GetProperty("telemetryDeliveryFailed").GetBoolean());
+        Assert.Single(handler.Bodies);
+    }
+
+    [Fact]
+    public async Task Saved_search_exports_bound_conversation_rows_and_report_the_original_reference_coverage()
+    {
+        var sources = Enumerable.Range(0, 100).Select(index => new
+        { url = "https://example.org/" + index + "/" + new string('x', 3000), title = "Source " + index }).ToArray();
+        var terminal = Event(new
+        {
+            type = "response.completed",
+            response = new
+            {
+                id = "bounded-search",
+                status = "completed",
+                output = new object[]
+                {
+                    new { id = "web-1", type = "web_search_call", status = "completed", action = new { type = "search", sources } },
+                    new { type = "message", role = "assistant", content = new[] { new { type = "output_text", text = "Bounded answer" } } }
+                },
+                usage = new { input_tokens = 31, output_tokens = 8 }
+            }
+        });
+        using var handler = new Handler(_ => Stream(terminal));
+        using var http = new HttpClient(handler);
+        using var executor = new OpenAiExperimentExecutor(Configuration(), http);
+        var probe = new Probe(new ExperimentSettings { AmbientWebSearch = true, MaxProviderCalls = 100 });
+        var result = await executor.ExecuteAsync(probe.Context, TestContext.Current.CancellationToken);
+        Assert.Equal("completed", result.Status);
+        var exported = Assert.Single(JsonSerializer.SerializeToElement(result.Usage).GetProperty("webSearchOutcomes").EnumerateArray());
+        Assert.True(exported.GetProperty("hostRetentionTruncated").GetBoolean());
+        Assert.Equal(100, exported.GetProperty("observed").GetProperty("sources").GetInt32());
+        Assert.True(exported.GetProperty("evidence").GetProperty("Sources").GetArrayLength() < 100);
+        Assert.True(exported.GetRawText().Length <= 1_048_576 / 100);
+        Assert.True(JsonSerializer.Serialize(result.Usage).Length < 20000);
+    }
+
     private static OpenAiProviderConfiguration Configuration() => new(name => name == "OPENAI_API_KEY" ? "fixture-secret" : null);
     private static JsonElement Payload(ExperimentTraceInput item) => JsonSerializer.SerializeToElement(item.Data);
     private static string Event(object data) => "data: " + JsonSerializer.Serialize(data) + "\n\n";
@@ -614,6 +814,7 @@ public sealed class ExperimentExecutorTests
     {
         private readonly byte[] _initial = Encoding.UTF8.GetBytes(initial);
         private int _position;
+        public TaskCompletionSource Waiting { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             if (_position < _initial.Length)
@@ -622,6 +823,7 @@ public sealed class ExperimentExecutorTests
                 _initial.AsMemory(_position, count).CopyTo(buffer); _position += count;
                 return count;
             }
+            Waiting.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             return 0;
         }

@@ -3,7 +3,11 @@ using System.Security.Cryptography;
 namespace Agentica.Lab.Web.Chat;
 
 public sealed record ExperimentTokenCount(int Tokens, string Method, string RequestHash,
-    bool ProviderCount = false, string? CountRequestHash = null);
+    bool ProviderCount = false, string? CountRequestHash = null)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? CountAttemptId { get; init; }
+}
 
 /// <summary>A turn-owned input measurement. Counting never generates a response.</summary>
 public interface IExperimentInputTokenCounter
