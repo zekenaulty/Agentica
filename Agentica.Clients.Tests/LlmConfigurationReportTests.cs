@@ -13,6 +13,26 @@ public sealed class LlmConfigurationReportTests
 {
     private static readonly DateTimeOffset AsOf = new(2026, 11, 6, 0, 0, 0, TimeSpan.Zero);
 
+    [Fact]
+    public void Report_reuses_constructor_transport_policy_and_rejects_invalid_endpoint_schemes()
+    {
+        var rejected = LlmConfigurationReports.Describe(Request(null),
+            new OllamaClientOptions(new Uri("http://remote.fixture.invalid/api/chat")));
+        Assert.False(rejected.AdapterAcceptsRequest);
+        Assert.Contains(rejected.Issues, issue => issue.Code == "invalid_request_value");
+        var loopback = LlmConfigurationReports.Describe(Request(null),
+            new OllamaClientOptions(new Uri("http://127.0.0.1:11434/api/chat")));
+        Assert.True(loopback.AdapterAcceptsRequest);
+        foreach (var endpoint in new[] { new Uri("relative", UriKind.Relative), new Uri("ftp://fixture.invalid/response") })
+        {
+            var invalid = LlmConfigurationReports.Describe(Request(null),
+                new OpenAiResponsesClientOptions(Endpoint: endpoint));
+            Assert.False(invalid.AdapterAcceptsRequest);
+            Assert.Contains(invalid.Issues, issue => issue.Code == "invalid_endpoint");
+            Assert.Equal(LlmCapabilitySupport.Unsupported, invalid.RouteResolution.State);
+        }
+    }
+
     [Theory]
     [InlineData("openai", "responses")]
     [InlineData("xai", "responses")]

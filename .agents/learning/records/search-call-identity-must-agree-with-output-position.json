@@ -9,7 +9,7 @@
   "guidance": "Lifecycle updates may coalesce by call ID or output position only when their other known identity field agrees. Matching either field while ignoring a contradictory other field can collapse two reported calls into one and bypass the call ceiling. Retain both conflicting observations and fail client delivery. Bounded omissions of present external query/title fields must set the truncation flag; absence and discarded data are different evidence states.",
   "evidence": [
     {
-      "kind": "test",
+      "kind": "offline_test",
       "reference": "Agentica.Clients.Tests/OpenAiWebSearchTests.cs",
       "revision": "P06 implementation based on e9d050a; recorded with this source change",
       "note": "Duplicate ID across positions and different IDs at one position reject with retained observations; oversized present query/title fields mark bounded omissions. Independent review found the original defects, then protocol fixtures verified the corrections."

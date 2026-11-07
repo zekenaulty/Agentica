@@ -49,7 +49,11 @@ public static class LlmConfigurationReports
         ArgumentNullException.ThrowIfNull(options);
         return Describe(request, "ollama", "chat", options.DefaultModelId,
             options.Endpoint ?? OllamaClientOptions.DefaultEndpoint,
-            model => OllamaLlmClient.BuildRequestBody(request, model), context);
+            model =>
+            {
+                _ = new OllamaLlmClient(options); // Reuse the actual endpoint policy too.
+                return OllamaLlmClient.BuildRequestBody(request, model);
+            }, context);
     }
 
     public static LlmConfigurationReport Describe(LlmRequest request,
@@ -125,7 +129,9 @@ public static class LlmConfigurationReports
             if (request.WebSearch is not null && provider != "openai")
                 throw new LlmClientException(provider, "Provider-native web search is unsupported by this route.",
                     errorKind: LlmClientErrorKind.BadRequest, errorClass: "unsupported_web_search");
-            if (string.IsNullOrWhiteSpace(model))
+            if (!endpoint.IsAbsoluteUri || endpoint.Scheme is not ("http" or "https"))
+                issues.Add(new("invalid_endpoint", "The configured endpoint must be an absolute HTTP(S) URL."));
+            else if (string.IsNullOrWhiteSpace(model))
                 issues.Add(new("missing_model", "No model was requested or configured; no substitute was selected."));
             else
             {
@@ -145,10 +151,15 @@ public static class LlmConfigurationReports
         {
             issues.Add(new("invalid_request_value", "The adapter could not serialize this request value."));
         }
-        var routeResolved = !string.IsNullOrWhiteSpace(model) && endpoint.IsAbsoluteUri;
+        var routeResolved = !string.IsNullOrWhiteSpace(model) && endpoint.IsAbsoluteUri &&
+            endpoint.Scheme is "http" or "https";
         if (resolveEndpoint is not null && !string.IsNullOrWhiteSpace(model))
         {
-            try { endpoint = resolveEndpoint(model); routeResolved = endpoint.IsAbsoluteUri; }
+            try
+            {
+                endpoint = resolveEndpoint(model);
+                routeResolved = endpoint.IsAbsoluteUri && endpoint.Scheme is "http" or "https";
+            }
             catch (LlmClientException exception)
             {
                 routeResolved = false;
@@ -162,8 +173,6 @@ public static class LlmConfigurationReports
         var endpointIdentity = endpoint.IsAbsoluteUri
             ? endpoint.GetComponents(UriComponents.SchemeAndServer | UriComponents.Path, UriFormat.UriEscaped)
             : "invalid-relative-endpoint";
-        if (!endpoint.IsAbsoluteUri)
-            issues.Add(new("invalid_endpoint", "The configured endpoint must be absolute."));
         // Only applied configuration enters this identity; no user messages, system instructions,
         // native history, request metadata, keys, endpoint query/userinfo or host bundle IDs.
         var providerConfiguration = new SortedDictionary<string, JsonElement>(StringComparer.Ordinal);
