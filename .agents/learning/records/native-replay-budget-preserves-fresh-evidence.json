@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "id": "native-replay-budget-preserves-fresh-evidence",
+  "scope": "agentica",
+  "kind": "technical",
+  "status": "accepted",
+  "title": "Budget fresh planning, repair reserve and native replay independently",
+  "trigger": "Lab harness native count context ceiling repair reserve accumulated continuation fresh evidence fallback",
+  "guidance": "Leave enough room for mandatory fresh planner input plus repair reserve before choosing a replay bound. Accumulated opaque native history can exceed a native-token ceiling even when the current fresh prompt fits; character size is not a token count. Gate the exact complete wire input with native counting and preserve accepted host observations/receipts when resetting replay. Qualify an evidence-preserving reset through a later real model decision. Retain rejected requests and paid prior attempts in the same cumulative ledger; an explicit successor never replenishes capacity. The 40000-character setting is proof-specific, not a general token guarantee. Current external tight-count rejection fails closed; automatic bounded recompile remains a separate refinement.",
+  "evidence": [
+    {
+      "kind": "offline_test",
+      "reference": "eng/provider-live-proof/HarnessBudgetSelfTest.cs",
+      "revision": "8cd502c",
+      "note": "Actual executor/shared-client/native-carrier/runner fixture: three successful tool phases, two refinements; input item counts1/4/1 and required earlier evidence retained after replay reset."
+    },
+    {
+      "kind": "live_test",
+      "reference": "docs/implementation/provider-readiness-20261106/P09-QUALIFICATION.md; restricted .agentica/verification/p09-live/scenario-evidence.json",
+      "revision": "8cd502c",
+      "note": "Retained initial no-send repair-reserve rejection, two paid decisions followed by9613-token pre-send rejection, then successful three-decision Luna/high successor with2996/6136/4389 native inputs. Same ledger5 inference/6 count and unchanged reopen."
+    }
+  ],
+  "recheck": "Recheck if planner instructions/schema/repair reserve, model tokenization, native-carrier construction or host evidence projection changes. These observed proof settings do not guarantee future input sizes or establish production/installed migration acceptance.",
+  "tags": [
+    "context",
+    "native-replay",
+    "counting",
+    "planning",
+    "recovery",
+    "budget",
+    "evidence"
+  ],
+  "recorded_on": "2026-11-06"
+}

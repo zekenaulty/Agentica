@@ -86,6 +86,16 @@ jobs:
       - name: Qualify Lab web contracts and real sockets
         run: dotnet test Agentica.Lab.Web.Tests/Agentica.Lab.Web.Tests.csproj --configuration Release --no-build --no-restore
 
+      - name: Qualify the isolated provider proof guard without live access
+        shell: pwsh
+        run: |
+          dotnet restore eng/provider-live-proof/ProviderLiveProof.csproj --locked-mode --configfile NuGet.config
+          if ($LASTEXITCODE -ne 0) { throw 'Proof driver locked restore failed.' }
+          dotnet build eng/provider-live-proof/ProviderLiveProof.csproj --configuration Release --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'Proof driver build failed.' }
+          dotnet run --project eng/provider-live-proof/ProviderLiveProof.csproj --configuration Release --no-build --no-restore -- self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Offline proof guard qualification failed.' }
+
       - name: Qualify the browser host SDK
         env:
           AGENTICA_TEST_START_SERIALIZATION: '1'
@@ -177,6 +187,16 @@ jobs:
 
       - name: Qualify Lab web contracts and real sockets
         run: dotnet test Agentica.Lab.Web.Tests/Agentica.Lab.Web.Tests.csproj --configuration Release --no-build --no-restore
+
+      - name: Qualify the isolated provider proof guard without live access
+        shell: pwsh
+        run: |
+          dotnet restore eng/provider-live-proof/ProviderLiveProof.csproj --locked-mode --configfile NuGet.config
+          if ($LASTEXITCODE -ne 0) { throw 'Proof driver locked restore failed.' }
+          dotnet build eng/provider-live-proof/ProviderLiveProof.csproj --configuration Release --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'Proof driver build failed.' }
+          dotnet run --project eng/provider-live-proof/ProviderLiveProof.csproj --configuration Release --no-build --no-restore -- self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Offline proof guard qualification failed.' }
 
       - name: Qualify the browser host SDK
         env:

@@ -1,12 +1,40 @@
 # Agentica Product Status And Goal Xref
 
-Canonical status date: 2026-11-03, 16:47 UTC
+Canonical status date: 2026-11-06 provider-readiness overlay; earlier sections retain their November 3 evidence cuts.
 
 Lifecycle: Incubating
 
 This is the authoritative high-level status page for Agentica. Detailed goal documents remain useful design records and evidence logs, but they do not independently set current priority. When another document conflicts with this page about product identity, active work, lifecycle, or completion, this page wins.
 
-## Current program: reconcile, integrate and prove the next contracts
+## November 6 overlay: provider-only host readiness
+
+[Provider-readiness Epic #47](https://github.com/zekenaulty/Agentica/issues/47)
+extends program #12. P01–P08 are merged through PRs #58/#60/#59/#61/#62/#63;
+each reviewed head passed Windows and Linux CI on the pinned SDK 10.0.302.
+The shared clients now retain unsuccessful/cancelled call facts, support exact
+prepared admission, report effective controls, exchange bounded private native
+continuation, and expose OpenAI search. Lab uses those contracts and owns durable
+count/turn storage. The packed provider-only host qualifies 35 offline cases,
+including fresh-process recovery and the admitted/observed embedding seam.
+
+P09's isolated **real GPT-6 Luna/high** Lab loop passed: three model decisions,
+two refinements, exact tool-grounded completion, then a read-only host reopen with
+no extra call. Cumulative verification used five of six inference attempts and
+six of eight counts, with US$0.00697625 conservative priced exposure. The rejected
+9,613-token preparation and its completed prior calls remain in the same ledger.
+Actual browser checks preserved blank defaults, Markdown, sources, saved settings
+and collapsed traces. [The qualification](implementation/provider-readiness-20261106/P09-QUALIFICATION.md)
+separates local/live/package/browser proof and the final exact-head release gate;
+[issue #56](https://github.com/zekenaulty/Agentica/issues/56) records final admission.
+
+[The A1–A6 handoff](implementation/provider-readiness-20261106/BRIDGE-HANDOFF.md)
+provides concrete provider-only contracts and package custody. Bridge, Nyx and
+Cloud retain their own executor, canonical state and migration acceptance.
+Other-provider live checks, historical reindex/recall, media and native TypeScript
+Cloud migration remain outside this producer proof. Broader #10/#24/#25/#26/#31
+acceptance remains separate; this overlay assigns no overall product percentage.
+
+## Retained November 3 program snapshot: reconcile, integrate and prove the next contracts
 
 The owner has authorized Agentica issue creation, bounded implementation and stable reviewed merges. [Program #12](https://github.com/zekenaulty/Agentica/issues/12) links five epics covering obligation contracts, provider/MCP correctness, interpretation reuse, qualification, and the independent Nyx learning path. [The reconciliation](reconciliation/2026-11-03/planning-reconciliation.md) pins the live Google planning cuts and distinguishes shipped source, existing branches, proposals and external-host gates. [Git custody](reconciliation/2026-11-03/git-custody.md) records the pre-integration local and remote inventory.
 

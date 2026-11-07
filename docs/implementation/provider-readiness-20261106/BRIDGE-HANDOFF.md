@@ -14,13 +14,13 @@ a Lab service or a second scheduler.
 | --- | --- | --- |
 | Shared P01–P06 contracts and adapters | Main `a26e8d8cfbd7e3d6772d5e74c9c014c33b1cf9e7`; [PR #61](https://github.com/zekenaulty/Agentica/pull/61) completed both required Windows/Linux gates | Merged; offline contract/transport qualification |
 | Early A5 packed embedding consumer | Main `004ad7acaa8e7bd29fd85036721906c5896424c6`; [CI run 42313237152](https://github.com/zekenaulty/Agentica/actions/runs/42313237152) | Previously qualified producer seam; no installed claim |
-| P07 Lab adoption | Integration commits `7d6951b`, `4bd10e2`, `3bfa686`; [P07 evidence](P07-LAB.md) | Candidate; final integration CI/browser gates pending |
-| P08 full provider-only recovery host | Worker `56ae681` + reviewed fix `6da2062`; integration `4270ba0` + `f9dd1d3`; [qualification](../../../eng/provider-consumer/QUALIFICATION.md) | Candidate; 35 local offline scenarios, including 20 recovery cases; final integration CI pending |
-| P09 live OpenAI / final artifact publication | [Issue #56](https://github.com/zekenaulty/Agentica/issues/56) | NOT RUN at this cut |
+| P07 Lab adoption | Main `8b466e5`, [PR #63](https://github.com/zekenaulty/Agentica/pull/63), CI `42325652843`; [P07 evidence](P07-LAB.md) | Merged; Windows/Linux passed; real Lab proof in P09 |
+| P08 full provider-only recovery host | Main `74d470a`, [PR #62](https://github.com/zekenaulty/Agentica/pull/62), CI `42325135654`; [qualification](../../../eng/provider-consumer/QUALIFICATION.md) | Merged; 35 packed scenarios, including 20 recovery cases; Windows/Linux passed |
+| P09 live OpenAI / final artifact publication | [Qualification](P09-QUALIFICATION.md), [issue #56](https://github.com/zekenaulty/Agentica/issues/56) | Real Luna/high full loop and reopen passed; final exact-head CI/merge recorded on the issue |
 | Actual Bridge / Nyx / Cloud adoption | External PM04–PM18 acceptance | Not established by Agentica producer tests |
 
 All examples below use existing public APIs from merged core unless explicitly
-marked candidate. Model/account support and successful billing are separate from
+marked with a later source cut. Model/account support and successful billing are separate from
 adapter support. The local SDK pin is **10.0.302**. Packages remain internal
 `0.1.0-research.1` previews; no public feed publication is assumed. Record source
 commit, nupkg SHA-256 and restored DLL identity rather than trusting that reused
@@ -140,7 +140,7 @@ finally
 ```
 
 The comments above identify required **host operations**; they are not package
-methods. The complete executable composition is the candidate
+methods. The complete executable composition is the merged
 [RecoveryHost](../../../eng/provider-consumer/RecoveryHost.cs),
 [physical transport](../../../eng/provider-consumer/RecoveryTransport.cs) and
 [recovery cases](../../../eng/provider-consumer/RecoveryCases.cs).
@@ -269,7 +269,7 @@ eligibility/authorization and independently proves completion against canonical
 state and receipts, then continues or parks the exact original objective.
 
 Default OpenAI native mode rejects synthesized assistant-history replay. The
-candidate P07 `OpenAiHistoryMode.TranscriptOnly` is a separate explicit visible
+merged P07 `OpenAiHistoryMode.TranscriptOnly` is a separate explicit visible
 transcript mode, returns no native continuation and does not weaken the default.
 
 ## A4 — Shared OpenAI search and source activity
@@ -296,7 +296,7 @@ UTF-16 projections. Unknown/invalid offsets remain unavailable. The evidence is
 `external-untrusted`, not verified truth or tool authority. Native search items
 survive private export/import. See [contracts](../../../Agentica.Clients/Llm/LlmWebSearch.cs),
 [shared parser tests](../../../Agentica.Clients.Tests/OpenAiWebSearchTests.cs) and
-candidate P08's dedicated search case. Bound activity, replay, URLs, retention and
+merged P08's dedicated search case. Bound activity, replay, URLs, retention and
 UI independently; do not put search queries/source content into structural receipts.
 
 ## A5 — Existing embedding client with host-owned observed transport
