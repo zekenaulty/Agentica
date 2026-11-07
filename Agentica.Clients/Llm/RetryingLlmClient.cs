@@ -291,7 +291,10 @@ public sealed class RetryingLlmClient : ILlmClient
             statusCode,
             attempts,
             errorClass)
-        { AttemptEvidence = (innerException as LlmClientException)?.AttemptEvidence ?? request.AttemptCapture?.Latest };
+        {
+            AttemptEvidence = (innerException as LlmClientException)?.AttemptEvidence ?? request.AttemptCapture?.Latest,
+            WebSearch = (innerException as LlmClientException)?.WebSearch ?? request.AttemptCapture?.LatestWebSearch
+        };
 
     private LlmClientException CallTimedOut(
         LlmRequest request,
@@ -305,7 +308,10 @@ public sealed class RetryingLlmClient : ILlmClient
             statusCode: null,
             attempts,
             errorClass: "llm_call_timeout")
-        { AttemptEvidence = (innerException as LlmClientException)?.AttemptEvidence ?? request.AttemptCapture?.Latest };
+        {
+            AttemptEvidence = (innerException as LlmClientException)?.AttemptEvidence ?? request.AttemptCapture?.Latest,
+            WebSearch = (innerException as LlmClientException)?.WebSearch ?? request.AttemptCapture?.LatestWebSearch
+        };
 
     private static string ReasonFor(LlmClientException exception) =>
         $"{exception.ErrorKind.ToString().ToLowerInvariant()}:{exception.ErrorClass}:{exception.StatusCode?.ToString() ?? "none"}";

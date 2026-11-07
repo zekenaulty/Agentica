@@ -10,6 +10,9 @@ public sealed record LlmRequest(
     IReadOnlyDictionary<string, string>? Metadata = null,
     [property: JsonIgnore] LlmNativeContinuation? NativeContinuation = null)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public LlmWebSearchOptions? WebSearch { get; init; }
+
     [JsonIgnore]
     public LlmInputCompilationReceipt? InputCompilationReceipt { get; init; }
 

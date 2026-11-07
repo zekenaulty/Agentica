@@ -21,6 +21,10 @@ internal static class LlmStreamCompletion
         LlmResponse? completed = null;
         var evidenceAtEntry = request.AttemptCapture?.Latest;
         LlmAttemptEvidence? observedEvidence = null;
+        LlmWebSearchEvidence? observedSearch = null;
+        LlmWebSearchEvidence? FailureSearch(LlmWebSearchEvidence? exceptionSearch = null) =>
+            exceptionSearch ?? (evidenceAtEntry is null ? request.AttemptCapture?.LatestWebSearch : null) ??
+            observedSearch ?? completed?.WebSearch;
         var observerHealthy = true;
         void Report(LlmStreamEvent item)
         {
@@ -63,6 +67,7 @@ internal static class LlmStreamCompletion
             await foreach (var item in streaming.StreamAsync(request, cancellationToken)
                 .ConfigureAwait(false))
             {
+                observedSearch = item.WebSearch ?? item.Response?.WebSearch ?? observedSearch;
                 if (completed is not null)
                 {
                     item.Response?.NativeContinuation?.Dispose();
@@ -82,7 +87,7 @@ internal static class LlmStreamCompletion
             if (completed is null) throw Incomplete("stream_incomplete");
             Report(new LlmStreamEvent(LlmStreamEventKind.Completed,
                 Response: completed)
-            { AttemptEvidence = completed.AttemptEvidence });
+            { AttemptEvidence = completed.AttemptEvidence, WebSearch = completed.WebSearch });
             delivered = true;
             return completed;
         }
@@ -91,7 +96,8 @@ internal static class LlmStreamCompletion
             Report(new LlmStreamEvent(LlmStreamEventKind.Cancelled)
             {
                 AttemptEvidence = FailureEvidence(LlmAttemptOutcome.Cancelled,
-                cancellationToken.IsCancellationRequested ? "caller_cancelled" : "operation_cancelled")
+                cancellationToken.IsCancellationRequested ? "caller_cancelled" : "operation_cancelled"),
+                WebSearch = FailureSearch()
             });
             throw;
         }
@@ -101,16 +107,17 @@ internal static class LlmStreamCompletion
                 ? exception.ErrorClass : "stream_failure";
             var evidence = FailureEvidence(LlmAttemptOutcome.Failed, reason, exception.AttemptEvidence);
             if (evidence is not null) exception.RetainAttemptEvidence(evidence, completed?.AttemptEvidence);
+            exception.RetainWebSearch(FailureSearch(exception.WebSearch));
             Report(new LlmStreamEvent(LlmStreamEventKind.Failed,
                 exception.ErrorClass ?? "provider_failure")
-            { AttemptEvidence = evidence });
+            { AttemptEvidence = evidence, WebSearch = FailureSearch(exception.WebSearch) });
             throw;
         }
         catch
         {
             Report(new LlmStreamEvent(LlmStreamEventKind.Failed,
                 "stream_failure")
-            { AttemptEvidence = FailureEvidence(LlmAttemptOutcome.Failed, "stream_failure") });
+            { AttemptEvidence = FailureEvidence(LlmAttemptOutcome.Failed, "stream_failure"), WebSearch = FailureSearch() });
             throw;
         }
         finally

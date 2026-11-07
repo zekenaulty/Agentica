@@ -122,6 +122,9 @@ public static class LlmConfigurationReports
         JsonElement wire = default;
         try
         {
+            if (request.WebSearch is not null && provider != "openai")
+                throw new LlmClientException(provider, "Provider-native web search is unsupported by this route.",
+                    errorKind: LlmClientErrorKind.BadRequest, errorClass: "unsupported_web_search");
             if (string.IsNullOrWhiteSpace(model))
                 issues.Add(new("missing_model", "No model was requested or configured; no substitute was selected."));
             else
@@ -197,7 +200,7 @@ public static class LlmConfigurationReports
             Capability("native_continuation_replay", !legacy, "Replay is bound to provider, API mode, exact model and instructions."),
             Capability("durable_continuation_exchange", !legacy,
                 "Explicit versioned sensitive codec; exact native bindings apply. Hosts own authenticated storage and retention."),
-            Capability("native_search", false, "No native search option exists in this shared request contract; Lab search is a separate path."),
+            Capability("native_search", provider == "openai", "Optional OpenAI native web search; model/account readiness and host acceptance remain separate."),
             Capability("native_input_count", provider == "openai", "OpenAI input counting is a separate admitted operation; generation does not count automatically."),
             Capability("prepared_request_admission", !legacy, "Optional exact preparation requires host admission before inference; ordinary client entrypoints remain compatible."));
         return new LlmConfigurationReport(provider, apiMode, request.ModelId, model, identity,
@@ -288,6 +291,10 @@ public static class LlmConfigurationReports
             Value(Read(wire, "text.format.strict")), provider == "xai"
                 ? "The strict compatibility flag is serialized; equal OpenAI enforcement guarantees are not claimed."
                 : "Only Responses schema requests emit a strict flag; other adapters retain provider-defined behavior.");
+        Add("web_search_mode", request.WebSearch?.Mode.ToString().ToLowerInvariant(), Value(Read(wire, "tool_choice")),
+            "Null leaves search disabled; auto and required retain their provider meanings.");
+        Add("max_web_search_calls", request.WebSearch?.MaxToolCalls.ToString(CultureInfo.InvariantCulture), Value(Read(wire, "max_tool_calls")),
+            "Requested provider ceiling and observed-call validation; cumulative admission and billing remain host-owned.");
         return result.ToImmutable();
 
         void Add(string name, string? requested, string? applied, string explanation)
@@ -311,6 +318,7 @@ public static class LlmConfigurationReports
     {
         var supported = control switch
         {
+            "web_search_mode" or "max_web_search_calls" => provider == "openai",
             "temperature" => provider == "ollama" || geminiContent,
             "thought_output" => provider != "ollama",
             "structured_output" => provider != "anthropic",
@@ -326,6 +334,7 @@ public static class LlmConfigurationReports
 
     private static bool RejectedControl(string code, string control) => code switch
     {
+        "unsupported_web_search" => control is "web_search_mode" or "max_web_search_calls",
         "unsupported_reasoning_effort" or "invalid_reasoning_effort" => control == "reasoning_effort",
         "unsupported_thinking_budget" or "invalid_thinking_budget" => control == "thinking_budget_tokens",
         "conflicting_thinking_controls" => control is "reasoning_effort" or "thinking_budget_tokens",

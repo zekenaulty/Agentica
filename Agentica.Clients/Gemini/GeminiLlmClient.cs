@@ -33,6 +33,9 @@ public sealed class GeminiLlmClient : ILlmClient
         var recorder = LlmAttemptRecorder.Start(request, ProviderName, modelId);
         try
         {
+            if (request.WebSearch is not null)
+                throw new LlmClientException(ProviderName, "Provider-native search is not implemented for this route.",
+                    errorKind: LlmClientErrorKind.BadRequest, errorClass: "unsupported_web_search");
             if (request.NativeContinuation is not null || request.Messages.Any(message =>
                     message.Role is LlmMessageRole.Assistant or LlmMessageRole.Tool))
             {

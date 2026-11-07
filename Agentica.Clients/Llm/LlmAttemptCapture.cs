@@ -8,6 +8,7 @@ namespace Agentica.Clients.Llm;
 public sealed class LlmAttemptCapture
 {
     private LlmAttemptEvidence? _latest;
+    private LlmWebSearchEvidence? _latestWebSearch;
     private int _claimed;
 
     public LlmAttemptCapture(LlmAttemptReferences references)
@@ -18,6 +19,11 @@ public sealed class LlmAttemptCapture
 
     public LlmAttemptReferences References { get; }
     public LlmAttemptEvidence? Latest => Volatile.Read(ref _latest);
+
+    /// <summary>External search output, separate from structural attempt receipts. Persist only under host output policy.</summary>
+    public LlmWebSearchEvidence? LatestWebSearch => Volatile.Read(ref _latestWebSearch);
+
+    internal void PublishWebSearch(LlmWebSearchEvidence evidence) => Volatile.Write(ref _latestWebSearch, evidence);
 
     internal void Claim()
     {
@@ -67,6 +73,8 @@ internal sealed class LlmAttemptRecorder
     }
 
     public LlmAttemptEvidence Evidence => _capture.Latest!;
+    public LlmWebSearchEvidence? WebSearch => _capture.LatestWebSearch;
+    public void ObserveWebSearch(LlmWebSearchEvidence evidence) => _capture.PublishWebSearch(evidence);
 
     public static LlmAttemptRecorder Start(LlmRequest request, string providerName, string effectiveModelId)
     {

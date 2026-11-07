@@ -11,6 +11,8 @@ internal static class LlmProviderAttempt
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var recorder = LlmAttemptRecorder.Start(request, providerName, modelId);
+        if (request.WebSearch is not null && providerName != "openai")
+            throw Failure(recorder, providerName, "Provider-native web search is not implemented for this route.", "unsupported_web_search");
         IAsyncEnumerator<LlmStreamEvent>? enumerator = null;
         LlmStreamEvent? completed = null;
         var delivered = false;
@@ -44,7 +46,7 @@ internal static class LlmProviderAttempt
                 }
                 if (completed is not null)
                     throw Failure(recorder, providerName, "Stream data followed completion.", "data_after_completion");
-                yield return item with { AttemptEvidence = recorder.Evidence };
+                yield return item with { AttemptEvidence = recorder.Evidence, WebSearch = recorder.WebSearch };
             }
             try
             {
@@ -68,8 +70,9 @@ internal static class LlmProviderAttempt
             delivered = true;
             yield return completed with
             {
-                Response = response with { AttemptEvidence = evidence },
-                AttemptEvidence = evidence
+                Response = response with { AttemptEvidence = evidence, WebSearch = recorder.WebSearch },
+                AttemptEvidence = evidence,
+                WebSearch = recorder.WebSearch
             };
         }
         finally
@@ -114,11 +117,13 @@ internal static class LlmProviderAttempt
     {
         RetainFailure(recorder, exception);
         if (exception is OperationCanceledException or LlmClientException) return exception;
-        return new LlmClientException(recorder.Evidence.ProviderName,
+        var failure = new LlmClientException(recorder.Evidence.ProviderName,
             "Provider stream could not be delivered completely.", exception,
             exception is IOException ? LlmClientErrorKind.Network : LlmClientErrorKind.Unknown,
             errorClass: "stream_delivery_failed")
         { AttemptEvidence = recorder.Evidence };
+        failure.RetainWebSearch(recorder.WebSearch);
+        return failure;
     }
 
     internal static void RetainFailure(LlmAttemptRecorder recorder, Exception exception)
@@ -127,6 +132,10 @@ internal static class LlmProviderAttempt
             recorder.Evidence.DispatchCertainty == LlmDispatchCertainty.NotDispatched ?
                 LlmAttemptOutcome.Rejected : LlmAttemptOutcome.Failed,
             exception is OperationCanceledException ? "cancelled" : "client_failure");
-        if (exception is LlmClientException failure) failure.RetainAttemptEvidence(evidence);
+        if (exception is LlmClientException failure)
+        {
+            failure.RetainAttemptEvidence(evidence);
+            failure.RetainWebSearch(recorder.WebSearch);
+        }
     }
 }

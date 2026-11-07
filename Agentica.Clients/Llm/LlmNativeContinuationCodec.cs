@@ -167,8 +167,12 @@ public static class LlmNativeContinuationCodec
         if (provider != expected.ProviderName) return LlmNativeContinuationRejection.ProviderMismatch;
         var apiMode = provider switch
         {
-            "openai" or "xai" => "responses", "anthropic" => "messages", "ollama" => "chat",
-            "Gemini" => "interactions", "Gemini.GenerateContent" => "generate_content", _ => null
+            "openai" or "xai" => "responses",
+            "anthropic" => "messages",
+            "ollama" => "chat",
+            "Gemini" => "interactions",
+            "Gemini.GenerateContent" => "generate_content",
+            _ => null
         };
         if (apiMode is null) return LlmNativeContinuationRejection.UnsupportedProvider;
         if (expected.ApiMode != apiMode) return LlmNativeContinuationRejection.UnsupportedApiMode;
@@ -211,6 +215,11 @@ public static class LlmNativeContinuationCodec
                 case "xai":
                     if (role == "user" && type is null or "message" && String(item, "content") is not null) break;
                     if (type == "reasoning" && !string.IsNullOrWhiteSpace(String(item, "encrypted_content"))) { outputObserved = true; break; }
+                    if (provider == "openai" && type == "web_search_call")
+                    {
+                        if (!ValidWebSearchCall(item)) return false;
+                        break;
+                    }
                     if (type != "message" || role != "assistant" || !Array(item, "content", out var responseParts) ||
                         responseParts.EnumerateArray().Any(part => String(part, "type") != "output_text" || String(part, "text") is null)) return false;
                     outputObserved = true;
@@ -254,6 +263,24 @@ public static class LlmNativeContinuationCodec
             }
         }
         return outputObserved;
+    }
+
+    private static bool ValidWebSearchCall(JsonElement item)
+    {
+        var id = String(item, "id");
+        if (string.IsNullOrWhiteSpace(id) || id.Length > 512 || id.Any(char.IsControl) ||
+            String(item, "status") is not ("in_progress" or "searching" or "completed" or "failed") ||
+            !item.TryGetProperty("action", out var action) || action.ValueKind != JsonValueKind.Object) return false;
+        var type = String(action, "type");
+        if (type is not ("search" or "open_page" or "find_in_page")) return false;
+        if (type is "open_page" or "find_in_page" && String(action, "url") is null) return false;
+        if (type == "find_in_page" && String(action, "pattern") is null) return false;
+        if (action.TryGetProperty("query", out var query) && query.ValueKind != JsonValueKind.String) return false;
+        if (action.TryGetProperty("queries", out var queries) &&
+            (queries.ValueKind != JsonValueKind.Array || queries.EnumerateArray().Any(value => value.ValueKind != JsonValueKind.String))) return false;
+        if (action.TryGetProperty("sources", out var sources) &&
+            (sources.ValueKind != JsonValueKind.Array || sources.EnumerateArray().Any(value => value.ValueKind != JsonValueKind.Object))) return false;
+        return true;
     }
 
     private static bool ValidGeminiPart(JsonElement part)
