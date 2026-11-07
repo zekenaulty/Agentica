@@ -20,7 +20,13 @@ internal sealed record AttemptEvidence(string AttemptId, string OperationId, str
     string RequestIdentity, string BodyHash, DispatchState Dispatch, AcceptanceState Acceptance,
     int? StatusCode = null, string? ProviderRequestId = null, long? InputTokens = null, string? ErrorCode = null);
 
-internal sealed class InMemoryAttemptJournal
+internal interface IEmbeddingAttemptJournal
+{
+    void Reserve(AttemptEvidence evidence);
+    void Update(string id, Func<AttemptEvidence, AttemptEvidence> update);
+}
+
+internal sealed class InMemoryAttemptJournal : IEmbeddingAttemptJournal
 {
     private readonly Dictionary<string, AttemptEvidence> _records = new(StringComparer.Ordinal);
     public bool RejectReservation { get; init; }
@@ -45,7 +51,7 @@ internal sealed class EmbeddingAttempt : IDisposable
     private readonly MemoryEmbeddingProfile _profile;
     private readonly MemoryEmbeddingPurpose _purpose;
     private readonly SourceInput[] _sources;
-    private readonly InMemoryAttemptJournal _journal;
+    private readonly IEmbeddingAttemptJournal _journal;
     private readonly HttpClient _http;
     private readonly OpenAiEmbeddingClient _client;
     private int _started;
@@ -53,7 +59,7 @@ internal sealed class EmbeddingAttempt : IDisposable
 
     public EmbeddingAttempt(string attemptId, string operationId, string scopeId,
         MemoryEmbeddingProfile profile, MemoryEmbeddingPurpose purpose, IReadOnlyList<SourceInput> sources,
-        InMemoryAttemptJournal journal, HttpMessageHandler physicalTransport)
+        IEmbeddingAttemptJournal journal, HttpMessageHandler physicalTransport)
     {
         _attemptId = Id(attemptId);
         _operationId = Id(operationId);

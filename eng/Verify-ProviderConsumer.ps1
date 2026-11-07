@@ -19,6 +19,7 @@ $sourceRoot = Join-Path $PSScriptRoot 'provider-consumer'
 $previousCliHome = $env:DOTNET_CLI_HOME
 $previousCertificateGeneration = $env:DOTNET_GENERATE_ASPNET_CERTIFICATE
 $previousTelemetryOptOut = $env:DOTNET_CLI_TELEMETRY_OPTOUT
+$previousConsumerDotnet = $env:AGENTICA_PROVIDER_CONSUMER_DOTNET
 $env:DOTNET_CLI_HOME = Join-Path $runRoot 'cli-home'
 $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
@@ -44,7 +45,9 @@ try {
     }
 
     # Copy a standalone consumer: no project reference and no shared mutable output/cache.
-    foreach ($file in @('ProviderConsumer.csproj', 'Program.cs', 'EmbeddingAttempt.cs')) {
+    foreach ($file in @('ProviderConsumer.csproj', 'Program.cs', 'EmbeddingAttempt.cs',
+        'BridgeContractFixtures.cs', 'RecoveryHost.cs', 'RecoveryTransport.cs', 'RecoveryCases.cs',
+        'EmbeddingRecoveryCases.cs')) {
         Copy-Item -LiteralPath (Join-Path $sourceRoot $file) -Destination $consumer
     }
     Copy-Item -LiteralPath (Join-Path $repositoryRoot 'global.json') -Destination $consumer
@@ -81,11 +84,13 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Packed provider consumer restore failed.' }
     & $DotnetPath build $projectPath --configuration $Configuration --no-restore "-p:GoogleConsumerVersion=$GoogleConsumerVersion" "-p:AgenticaPackageVersion=$version"
     if ($LASTEXITCODE -ne 0) { throw 'Packed provider consumer build failed.' }
+    $env:AGENTICA_PROVIDER_CONSUMER_DOTNET = (Get-Command $DotnetPath).Source
     $output = & $DotnetPath run --project $projectPath --configuration $Configuration --no-build --no-restore
     $runCode = $LASTEXITCODE
-    $output | Tee-Object -FilePath (Join-Path $runRoot 'a5-results.log')
-    if ($runCode -ne 0 -or $output -notcontains 'agentica-provider-consumer-a5-ok') {
-        throw 'Packed provider consumer did not complete the A5 scenarios.'
+    $output | Tee-Object -FilePath (Join-Path $runRoot 'provider-consumer-results.log')
+    if ($runCode -ne 0 -or $output -notcontains 'agentica-provider-consumer-a5-ok' -or
+        $output -notcontains 'agentica-provider-consumer-p08-ok') {
+        throw 'Packed provider consumer did not complete A5 and P08 recovery scenarios.'
     }
 
     # Prove the package cache contains these just-produced bytes, not an older
@@ -97,12 +102,13 @@ try {
         $restoredHash = (Get-FileHash -LiteralPath $restoredPath -Algorithm SHA256).Hash
         if ($packedHash -ne $restoredHash) { throw "Consumer restored different '$id' package bytes." }
     }
-    Write-Host "A5 packed consumer passed. Retained local evidence: $runRoot"
-    Write-Host 'Full P08 LLM/recovery/new-contract qualification and installed Bridge remain NOT-RUN.'
+    Write-Host "A5 and P08 packed consumer passed. Retained local evidence: $runRoot"
+    Write-Host 'Offline synthetic host qualification only; live providers and installed Bridge remain NOT-RUN.'
 }
 finally {
     $env:DOTNET_CLI_HOME = $previousCliHome
     $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = $previousCertificateGeneration
     $env:DOTNET_CLI_TELEMETRY_OPTOUT = $previousTelemetryOptOut
+    $env:AGENTICA_PROVIDER_CONSUMER_DOTNET = $previousConsumerDotnet
     Pop-Location
 }
