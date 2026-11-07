@@ -30,7 +30,7 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentI
     {
         _configuration = configuration;
         _ownsHttp = httpClient is null;
-        _http = httpClient ?? new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        _http = httpClient ?? new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
         _plannerFactory = plannerFactory;
     }
 
@@ -40,37 +40,42 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentI
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(settings.TimeoutSeconds));
         var state = new DirectState(context, settings.AmbientWebSearch, "assistant");
-        using var transport = new ExperimentProviderTransport(_http, context,
-            settings.Mode == "clean-room" ? state.ObserveAsync : null);
+        using var transport = new ExperimentProviderTransport(_http, context);
         using var observed = new HttpClient(transport) { Timeout = Timeout.InfiniteTimeSpan };
         try
         {
+            var snapshot = _configuration.Capture();
+            var key = snapshot.ApiKey ?? throw new ExperimentException("provider.not_configured", "Configure the existing OpenAI provider credential before sending a turn.");
+            transport.AttachCounter(context.InputTokenCounter ?? new OpenAiExperimentInputTokenCounter(_http, key, settings.MaxProviderCalls + 32),
+                ownsCounter: context.InputTokenCounter is null, key);
             if (settings.MemoryEnabled)
                 throw new ExperimentException("memory.disabled", "The experiment memory adapter is not enabled.");
             if (settings.Mode == "harness" && settings.AmbientWebSearch)
                 throw new ExperimentException("search.ambient_mode", "Ambient provider search is available in Clean Room mode. Bind web.search explicitly for Harness mode.");
             return settings.Mode == "harness"
-                ? await HarnessAsync(context, observed, transport, deadline.Token).ConfigureAwait(false)
-                : await DirectAsync(context, state, observed, transport, deadline.Token).ConfigureAwait(false);
+                ? await HarnessAsync(context, observed, transport, key, deadline.Token).ConfigureAwait(false)
+                : await DirectAsync(context, state, observed, transport, key, deadline.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
             return new(cancellationToken.IsCancellationRequested ? "cancelled" : "failed", state.Text.ToString(),
-                new { providerCalls = transport.Calls }, cancellationToken.IsCancellationRequested ? "turn.cancelled" : "turn.timeout",
+                new { providerCalls = transport.Calls, attempts = transport.Attempts, webSearchOutcomes = transport.SearchOutcomes, telemetryDeliveryFailed = transport.TelemetryDeliveryFailed, provider = state.Usage }, cancellationToken.IsCancellationRequested ? "turn.cancelled" : "turn.timeout",
                 cancellationToken.IsCancellationRequested ? "Turn cancelled. Partial output is retained." : "The turn time limit expired. No automatic retry was made.");
         }
         catch (ExperimentException exception)
         {
-            return new("failed", state.Text.ToString(), new { providerCalls = transport.Calls }, exception.Code, exception.Message);
+            return new("failed", state.Text.ToString(), new { providerCalls = transport.Calls, attempts = transport.Attempts, webSearchOutcomes = transport.SearchOutcomes, telemetryDeliveryFailed = transport.TelemetryDeliveryFailed, provider = state.Usage }, exception.Code, exception.Message);
         }
         catch (LlmClientException exception)
         {
-            return new("failed", state.Text.ToString(), new { providerCalls = transport.Calls },
-                "provider." + (exception.ErrorClass ?? "failure"), "The provider could not complete the configured request. No automatic retry was made.");
+            return new("failed", state.Text.ToString(), new { providerCalls = transport.Calls, attempts = transport.Attempts, webSearchOutcomes = transport.SearchOutcomes, telemetryDeliveryFailed = transport.TelemetryDeliveryFailed, provider = state.Usage },
+                transport.AdmissionFailure ?? transport.ProviderErrorCode ?? "provider." + (exception.ErrorClass switch
+                { "stream_incomplete" => "incomplete_stream", "unsupported_output_item" => "unsupported_item", _ => exception.ErrorClass ?? "failure" }),
+                transport.ProviderErrorMessage ?? "The provider could not complete the configured request. No automatic retry was made.");
         }
         catch (Exception exception) when (exception is HttpRequestException or IOException or JsonException or InvalidOperationException)
         {
-            return new("failed", state.Text.ToString(), new { providerCalls = transport.Calls }, "provider.stream_failed",
+            return new("failed", state.Text.ToString(), new { providerCalls = transport.Calls, attempts = transport.Attempts, webSearchOutcomes = transport.SearchOutcomes, telemetryDeliveryFailed = transport.TelemetryDeliveryFailed, provider = state.Usage }, "provider.stream_failed",
                 "The provider stream did not complete. Partial output is retained; no automatic retry was made.");
         }
     }
@@ -111,51 +116,17 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentI
     }
 
     private async Task<ExperimentExecutionResult> DirectAsync(ExperimentExecutionContext context, DirectState state,
-        HttpClient client, ExperimentProviderTransport transport, CancellationToken cancellationToken)
+        HttpClient client, ExperimentProviderTransport transport, string key, CancellationToken cancellationToken)
     {
         var settings = context.Turn.Settings;
         if (settings.EnabledTools.Count != 0)
             throw new ExperimentException("tools.require_harness", "Enable Harness mode to bind experiment tools.");
-        var snapshot = _configuration.Capture();
-        if (snapshot.ApiKey is null)
-            throw new ExperimentException("provider.not_configured", "Configure the existing OpenAI provider credential before sending a turn.");
-        var envelope = ExperimentDirectRequest.Build(settings, context.History, context.Turn.UserText,
+        var request = ExperimentDirectRequest.Create(settings, context.History, context.Turn.UserText,
             settings.ThreadRecallEnabled ? context.Recall : null);
-        using var request = new HttpRequestMessage(HttpMethod.Post, OpenAiResponsesClientOptions.DefaultEndpoint)
-        {
-            Content = new ByteArrayContent(envelope.Utf8)
-        };
-        request.Content.Headers.ContentType = new("application/json") { CharSet = "utf-8" };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", snapshot.ApiKey);
-        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-            return new("failed", ErrorCode: transport.ProviderErrorCode ?? "provider.http_" + (int)response.StatusCode,
-                ErrorMessage: transport.ProviderErrorMessage ?? "OpenAI rejected the configured request. No fallback or retry was made.",
-                Usage: new { providerCalls = transport.Calls });
-        if (response.Content.Headers.ContentType?.MediaType != "text/event-stream")
-            throw new ExperimentException("provider.content_type", "The provider did not return the requested event stream.");
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        var buffer = new byte[8192];
-        while (await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false) != 0) { }
-        if (!state.Completed)
-            return new("failed", state.Text.ToString(), new
-            { providerCalls = transport.Calls, provider = state.Usage, webSearchUsage = settings.AmbientWebSearch ? "unsettled; inspect retained native events" : "disabled" },
-                state.ErrorCode ?? "provider.incomplete_stream", state.ErrorMessage ?? "The provider stream ended without a completed response. No retry was made.");
-        if (state.WebSearchCalls > settings.MaxWebSearchCalls)
-            throw new ExperimentException("web.search.provider_limit", "The provider returned more web-search calls than the requested ceiling.");
-        if (state.FinalText is { } final && state.Text.Length == 0)
-        {
-            state.Text.Append(final);
-            await context.Output(final).ConfigureAwait(false);
-        }
-        else if (state.FinalText is { } authoritative && authoritative != state.Text.ToString())
-            await context.Trace(new("provider.output.reconciled", new
-            {
-                source = "completed provider output items",
-                streamedCharacters = state.Text.Length,
-                finalCharacters = authoritative.Length,
-                note = "Completed output differs from deltas; terminal transcript uses the provider's completed text."
-            }, transport.LatestCallId)).ConfigureAwait(false);
+        var shared = new ExperimentPreparedClient(new OpenAiResponsesClientOptions(key, settings.Model) { IncludeEncryptedReasoning = false },
+            client, transport, context, "clean-room");
+        await foreach (var item in shared.StreamAsync(request, cancellationToken).ConfigureAwait(false))
+            await state.ObserveAsync(item, transport.LatestCallId, transport.RedactText).ConfigureAwait(false);
         await context.Trace(new("provider.continuity", new
         {
             mode = "transcript-only",
@@ -165,16 +136,18 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentI
             providerCalls = transport.Calls
         }, transport.LatestCallId)).ConfigureAwait(false);
         return new("completed", state.FinalText ?? state.Text.ToString(), new
-        { providerCalls = transport.Calls, webSearchCalls = state.WebSearchCalls, provider = state.Usage });
+        { providerCalls = transport.Calls, attempts = transport.Attempts, webSearchOutcomes = transport.SearchOutcomes, telemetryDeliveryFailed = transport.TelemetryDeliveryFailed, webSearchCalls = state.WebSearchCalls, provider = state.Usage });
     }
 
     private async Task<ExperimentExecutionResult> HarnessAsync(ExperimentExecutionContext context, HttpClient observed,
-        ExperimentProviderTransport transport, CancellationToken cancellationToken)
+        ExperimentProviderTransport transport, string key, CancellationToken cancellationToken)
     {
         var settings = context.Turn.Settings;
         using var ownedFactory = _plannerFactory is null ? new LabPlannerFactory(observed,
             openAiConfiguration: _configuration, useStatelessPlanRepair: true, inputBudgetOwnedByChatTransport: true,
-            compiledInputCharacterLimit: settings.MaxInputCharacters) : null;
+            compiledInputCharacterLimit: settings.MaxInputCharacters,
+            decorateClient: _ => new ExperimentPreparedClient(new(key, settings.Model),
+                observed, transport, context, "harness")) : null;
         var factory = _plannerFactory ?? ownedFactory!;
         void Stream(LlmStreamEvent item) => context.Trace(new("planner.stream", new
         {
@@ -190,7 +163,7 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentI
         var webBudget = new WebSearchBudget(settings.MaxWebSearchCalls);
         if (settings.EnabledTools.Contains("web.search", StringComparer.Ordinal))
             registrations.Add(ExperimentWebSearch.CreateRegistration(context,
-                (query, token) => SearchAsync(context, query, observed, transport, webBudget, token)));
+                (query, token) => SearchAsync(context, query, observed, transport, webBudget, key, token)));
         registrations.Add(ResponseRegistration());
         var runner = new AgenticaRunner(planner, ToolCatalog.Create(registrations.ToArray()), new TraceSink(context),
             new DeterministicOutcomeReporter(), new ExecutionPolicy(MaxSteps: settings.MaxSteps,
@@ -219,6 +192,9 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentI
             status = envelope.Outcome.Status.ToString(),
             stopReason = envelope.Outcome.StopReason.ToString(),
             envelope.Outcome.CompletionEvidence,
+            residualObligations = envelope.Outcome.Status == RunOutcomeStatus.Succeeded
+                ? Array.Empty<string>() : new[] { "Produce a host-accepted response artifact for the current user turn." },
+            blockers = envelope.Outcome.Blockers,
             receipts = envelope.Receipts.Items,
             artifacts = envelope.Details.Artifacts,
             plans = envelope.Details.PlanVersions,
@@ -228,6 +204,9 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentI
             envelope.Details.ValidationIssues,
             eventDeliveryFailure = envelope.Details.EventDeliveryFailure,
             providerCalls = transport.Calls,
+            attempts = transport.Attempts,
+            webSearchOutcomes = transport.SearchOutcomes,
+            telemetryDeliveryFailed = transport.TelemetryDeliveryFailed,
             webSearchCalls = webBudget.CompletedCalls,
             unresolvedWebSearchReservation = webBudget.UnresolvedReservation,
             nativeContinuation = "run-session-only; transcript replay between turns"
@@ -240,6 +219,9 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentI
             return new("completed", answer, new
             {
                 providerCalls = transport.Calls,
+                attempts = transport.Attempts,
+                webSearchOutcomes = transport.SearchOutcomes,
+                telemetryDeliveryFailed = transport.TelemetryDeliveryFailed,
                 webSearchCalls = webBudget.CompletedCalls,
                 unresolvedWebSearchReservation = webBudget.UnresolvedReservation,
                 runnerRunId = envelope.Outcome.RunId
@@ -249,6 +231,9 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentI
             new
             {
                 providerCalls = transport.Calls,
+                attempts = transport.Attempts,
+                webSearchOutcomes = transport.SearchOutcomes,
+                telemetryDeliveryFailed = transport.TelemetryDeliveryFailed,
                 webSearchCalls = webBudget.CompletedCalls,
                 unresolvedWebSearchReservation = webBudget.UnresolvedReservation,
                 runnerRunId = envelope.Outcome.RunId
@@ -259,48 +244,30 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentI
     }
 
     private async Task<object> SearchAsync(ExperimentExecutionContext context, string query, HttpClient observed,
-        ExperimentProviderTransport transport, WebSearchBudget budget, CancellationToken cancellationToken)
+        ExperimentProviderTransport transport, WebSearchBudget budget, string key, CancellationToken cancellationToken)
     {
         var allowance = budget.Reserve();
         var settings = context.Turn.Settings;
-        var key = _configuration.Capture().ApiKey ?? throw new ExperimentException("provider.not_configured", "The OpenAI provider credential is not configured.");
-        var body = new Dictionary<string, object?>
+        var request = OpenAiWebSearch.CreateRequest(settings.Model, query, ExperimentDirectRequest.Generation(settings), allowance)
+            with
         {
-            ["model"] = settings.Model,
-            ["input"] = new[] { new { role = "user", content = query } },
-            ["store"] = false,
-            ["stream"] = true,
-            ["max_output_tokens"] = settings.MaxOutputTokens
+            OpenAiHistoryMode = OpenAiHistoryMode.TranscriptOnly,
+            WebSearch = new(LlmWebSearchMode.Required, allowance, LlmCitationIndexUnit.Utf16CodeUnits)
         };
-        var reasoning = new Dictionary<string, object?>();
-        if (settings.ReasoningEffort is not null) reasoning["effort"] = settings.ReasoningEffort;
-        if (settings.ReasoningSummary) reasoning["summary"] = "auto";
-        if (reasoning.Count != 0) body["reasoning"] = reasoning;
-        ExperimentDirectRequest.AddWebSearch(body, "required", allowance);
         var state = new DirectState(context with { Output = _ => Task.CompletedTask }, allowWebSearch: true, target: "tool");
-        using var request = new HttpRequestMessage(HttpMethod.Post, OpenAiResponsesClientOptions.DefaultEndpoint)
+        var shared = new ExperimentPreparedClient(new OpenAiResponsesClientOptions(key, settings.Model) { IncludeEncryptedReasoning = false },
+            observed, transport, context, "web-search-query");
+        try
         {
-            Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json")
-        };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
-        request.Options.Set(ExperimentProviderTransport.NativeObserverOption, state.ObserveAsync);
-        request.Options.Set(ExperimentProviderTransport.PurposeOption, "web-search-query");
-        using var response = await observed.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-            throw new ExperimentException(transport.ProviderErrorCode ?? "provider.search_failed",
-                transport.ProviderErrorMessage ?? "The provider rejected the web-search request; no fallback was used.");
-        if (response.Content.Headers.ContentType?.MediaType != "text/event-stream")
-            throw new ExperimentException("provider.content_type", "The web-search response did not return the requested event stream.");
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        var buffer = new byte[8192];
-        while (await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false) != 0) { }
-        if (!state.Completed)
-            throw new ExperimentException(state.ErrorCode ?? "provider.search_incomplete", "Web search did not complete. Its reserved search allowance remains unavailable; no automatic retry was made.");
+            await foreach (var item in shared.StreamAsync(request, cancellationToken).ConfigureAwait(false))
+                await state.ObserveAsync(item, transport.LatestCallId, transport.RedactText).ConfigureAwait(false);
+        }
+        catch (LlmClientException error)
+        {
+            throw new ExperimentException(transport.AdmissionFailure ?? transport.ProviderErrorCode ?? "provider." + error.ErrorClass,
+                "The search did not complete. Its reserved allowance remains unavailable; no automatic retry was made.");
+        }
         budget.Complete(allowance, state.WebSearchCalls);
-        if (state.WebSearchCalls == 0)
-            throw new ExperimentException("web.search.not_performed", "The provider completed without an observable web-search call despite required search. No search result is claimed.");
-        if (state.CompletedWebSearchCalls == 0)
-            throw new ExperimentException("web.search.not_completed", "The provider did not report a completed web-search call. No successful search result is claimed.");
         return new
         {
             query,
@@ -399,117 +366,55 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentI
         public bool ReferencesTruncated { get; private set; }
         public List<Dictionary<string, object?>> Citations { get; } = [];
         public List<Dictionary<string, object?>> Sources { get; } = [];
-        public async Task ObserveAsync(string callId, JsonElement item)
+        public async Task ObserveAsync(LlmStreamEvent item, string? callId, Func<string?, string?> redact)
         {
-            var type = ExperimentProviderTransport.String(item, "type");
-            if (Completed || ErrorCode is not null) throw new ExperimentException("provider.after_terminal", "Provider sent events after a terminal response.");
-            if (type == "response.output_text.delta")
+            if (item.Kind == LlmStreamEventKind.TextDelta && redact(item.Text) is { } delta)
             {
-                var delta = ExperimentProviderTransport.String(item, "delta") ?? "";
                 if (Text.Length + delta.Length > 200_000)
                     throw new ExperimentException("provider.output_limit", "Provider output exceeded the retained text limit.");
                 Text.Append(delta);
                 await context.Output(delta).ConfigureAwait(false);
             }
-            else if (type == "response.reasoning_summary_text.delta") SummaryEmitted = true;
-            else if ((type is "response.output_item.added" or "response.output_item.done") && item.TryGetProperty("item", out var lifecycle) &&
-                ExperimentProviderTransport.String(lifecycle, "type") == "web_search_call")
-                await context.Trace(new("provider.web-search", new { target, phase = type, item = lifecycle.Clone() }, callId,
-                    ExperimentProviderTransport.String(lifecycle, "id"))).ConfigureAwait(false);
-            else if (type == "response.completed" && item.TryGetProperty("response", out var response))
+            if (item.Kind == LlmStreamEventKind.ThoughtSummaryDelta) SummaryEmitted = true;
+            if (item.Kind != LlmStreamEventKind.Completed || item.Response is not { } response) return;
+            if (response.Text.Length is < 1 or > 200_000)
+                throw new ExperimentException("provider.output_limit", "Provider completed without bounded assistant text.");
+            FinalText = redact(response.Text)!;
+            ResponseId = redact(response.AttemptEvidence?.ProviderResponseId);
+            Usage = response.Usage;
+            Completed = true;
+            if (Text.Length == 0)
             {
-                ResponseId = ExperimentProviderTransport.String(response, "id");
-                var status = ExperimentProviderTransport.String(response, "status");
-                if (status is not (null or "completed")) { ErrorCode = "provider." + status; return; }
-                if (response.TryGetProperty("usage", out var usage)) Usage = ExperimentProviderTransport.Sanitize(usage);
-                var final = new StringBuilder();
-                if (!response.TryGetProperty("output", out var output) || output.ValueKind != JsonValueKind.Array)
-                    throw new ExperimentException("provider.missing_output", "The provider completed without output items.");
-                foreach (var native in output.EnumerateArray())
-                {
-                    var nativeType = ExperimentProviderTransport.String(native, "type");
-                    if (nativeType == "reasoning") continue;
-                    if (nativeType == "web_search_call" && allowWebSearch)
-                    {
-                        WebSearchCalls++;
-                        if (ExperimentProviderTransport.String(native, "status") == "completed")
-                        {
-                            CompletedWebSearchCalls++;
-                            if (native.TryGetProperty("action", out var action) && action.TryGetProperty("sources", out var sources) && sources.ValueKind == JsonValueKind.Array)
-                                foreach (var source in sources.EnumerateArray()) AddSource(source);
-                        }
-                        await context.Trace(new("provider.web-search", new { target, phase = "completed-output", item = native.Clone() }, callId,
-                            ExperimentProviderTransport.String(native, "id"))).ConfigureAwait(false);
-                        continue;
-                    }
-                    if (nativeType != "message")
-                        throw new ExperimentException("provider.unsupported_item", "The response contains an unbound output item. Its native record is retained; no local execution was dispatched for that item.");
-                    if (!native.TryGetProperty("content", out var contents) || contents.ValueKind != JsonValueKind.Array) continue;
-                    foreach (var part in contents.EnumerateArray())
-                    {
-                        if (ExperimentProviderTransport.String(part, "type") == "refusal")
-                            throw new ExperimentException("provider.refusal", "The provider refused this request.");
-                        if (ExperimentProviderTransport.String(part, "type") == "output_text")
-                        {
-                            var offset = final.Length;
-                            final.Append(ExperimentProviderTransport.String(part, "text"));
-                            if (part.TryGetProperty("annotations", out var annotations) && annotations.ValueKind == JsonValueKind.Array)
-                                foreach (var annotation in annotations.EnumerateArray()) AddCitation(annotation, offset);
-                        }
-                    }
-                }
-                if (final.Length > 200_000) throw new ExperimentException("provider.output_limit", "Provider output exceeded the retained text limit.");
-                if (final.Length == 0) throw new ExperimentException("provider.empty_output", "The provider completed without assistant text.");
-                FinalText = final.ToString(); Completed = true;
-                if (allowWebSearch)
-                    await context.Trace(new("provider.citations", new
-                    {
-                        target,
-                        citations = Citations,
-                        sources = Sources,
-                        responseId = ResponseId,
-                        webSearchCalls = WebSearchCalls,
-                        referencesTruncated = ReferencesTruncated
-                    }, callId)).ConfigureAwait(false);
+                Text.Append(FinalText);
+                await context.Output(FinalText).ConfigureAwait(false);
             }
-            else if (type is "response.failed" or "response.incomplete" or "error")
+            if (!allowWebSearch || response.WebSearch is not { } search) return;
+            WebSearchCalls = search.Calls.Count;
+            CompletedWebSearchCalls = search.CompletedCalls;
+            ReferencesTruncated = search.ReferencesTruncated;
+            Citations.AddRange(search.Citations.Select(citation => new Dictionary<string, object?>
             {
-                ErrorCode = type.Replace("response.", "provider.", StringComparison.Ordinal);
-                ErrorMessage = "The provider reported a failed or incomplete response. No automatic retry was made.";
-            }
-        }
-
-        private static string? WebUrl(JsonElement item)
-        {
-            var value = ExperimentProviderTransport.String(item, "url");
-            return value is { Length: <= 4096 } && Uri.TryCreate(value, UriKind.Absolute, out var url) && url.UserInfo.Length == 0 && url.Scheme is "http" or "https"
-                ? value : null;
-        }
-        private void AddSource(JsonElement source)
-        {
-            var url = WebUrl(source);
-            if (url is null || Sources.Any(item => (string?)item["url"] == url)) return;
-            if (Sources.Count >= 256) { ReferencesTruncated = true; return; }
-            Sources.Add(new() { ["url"] = url, ["title"] = ExperimentProviderTransport.String(source, "title") });
-        }
-        private void AddCitation(JsonElement citation, int offset)
-        {
-            if (ExperimentProviderTransport.String(citation, "type") != "url_citation") return;
-            var url = WebUrl(citation);
-            if (url is null) return;
-            if (Citations.Count >= 256) { ReferencesTruncated = true; return; }
-            Citations.Add(new()
+                ["url"] = redact(citation.Source.Url),
+                ["title"] = redact(citation.Source.Title),
+                ["startIndex"] = citation.AnswerStartIndex,
+                ["endIndex"] = citation.AnswerEndIndex,
+                ["providerStartIndex"] = citation.StartIndex,
+                ["providerEndIndex"] = citation.EndIndex,
+                ["outputIndex"] = citation.OutputIndex,
+                ["contentIndex"] = citation.ContentIndex
+            }));
+            Sources.AddRange(search.Sources.Select(source => new Dictionary<string, object?>
+            { ["url"] = redact(source.Url), ["title"] = redact(source.Title) }));
+            await context.Trace(new("provider.citations", new
             {
-                ["url"] = url,
-                ["title"] = ExperimentProviderTransport.String(citation, "title"),
-                ["startIndex"] = CitationIndex(citation, "start_index", offset),
-                ["endIndex"] = CitationIndex(citation, "end_index", offset)
-            });
-            AddSource(citation);
+                target,
+                citations = Citations,
+                sources = Sources,
+                responseId = ResponseId,
+                webSearchCalls = WebSearchCalls,
+                referencesTruncated = ReferencesTruncated
+            }, callId)).ConfigureAwait(false);
         }
-        private static int? CitationIndex(JsonElement citation, string property, int offset) =>
-            citation.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Number &&
-            value.TryGetInt32(out var index) && index >= 0 && index <= int.MaxValue - offset ? index + offset : null;
     }
 
     public void Dispose() { if (_ownsHttp) _http.Dispose(); }

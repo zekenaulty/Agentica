@@ -142,6 +142,7 @@ public sealed class GeminiGenerateContentLlmClient : ILlmStreamingClient
 
     internal static JsonObject BuildRequest(LlmRequest request, string model, out string instruction)
     {
+        LlmHistoryModeGuard.RequireNativeMode(request, ProviderName);
         if (request.Messages.Any(item => item.Role is not (LlmMessageRole.System or LlmMessageRole.Developer or LlmMessageRole.User)))
             throw Failure("native_history_required", LlmClientErrorKind.BadRequest);
         instruction = string.Join("\n\n", request.Messages

@@ -24,6 +24,9 @@ public sealed class LlmPreparedCallTests
         using var handler = new CaptureHandler();
         using var http = new HttpClient(handler);
         using var prepared = Prepare(mode, Request(), References(), http);
+        var report = Assert.IsType<LlmConfigurationReport>(prepared.ConfigurationReport);
+        Assert.Equal(prepared.Descriptor.ConfigurationIdentity, report.ConfigurationIdentity);
+        Assert.Equal(prepared.Descriptor.ModelId, report.EffectiveModelId);
         var admission = new Admission(descriptor =>
         {
             Assert.Equal(0, handler.Sends);

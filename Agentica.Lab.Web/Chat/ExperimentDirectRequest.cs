@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.Json;
 using Agentica.Lab.Web.Chat.Recall;
+using Agentica.Clients.Llm;
+using Agentica.Clients.OpenAI;
 
 namespace Agentica.Lab.Web.Chat;
 
@@ -21,40 +23,47 @@ internal static class ExperimentDirectRequest
     internal static Envelope Build(ExperimentSettings settings, IReadOnlyList<ExperimentMessage> history, string userText,
         ExperimentRecallContext? recall = null)
     {
-        var input = history.Select(message =>
-        {
-            if (message.Role is not ("user" or "assistant"))
-                throw new ExperimentException("context.role", "Only this conversation's visible user and assistant transcript may be replayed.");
-            return (object)new { role = message.Role, content = message.Content };
-        }).ToList();
-        if (recall is { Evidence.Count: > 0 })
-            input.Add(new
-            {
-                role = "user",
-                content = new[]
-            {
-                new { type = "input_text", text = FormatEvidence(recall) },
-                new { type = "input_text", text = userText }
-            }
-            });
-        else input.Add(new { role = "user", content = userText });
-        var body = new Dictionary<string, object?>
-        {
-            ["model"] = settings.Model,
-            ["input"] = input,
-            ["stream"] = true,
-            ["store"] = false,
-            ["max_output_tokens"] = settings.MaxOutputTokens
-        };
-        // Empty is omission; every character of a nonempty instruction is preserved.
-        if (settings.Instructions.Length != 0) body["instructions"] = settings.Instructions;
-        var reasoning = new Dictionary<string, object?>();
-        if (settings.ReasoningEffort is not null) reasoning["effort"] = settings.ReasoningEffort;
-        if (settings.ReasoningSummary) reasoning["summary"] = "auto";
-        if (reasoning.Count != 0) body["reasoning"] = reasoning;
-        if (settings.AmbientWebSearch) AddWebSearch(body, "auto", settings.MaxWebSearchCalls);
-        var utf8 = JsonSerializer.SerializeToUtf8Bytes(body);
+        using var prepared = LlmCallPreparation.Prepare(Create(settings, history, userText, recall),
+            new OpenAiResponsesClientOptions(ApiKey: "") { IncludeEncryptedReasoning = false },
+            new LlmAttemptReferences("lab-context-compilation"), "lab-context-compilation");
+        var utf8 = prepared.CopySensitiveRequestBody();
         return new(utf8, Encoding.UTF8.GetCharCount(utf8));
+    }
+
+    internal static LlmRequest Create(ExperimentSettings settings, IReadOnlyList<ExperimentMessage> history,
+        string userText, ExperimentRecallContext? recall = null)
+    {
+        var messages = new List<LlmMessage>();
+        if (settings.Instructions.Length != 0) messages.Add(new(LlmMessageRole.System, settings.Instructions));
+        foreach (var message in history)
+        {
+            var role = message.Role switch
+            {
+                "user" => LlmMessageRole.User,
+                "assistant" => LlmMessageRole.Assistant,
+                _ => throw new ExperimentException("context.role", "Only this conversation's visible user and assistant transcript may be replayed.")
+            };
+            messages.Add(new(role, message.Content));
+        }
+        // Historical evidence remains quoted input data in its own user message. Its
+        // original source role is carried in the evidence, never promoted to instructions.
+        if (recall is { Evidence.Count: > 0 }) messages.Add(new(LlmMessageRole.User, FormatEvidence(recall)));
+        messages.Add(new(LlmMessageRole.User, userText));
+        return new LlmRequest(settings.Model, messages, Generation(settings))
+        {
+            OpenAiHistoryMode = OpenAiHistoryMode.TranscriptOnly,
+            WebSearch = settings.AmbientWebSearch ? new(LlmWebSearchMode.Auto, settings.MaxWebSearchCalls,
+                LlmCitationIndexUnit.Utf16CodeUnits) : null
+        };
+    }
+
+    internal static LlmGenerationOptions Generation(ExperimentSettings settings)
+    {
+        var effort = settings.ReasoningEffort is { } value
+            ? Enum.Parse<LlmReasoningEffort>(value, ignoreCase: true) : (LlmReasoningEffort?)null;
+        return new(MaxOutputTokens: settings.MaxOutputTokens,
+            Thinking: effort is not null || settings.ReasoningSummary
+                ? new LlmThinkingOptions(IncludeThoughts: settings.ReasoningSummary, Effort: effort) : null);
     }
 
     internal static string FormatEvidence(ExperimentRecallContext recall) => JsonSerializer.Serialize(new
@@ -82,12 +91,4 @@ internal static class ExperimentDirectRequest
         }
     });
 
-    internal static void AddWebSearch(Dictionary<string, object?> body, string choice, int maximumCalls)
-    {
-        if (maximumCalls <= 0) throw new ExperimentException("web.search.call_limit", "The configured web-search call limit was reached.");
-        body["tools"] = new[] { new { type = "web_search" } };
-        body["tool_choice"] = choice;
-        body["include"] = new[] { "web_search_call.action.sources" };
-        body["max_tool_calls"] = maximumCalls;
-    }
 }

@@ -9,6 +9,34 @@ export const depthPresets = Object.freeze({
   deep: { maxHistoryMessages: 64, maxInputCharacters: 160000 },
   exhaustive: { maxHistoryMessages: 128, maxInputCharacters: 256000 }
 });
+export function usageLabel(usage) {
+  const attempts = usage?.attempts;
+  if (Array.isArray(attempts) && attempts.length) {
+    const totals = { input: 0, output: 0, reasoning: 0 }; const known = { input: false, output: false, reasoning: false };
+    let unknown = 0; let notDispatched = 0;
+    for (const attempt of attempts) {
+      if ((attempt.DispatchCertainty ?? attempt.dispatchCertainty) === 0) { notDispatched++; continue; }
+      const observed = attempt.Usage ?? attempt.usage;
+      if (!observed || [observed.PromptTokens ?? observed.promptTokens, observed.CompletionTokens ?? observed.completionTokens,
+        observed.ThinkingTokens ?? observed.thinkingTokens].every(value => value == null)) unknown++;
+      for (const [name, value] of [['input', observed?.PromptTokens ?? observed?.promptTokens],
+        ['output', observed?.CompletionTokens ?? observed?.completionTokens], ['reasoning', observed?.ThinkingTokens ?? observed?.thinkingTokens]]) {
+        if (Number.isSafeInteger(value) && value >= 0) { totals[name] += value; known[name] = true; }
+      }
+    }
+    const labels = Object.entries(totals).filter(([name]) => known[name]).map(([name, value]) => `${value.toLocaleString()} observed ${name} tokens`);
+    if (notDispatched) labels.push(`${notDispatched} attempt${notDispatched === 1 ? '' : 's'} not dispatched`);
+    if (unknown) labels.push(`${unknown} attempt${unknown === 1 ? '' : 's'} with usage unknown`);
+    return labels.join(' · ') || 'Usage unknown · inspect attempts';
+  }
+  const value = usage?.provider ?? usage ?? {};
+  const input = value.inputTokens ?? value.promptTokens ?? value.PromptTokens ?? value.input_tokens;
+  const output = value.outputTokens ?? value.completionTokens ?? value.CompletionTokens ?? value.output_tokens;
+  const reasoning = value.thinkingTokens ?? value.ThinkingTokens ?? value.reasoningTokens ?? value.output_tokens_details?.reasoning_tokens;
+  return [['input', input], ['output', output], ['reasoning', reasoning]].filter(([, count]) => count != null)
+    .map(([name, count]) => `${Number(count).toLocaleString()} ${name} tokens`).join(' · ') || 'Usage returned · inspect trace';
+}
+
 export function classifyEvent(event) {
   const type = String(event?.type ?? 'unknown');
   if (/fail|error|interrupt|cancel|gap|drop|loss/i.test(type)) return 'error';
@@ -336,7 +364,7 @@ function startChat() {
     const traceContent = node('div', 'trace-content'); const activity = node('div', 'trace-activity');
     const summary = node('section', 'trace-summary'); summary.append(node('h4', '', 'Provider reasoning summary')); const summaryText = node('pre'); summary.append(summaryText);
     const absence = node('p', 'trace-absence'); const coverage = node('p', 'trace-coverage');
-    const requestInspector = makeInspector('Effective provider request'); const contextInspector = makeInspector('Context manifest'); const nativeInspector = makeInspector('Native output items · sanitized'); const settingsInspector = makeInspector('Invocation settings snapshot');
+    const attemptInspector = makeInspector('Provider attempts & recovery'); const requestInspector = makeInspector('Effective provider request'); const contextInspector = makeInspector('Context manifest'); const nativeInspector = makeInspector('Native output items · sanitized'); const settingsInspector = makeInspector('Invocation settings snapshot');
     const searchInspector = makeInspector('Web search & sources'); const recallInspector = makeInspector('Thread recall evidence manifest'); recallInspector.links = node('div', 'recall-results'); recallInspector.section.append(recallInspector.links);
     const sourceInspector = makeInspector('Provider source records'); sourceInspector.body.remove();
     sourceInspector.section.append(node('p', 'trace-coverage', 'Allowed provider source events, with sensitive fields redacted. Private reasoning and opaque continuation carriers are not exposed. These records are separate from the normalized timeline and are not a replay carrier.'));
@@ -347,11 +375,11 @@ function startChat() {
     const restart = node('button', 'button secondary', 'Read from start'); restart.type = 'button'; restart.title = 'Reset only the browser trace window and reread retained pages. Makes no provider call.';
     const resumeLive = node('button', 'button secondary', 'Resume live'); resumeLive.type = 'button'; resumeLive.title = 'Show the latest bounded trace tail. Retained inspection remains available. Makes no provider call.';
     const pageInfo = node('span'); pageControls.append(load, restart, resumeLive, pageInfo);
-    traceContent.append(activity, summary, absence, coverage, requestInspector.section, contextInspector.section, recallInspector.section, searchInspector.section, nativeInspector.section, sourceInspector.section, settingsInspector.section, timelineSection, pageControls); trace.append(traceContent); article.append(trace);
-    const entry = { article, content, placeholder, answerSources, meta, error, continuity, trace, traceLabel, activity, summary, summaryText, absence, coverage, timeline, timelineSection, timelineLabel, requestInspector, contextInspector, nativeInspector, sourceInspector, searchInspector, recallInspector, load, resumeLive, pageInfo };
+    traceContent.append(activity, summary, absence, coverage, attemptInspector.section, requestInspector.section, contextInspector.section, recallInspector.section, searchInspector.section, nativeInspector.section, sourceInspector.section, settingsInspector.section, timelineSection, pageControls); trace.append(traceContent); article.append(trace);
+    const entry = { article, content, placeholder, answerSources, meta, error, continuity, trace, traceLabel, activity, summary, summaryText, absence, coverage, timeline, timelineSection, timelineLabel, attemptInspector, requestInspector, contextInspector, nativeInspector, sourceInspector, searchInspector, recallInspector, load, resumeLive, pageInfo };
     state.nodes.set(turn.id, entry); state.traces.set(turn.id, newTrace(turn));
     trace.addEventListener('toggle', () => { if (trace.open && !state.traces.get(turn.id)?.loaded) loadTrace(turn.id); });
-    for (const inspector of [timelineSection, requestInspector.section, contextInspector.section, nativeInspector.section, sourceInspector.section, searchInspector.section, recallInspector.section]) inspector.addEventListener('toggle', () => { if (inspector.open) renderTrace(turn.id); });
+    for (const inspector of [timelineSection, attemptInspector.section, requestInspector.section, contextInspector.section, nativeInspector.section, sourceInspector.section, searchInspector.section, recallInspector.section]) inspector.addEventListener('toggle', () => { if (inspector.open) renderTrace(turn.id); });
     load.addEventListener('click', () => loadTrace(turn.id));
     restart.addEventListener('click', () => {
       const retained = state.traces.get(turn.id); if (!retained || retained.loading) return;
@@ -401,10 +429,6 @@ function startChat() {
     elements.continuity.textContent = turn.continuity ? `Continuity: ${label(turn.continuity)}. This is distinct from provider-native reasoning replay.` : '';
     elements.traceLabel.textContent = `${isTerminal(turn.status) ? 'Inspect turn' : 'Live trace'} · ${(turn.traceCount ?? 0).toLocaleString()} retained events${turn.droppedTraceCount ? ` · ${turn.droppedTraceCount} dropped` : ''}`;
     if (isTerminal(turn.status) && (turn.settings?.ambientWebSearch || turn.settings?.enabledTools?.includes('web.search'))) hydrateCitations(turn.id);
-  }
-  function usageLabel(usage) {
-    const input = usage.inputTokens ?? usage.promptTokens; const output = usage.outputTokens ?? usage.completionTokens; const reasoning = usage.reasoningTokens ?? usage.outputTokensDetails?.reasoningTokens ?? usage.output_tokens_details?.reasoning_tokens;
-    return [['input', input], ['output', output], ['reasoning', reasoning]].filter(([, value]) => value !== undefined && value !== null).map(([name, value]) => `${Number(value).toLocaleString()} ${name} tokens`).join(' · ') || 'Usage returned · inspect trace';
   }
   function appendEvents(id, events, retained = false) {
     const trace = state.traces.get(id); if (!trace) return;
@@ -459,6 +483,14 @@ function startChat() {
     const latest = trace.events.at(-1); elements.activity.replaceChildren(node('span', `status-dot${isTerminal(turn.status) ? '' : ' busy'}`), node('span', '', latest ? `Latest activity: ${label(latest.type)}` : 'Waiting for retained trace'));
     const coverage = [trace.streamError, trace.gap, trace.inspecting ? 'Inspecting retained pages. Live activity continues separately; Resume live shows the latest tail.' : '', summary && !fullCoverage ? 'The summary shown covers this window only; inspect retained pages for other summary events.' : '', omitted ? `${omitted} events left this 1,000-event ${trace.inspecting ? 'inspection' : 'live'} window; the service trace remains available through Read from start.` : '', turn.droppedTraceCount ? `${turn.droppedTraceCount} service trace events were dropped. Coverage is incomplete.` : ''].filter(Boolean);
     elements.coverage.textContent = coverage.join(' '); elements.coverage.hidden = !coverage.length; elements.coverage.classList.toggle('warning', Boolean(coverage.length));
+    if (elements.attemptInspector.section.open) {
+      const attempts = events.filter(event => event.type === 'provider.attempt');
+      elements.attemptInspector.body.textContent = json({
+        savedUsage: turn.usage ?? null,
+        attempts: attempts.map(event => ({ callId: event.callId, data: event.data })),
+        note: 'Provider status and observed usage are distinct from delivery and host acceptance. Unknown usage is not zero. Unresolved dispatch is never automatically retried.'
+      });
+    }
     if (elements.requestInspector.section.open) {
       const requests = events.filter(event => event.type === 'provider.request');
       elements.requestInspector.body.textContent = requests.length ? json(requests.map(event => ({ sequence: event.sequence, callId: event.callId, data: event.data }))) : 'No provider request loaded. A pre-dispatch failure may have no request.';

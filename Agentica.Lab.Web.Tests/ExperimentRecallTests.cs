@@ -56,11 +56,10 @@ public sealed class ExperimentRecallTests
         using var json = JsonDocument.Parse(wire);
         Assert.False(json.RootElement.TryGetProperty("instructions", out _));
         Assert.False(json.RootElement.TryGetProperty("tools", out _));
-        var current = json.RootElement.GetProperty("input").EnumerateArray().Last();
-        var parts = current.GetProperty("content").EnumerateArray().ToArray();
-        Assert.Equal(2, parts.Length);
-        Assert.Equal(fixture.Turn.UserText, parts[1].GetProperty("text").GetString());
-        using var evidence = JsonDocument.Parse(parts[0].GetProperty("text").GetString()!);
+        var inputs = json.RootElement.GetProperty("input").EnumerateArray().ToArray();
+        Assert.Equal(fixture.Turn.UserText, inputs[^1].GetProperty("content").GetString());
+        Assert.Equal("user", inputs[^2].GetProperty("role").GetString());
+        using var evidence = JsonDocument.Parse(inputs[^2].GetProperty("content").GetString()!);
         var quote = Assert.Single(evidence.RootElement.GetProperty("historicalThreadEvidence").GetProperty("evidence").EnumerateArray());
         Assert.Equal("old:user", quote.GetProperty("sourceId").GetString());
         Assert.Equal(selected.Content, quote.GetProperty("quote").GetString());

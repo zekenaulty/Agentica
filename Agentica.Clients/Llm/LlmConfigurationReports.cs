@@ -126,6 +126,9 @@ public static class LlmConfigurationReports
         JsonElement wire = default;
         try
         {
+            if (request.OpenAiHistoryMode != OpenAiHistoryMode.NativeContinuation && provider != "openai")
+                throw new LlmClientException(provider, "OpenAI transcript mode is unsupported by this route.",
+                    errorKind: LlmClientErrorKind.BadRequest, errorClass: "unsupported_history_mode");
             if (request.WebSearch is not null && provider != "openai")
                 throw new LlmClientException(provider, "Provider-native web search is unsupported by this route.",
                     errorKind: LlmClientErrorKind.BadRequest, errorClass: "unsupported_web_search");
@@ -190,6 +193,8 @@ public static class LlmConfigurationReports
             endpoint = endpointIdentity,
             sdkRoute,
             providerConfiguration,
+            clientHistoryMode = request.OpenAiHistoryMode,
+            clientCitationIndexUnit = request.WebSearch?.CitationIndexUnit,
             rejectedControls = issues.Count == 0 ? null
                 : controls.Select(control => new { control.Name, control.RequestedValue }).ToArray(),
             issues = issues.Select(issue => issue.Code)
@@ -300,6 +305,9 @@ public static class LlmConfigurationReports
             Value(Read(wire, "text.format.strict")), provider == "xai"
                 ? "The strict compatibility flag is serialized; equal OpenAI enforcement guarantees are not claimed."
                 : "Only Responses schema requests emit a strict flag; other adapters retain provider-defined behavior.");
+        Add("history_mode", provider == "openai" ? request.OpenAiHistoryMode.ToString() : null,
+            provider == "openai" && wire.ValueKind == JsonValueKind.Object ? request.OpenAiHistoryMode.ToString() : null,
+            "TranscriptOnly preserves visible author roles and returns no native continuation; native mode retains its existing guards.");
         Add("web_search_mode", request.WebSearch?.Mode.ToString().ToLowerInvariant(), Value(Read(wire, "tool_choice")),
             "Null leaves search disabled; auto and required retain their provider meanings.");
         Add("max_web_search_calls", request.WebSearch?.MaxToolCalls.ToString(CultureInfo.InvariantCulture), Value(Read(wire, "max_tool_calls")),
@@ -327,7 +335,7 @@ public static class LlmConfigurationReports
     {
         var supported = control switch
         {
-            "web_search_mode" or "max_web_search_calls" => provider == "openai",
+            "history_mode" or "web_search_mode" or "max_web_search_calls" => provider == "openai",
             "temperature" => provider == "ollama" || geminiContent,
             "thought_output" => provider != "ollama",
             "structured_output" => provider != "anthropic",
@@ -343,6 +351,7 @@ public static class LlmConfigurationReports
 
     private static bool RejectedControl(string code, string control) => code switch
     {
+        "unsupported_history_mode" or "transcript_continuation_conflict" => control == "history_mode",
         "unsupported_web_search" => control is "web_search_mode" or "max_web_search_calls",
         "unsupported_reasoning_effort" or "invalid_reasoning_effort" => control == "reasoning_effort",
         "unsupported_thinking_budget" or "invalid_thinking_budget" => control == "thinking_budget_tokens",

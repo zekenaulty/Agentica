@@ -36,7 +36,10 @@ public sealed class OpenAiInputTokenCounter
         _apiKey = key;
         _maximumRequests = maximumRequests;
         _generationEndpoint = options.Endpoint ?? OpenAiResponsesClientOptions.DefaultEndpoint;
-        _endpoint = inputCountEndpoint ?? new Uri(_generationEndpoint.AbsoluteUri.TrimEnd('/') + "/input_tokens");
+        ValidateEndpoint(_generationEndpoint);
+        _endpoint = inputCountEndpoint ?? new UriBuilder(_generationEndpoint)
+        { Path = _generationEndpoint.AbsolutePath.TrimEnd('/') + "/input_tokens" }.Uri;
+        ValidateEndpoint(_endpoint);
     }
 
     public int Requests => Volatile.Read(ref _requests);
@@ -57,20 +60,75 @@ public sealed class OpenAiInputTokenCounter
         byte[] countBody;
         try { countBody = BuildCountRequest(generation); }
         finally { CryptographicOperations.ZeroMemory(generation); }
-        var configuration = new LlmConfigurationReport(
-            prepared.Descriptor.ProviderName, "responses_input_tokens", prepared.Descriptor.ModelId,
-            prepared.Descriptor.ModelId, prepared.Descriptor.ConfigurationIdentity,
-            "native_input_count", [], [], [],
-            new(LlmCapabilitySupport.Supported, "installed-count-serializer", null, "Separate native operation."),
-            new(LlmCapabilitySupport.Supported, "captured-endpoint", null, "Exact configured endpoint."),
-            new(LlmCapabilitySupport.Unknown, "not-observed", null, "No live readiness claim."),
-            new(LlmCapabilitySupport.Unknown, "not-observed", null, "No account/model claim."),
-            countReferences.RouteFingerprint, countReferences.ExecutionBundleReference);
+        return await CountCoreAsync(prepared.Descriptor, countBody, countCapture, admission, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Counts an exact stateless Responses body owned by the host. The full
+    /// generation byte hash/identity remains distinct from the filtered count request.</summary>
+    public async Task<LlmInputTokenMeasurement> CountAsync(ReadOnlyMemory<byte> completeGenerationBody,
+        LlmAttemptReferences generationReferences, string hostScopeId,
+        LlmAttemptCapture countCapture, ILlmCallAdmission admission,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(generationReferences);
+        ArgumentNullException.ThrowIfNull(countCapture);
+        ArgumentNullException.ThrowIfNull(admission);
+        if (countCapture.References.AttemptId == generationReferences.AttemptId)
+            throw Invalid("input_count_binding_mismatch");
+        if (completeGenerationBody.Length is < 1 or > LlmPreparedIdentity.MaximumBodyBytes)
+            throw Invalid("input_count_invalid_request");
+        var owned = completeGenerationBody.ToArray();
+        byte[]? countBody = null;
+        try
+        {
+            countBody = BuildCountRequest(owned);
+            using var body = JsonDocument.Parse(owned);
+            var model = body.RootElement.GetProperty("model").GetString()!;
+            var applied = body.RootElement.EnumerateObject().Where(property =>
+                property.Name is not ("input" or "instructions" or "metadata"))
+                .ToDictionary(property => property.Name, property => property.Value.Clone(), StringComparer.Ordinal);
+            var configurationIdentity = LlmPreparedIdentity.Hash(JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                contract = "agentica.host.responses.configuration.v1",
+                endpoint = _generationEndpoint.AbsoluteUri,
+                applied
+            }));
+            var configuration = Configuration(model, configurationIdentity, generationReferences, "responses");
+            var transport = new LlmPreparedTransportBinding(_http);
+            var generation = LlmPreparedIdentity.Describe(generationReferences, hostScopeId,
+                LlmProviderWorkKind.Inference, configuration, _generationEndpoint, owned, "text/event-stream|",
+                transportIdentity: transport.Identity);
+            var result = await CountCoreAsync(generation, countBody, countCapture, admission,
+                cancellationToken).ConfigureAwait(false);
+            countBody = null; // Core owns and clears the count buffer, including failure paths.
+            return result;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(owned);
+            if (countBody is not null) CryptographicOperations.ZeroMemory(countBody);
+        }
+    }
+
+    /// <summary>Validates before a host's cache lookup; performs no network work or admission.</summary>
+    public static void ValidateGenerationBody(ReadOnlyMemory<byte> completeGenerationBody)
+    {
+        var counted = BuildCountRequest(completeGenerationBody);
+        CryptographicOperations.ZeroMemory(counted);
+    }
+
+    private async Task<LlmInputTokenMeasurement> CountCoreAsync(LlmPreparedRequestDescriptor generation,
+        byte[] countBody, LlmAttemptCapture countCapture, ILlmCallAdmission admission,
+        CancellationToken cancellationToken)
+    {
+        var countReferences = countCapture.References;
+        var configuration = Configuration(generation.ModelId, generation.ConfigurationIdentity,
+            countReferences, "responses_input_tokens");
         var transportBinding = new LlmPreparedTransportBinding(_http);
-        var descriptor = LlmPreparedIdentity.Describe(countReferences, prepared.Descriptor.HostScopeId,
+        var descriptor = LlmPreparedIdentity.Describe(countReferences, generation.HostScopeId,
             LlmProviderWorkKind.InputCount, configuration, _endpoint, countBody, "|",
-            prepared.Descriptor.RequestIdentity, transportBinding.Identity);
-        var request = new LlmRequest(prepared.Descriptor.ModelId, [])
+            generation.RequestIdentity, transportBinding.Identity);
+        var request = new LlmRequest(generation.ModelId, [])
         {
             AttemptCapture = countCapture,
             PreparedDispatch = new(descriptor, _endpoint, countBody, "|", admission, transportBinding)
@@ -115,8 +173,8 @@ public sealed class OpenAiInputTokenCounter
                 !root.TryGetProperty("input_tokens", out var count) || !count.TryGetInt32(out var tokens) || tokens < 0)
                 throw Invalid("input_count_unavailable");
             var evidence = recorder.Finish(LlmAttemptOutcome.Succeeded);
-            return new(tokens, "openai.responses.input_tokens", prepared.Descriptor.RequestIdentity,
-                prepared.Descriptor.BodyHash, descriptor, evidence);
+            return new(tokens, "openai.responses.input_tokens", generation.RequestIdentity,
+                generation.BodyHash, descriptor, evidence);
         }
         catch (OperationCanceledException)
         {
@@ -148,24 +206,63 @@ public sealed class OpenAiInputTokenCounter
 
     internal static byte[] BuildCountRequest(ReadOnlyMemory<byte> generation)
     {
-        using var source = JsonDocument.Parse(generation);
-        var root = source.RootElement;
-        if (root.ValueKind != JsonValueKind.Object ||
-            !root.TryGetProperty("model", out var model) || model.ValueKind != JsonValueKind.String ||
-            string.IsNullOrWhiteSpace(model.GetString()) || !root.TryGetProperty("input", out var input) ||
-            input.ValueKind is not (JsonValueKind.String or JsonValueKind.Array) ||
-            HasStateReference(root, "conversation") || HasStateReference(root, "previous_response_id"))
+        if (generation.Length is < 1 or > LlmPreparedIdentity.MaximumBodyBytes)
             throw Invalid("input_count_invalid_request");
-        using var output = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(output))
+        try
         {
-            writer.WriteStartObject();
-            foreach (var field in CountFields)
-                if (root.TryGetProperty(field, out var value))
-                { writer.WritePropertyName(field); value.WriteTo(writer); }
-            writer.WriteEndObject();
+            using var source = JsonDocument.Parse(generation);
+            var root = source.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("model", out var model) || model.ValueKind != JsonValueKind.String ||
+                model.GetString() is not { Length: > 0 and <= 512 } modelId ||
+                string.IsNullOrWhiteSpace(modelId) || modelId.Any(char.IsControl) || modelId.Trim() != modelId ||
+                !root.TryGetProperty("input", out var input) ||
+                input.ValueKind is not (JsonValueKind.String or JsonValueKind.Array) ||
+                HasStateReference(root, "conversation") || HasStateReference(root, "previous_response_id") ||
+                HasStateReference(root, "response_id") ||
+                input.ValueKind == JsonValueKind.Array && input.EnumerateArray().Any(IsStoredItemReference) ||
+                root.EnumerateObject().Select(property => property.Name).Distinct(StringComparer.Ordinal).Count() != root.EnumerateObject().Count())
+                throw Invalid("input_count_invalid_request");
+            using var output = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(output))
+            {
+                writer.WriteStartObject();
+                foreach (var field in CountFields)
+                    if (root.TryGetProperty(field, out var value))
+                    { writer.WritePropertyName(field); value.WriteTo(writer); }
+                writer.WriteEndObject();
+            }
+            return output.ToArray();
         }
-        return output.ToArray();
+        catch (JsonException) { throw Invalid("input_count_invalid_request"); }
+    }
+
+    private static LlmConfigurationReport Configuration(string model, string identity,
+        LlmAttemptReferences references, string apiMode) => new(
+            OpenAiResponsesLlmClient.ProviderName, apiMode, model, model, identity,
+            "native_input_count", [], [], [],
+            new(LlmCapabilitySupport.Supported, "installed-count-serializer", null, "Separate native operation."),
+            new(LlmCapabilitySupport.Supported, "captured-endpoint", null, "Exact configured endpoint."),
+            new(LlmCapabilitySupport.Unknown, "not-observed", null, "No live readiness claim."),
+            new(LlmCapabilitySupport.Unknown, "not-observed", null, "No account/model claim."),
+            references.RouteFingerprint, references.ExecutionBundleReference);
+
+    private static void ValidateEndpoint(Uri endpoint)
+    {
+        if (!endpoint.IsAbsoluteUri || endpoint.Scheme is not ("http" or "https") ||
+            endpoint.UserInfo.Length != 0 || endpoint.Fragment.Length != 0)
+            throw new ArgumentException("Native counting requires an absolute HTTP endpoint without userinfo or fragment.", nameof(endpoint));
+    }
+
+    private static bool IsStoredItemReference(JsonElement item)
+    {
+        if (item.ValueKind != JsonValueKind.Object) return false;
+        var hasType = item.TryGetProperty("type", out var type);
+        if (hasType && type.ValueKind == JsonValueKind.String && type.GetString() == "item_reference") return true;
+        // ItemReference's discriminator is optional in the wire contract. Do not
+        // mistake complete native output items with IDs/content for ID-only refs.
+        return (!hasType || type.ValueKind == JsonValueKind.Null) && item.TryGetProperty("id", out _) &&
+            item.EnumerateObject().All(property => property.Name is "id" or "type");
     }
 
     private static bool HasStateReference(JsonElement root, string name) =>

@@ -39,10 +39,10 @@ public sealed class ExperimentNativeAdmissionTests
         Assert.False(body.RootElement.GetProperty("store").GetBoolean());
         Assert.False(body.RootElement.TryGetProperty("instructions", out _));
         var input = body.RootElement.GetProperty("input");
-        Assert.Equal(9, input.GetArrayLength()); // Four exact complete pairs plus current input/evidence.
-        var parts = input[8].GetProperty("content");
-        Assert.Equal(current, parts[1].GetProperty("text").GetString());
-        Assert.Contains("needle exact historical source", parts[0].GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.Equal(10, input.GetArrayLength()); // Four exact complete pairs, quoted evidence, then unchanged current input.
+        Assert.Equal(current, input[9].GetProperty("content").GetString());
+        Assert.Equal("user", input[8].GetProperty("role").GetString());
+        Assert.Contains("needle exact historical source", input[8].GetProperty("content").GetString(), StringComparison.Ordinal);
         Assert.Equal(2, fixture.Handler.CountBodies.Count); // Mandatory floor reused at dispatch; optional evidence counted once.
         Assert.Equal("count", fixture.Handler.Order[0]);
         Assert.Equal("generate", fixture.Handler.Order[^1]);
