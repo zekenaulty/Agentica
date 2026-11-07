@@ -265,6 +265,10 @@ public sealed class LlmPreparedCallTests
         using var prepared = LlmCallPreparation.Prepare(Request() with { ModelId = "" }, options,
             References(), "scope-1", http);
         Assert.Equal("fixture-default", prepared.Descriptor.ModelId);
+        var report = Assert.IsType<LlmConfigurationReport>(prepared.ConfigurationReport);
+        Assert.Equal("", report.RequestedModelId);
+        Assert.Equal("fixture-default", report.EffectiveModelId);
+        Assert.Equal(prepared.Descriptor.ConfigurationIdentity, report.ConfigurationIdentity);
 
         var error = await Assert.ThrowsAsync<LlmClientException>(() => prepared.GenerateAsync(new Admission()));
 

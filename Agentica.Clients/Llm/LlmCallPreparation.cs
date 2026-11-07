@@ -104,7 +104,7 @@ public static class LlmCallPreparation
         var snapshot = Snapshot(request, defaultModel);
         try
         {
-            var configuration = report(snapshot);
+            var configuration = report(snapshot) with { RequestedModelId = request.ModelId };
             if (!configuration.AdapterAcceptsRequest)
                 throw new LlmClientException(configuration.ProviderName, "The exact request is unsupported by this adapter.",
                     errorKind: LlmClientErrorKind.BadRequest, errorClass: configuration.Issues[0].Code);
