@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "provider-recovery-reconciles-every-unaccepted-outcome",
+  "scope": "agentica",
+  "kind": "technical",
+  "status": "accepted",
+  "supersedes": ["provider-recovery-preserves-authorship-and-custody"],
+  "title": "Reconcile delivered but unaccepted work and prove policy at the actual admission seam",
+  "trigger": "provider-only restart returned-before-Accept crash window stale native capsule retained embedding source eligibility host semantic author",
+  "guidance": "Treat every unaccepted paid outcome as requiring reconciliation, including a delivered response whose proposal/native bytes were lost before host acceptance. Persist delivered material for revalidation or park the attempt; a returned flag must not silently authorize reinference with an older capsule. Require an explicit distinct successor decision for each unresolved original while retaining its observations and reservation. Wire retained embedding profile/source-revision/eligibility checks into the actual required reservation before transport, and mutate live policy after request capture to prove zero sends on denial. Store semantic author, source ID and revision independently from provider envelope role: a Host observation carried in User input remains Host evidence. Verify those fields on reconstructed physical requests and verify crash windows using separate writer and reader processes.",
+  "evidence": [
+    {
+      "kind": "source_review",
+      "reference": "eng/provider-consumer/RecoveryHost.cs DurableAdmission.NeedsReconciliation; RecoveryCases.ReturnedBeforeAccept; EmbeddingRecoveryCases.cs RetainedEmbeddingAdmission; RecoveryTransport.cs semantic-author wire assertions",
+      "revision": "codex/provider-recovery-host review corrections after 56ae681, 2026-11-06"
+    },
+    {
+      "kind": "offline_test",
+      "reference": "eng/Verify-ProviderConsumer.ps1; artifacts/provider-consumer/e53a78abae3540cb80ba06e7b92601f4/provider-consumer-results.log",
+      "note": "Exact SDK10.0.302; fresh packed PackageReferences/hash verification; 15 A5 plus20 host cases. Separate process delivered-before-accept window parks without another POST until explicit successor; failed/refused/cancelled/host-rejected reopen parks; stale/ineligible embedding admission sends zero requests. No live calls."
+    }
+  ],
+  "recheck": "Reinspect every durable attempt status and the actual reservation/transport composition after changes. A pure validator test does not establish admission enforcement. This is single-owner synthetic file storage and offline protocol proof, not concurrent production recovery or installed Bridge acceptance.",
+  "tags": ["providers", "recovery", "admission", "authorship", "custody", "crash-window", "embeddings"],
+  "recorded_on": "2026-11-06"
+}

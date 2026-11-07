@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "provider-recovery-preserves-authorship-and-custody",
+  "scope": "agentica",
+  "kind": "technical",
+  "status": "accepted",
+  "title": "Recover provider-only work from accepted evidence without changing authorship or original custody",
+  "trigger": "provider-only packed consumer restart native continuation unavailable reconstruction unknown attempt replacement admission",
+  "guidance": "Persist objective, accepted evidence with original author/source/revision, remaining obligations, captured operation-route bundle and original attempt reservations before recovery. When a private capsule is unavailable or rejected, use an explicitly host-authored evidence projection instead of relabeling earlier assistant statements as participant speech or claiming equivalent private reasoning. Reopen a real consumer process, retain unresolved originals, and require an explicit distinct successor decision before another inference. A successful successor can continue the objective while the original uncertainty and reservation remain. Only a successful reserver may update an existing attempt record; rejected duplicates do not own prior evidence. Verify completion against authoritative state and effect receipts, not model narration.",
+  "evidence": [
+    {
+      "kind": "source_review",
+      "reference": "eng/provider-consumer/RecoveryHost.cs; RecoveryCases.cs; EmbeddingRecoveryCases.cs; RECOVERY.md",
+      "revision": "codex/provider-recovery-host on 2c76f0a, 2026-11-06"
+    },
+    {
+      "kind": "offline_test",
+      "reference": "eng/Verify-ProviderConsumer.ps1; artifacts/provider-consumer/41974d9608954f6ea7a244eead8cd3e0/provider-consumer-results.log",
+      "note": "Exact SDK10.0.302, fresh packed PackageReferences and nupkg hash checks, Google.GenAI1.13.0 coexistence, 15 A5 plus 19 recovery scenarios. Four fresh-process complete loops and unknown-original explicit successor through host completion. Zero live calls."
+    }
+  ],
+  "recheck": "Reinspect current native-history guards, request binding and host journal transactions. This proves a counted offline transport and single-owner atomic file store, not model judgement, concurrent production recovery, installed Bridge or production key management. Refresh source contracts and scope/profile/policy checks for each consumer.",
+  "tags": ["providers", "recovery", "admission", "authorship", "native-continuation", "custody", "packed-consumer"],
+  "recorded_on": "2026-11-06"
+}

@@ -5,6 +5,17 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 
+if (args is ["--resume", var statePath, var nativeMode])
+{
+    await RecoveryCases.ResumeProcess(statePath, nativeMode);
+    return;
+}
+if (args is ["--return-before-accept", var pendingStatePath])
+{
+    await RecoveryCases.ReturnBeforeAcceptProcess(pendingStatePath);
+    return;
+}
+
 var cases = new (string Name, Func<Task> Run)[]
 {
     ("document_order_profile_and_source_mapping", () => Cases.Success(MemoryEmbeddingPurpose.Document)),
@@ -36,6 +47,8 @@ Console.WriteLine(JsonSerializer.Serialize(new
     paidCalls = 0, fullP08 = "NOT-RUN", installedBridge = "NOT-RUN"
 }));
 Console.WriteLine("agentica-provider-consumer-a5-ok");
+await RecoveryCases.RunAll();
+Console.WriteLine("agentica-provider-consumer-p08-ok");
 
 internal static class Cases
 {
