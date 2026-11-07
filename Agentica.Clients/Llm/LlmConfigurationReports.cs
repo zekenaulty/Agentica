@@ -195,7 +195,8 @@ public static class LlmConfigurationReports
                 provider == "anthropic" ? "This adapter validates schema syntax but emits unconstrained text; host validation is required."
                     : "Reports the serialized format, not universal JSON Schema or model support."),
             Capability("native_continuation_replay", !legacy, "Replay is bound to provider, API mode, exact model and instructions."),
-            Capability("durable_continuation_exchange", false, "No public durable codec is implemented in this source snapshot."),
+            Capability("durable_continuation_exchange", !legacy,
+                "Explicit versioned sensitive codec; exact native bindings apply. Hosts own authenticated storage and retention."),
             Capability("native_search", false, "No native search option exists in this shared request contract; Lab search is a separate path."),
             Capability("native_input_count", false, "No native pre-dispatch token-count operation exists on this client surface."));
         return new LlmConfigurationReport(provider, apiMode, request.ModelId, model, identity,

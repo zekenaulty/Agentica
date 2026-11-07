@@ -60,10 +60,11 @@ In particular, Anthropic currently parses supplied schema syntax without emittin
 a native output constraint. The report makes that omission visible. Broad model
 and default research remains tracked separately by issue #10.
 
-The initial report marks native search, durable continuation exchange and native
-pre-dispatch input counting unsupported on the shared client surface at this
-source snapshot. Lab's separate implementations do not establish shared-client
-support. Extend these entries alongside P03/P05/P06 when their seams land.
+The report marks native search and native pre-dispatch input counting unsupported
+on the shared client surface at this source snapshot. Lab's separate implementations
+do not establish shared-client support. Extend these entries alongside P03/P06 when
+their seams land. Explicit [durable continuation exchange](contracts/native-continuation-exchange.md)
+is available for the existing native carriers; legacy SDK replay remains unsupported.
 Response usage is identified as post-response accounting; proxy estimates are not
 called native counts.
 
