@@ -14,7 +14,7 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
     private const int MaxEventCharacters = 4_194_304;
     private const int MaxOutputCharacters = 4_194_304;
     private const int MaxSummaryCharacters = 262_144;
-    private static readonly HttpClient SharedHttpClient = new();
+    private static readonly HttpClient SharedHttpClient = LlmProviderTransport.CreateDefaultClient();
     private readonly AnthropicMessagesClientOptions _options;
     private readonly HttpClient _httpClient;
 
@@ -36,8 +36,17 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
         return completed ?? throw Failure("stream_incomplete", LlmClientErrorKind.Transient);
     }
 
-    public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
-        LlmRequest request,
+    public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var model = string.IsNullOrWhiteSpace(request.ModelId) ? _options.DefaultModelId : request.ModelId;
+        return LlmProviderAttempt.StreamAsync(request, ProviderName, model,
+            recorder => StreamCoreAsync(request, recorder, cancellationToken), cancellationToken);
+    }
+
+    private async IAsyncEnumerable<LlmStreamEvent> StreamCoreAsync(
+        LlmRequest request, LlmAttemptRecorder recorder,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -60,8 +69,7 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
         HttpResponseMessage response;
         try
         {
-            response = await _httpClient.SendAsync(message,
-                HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            response = await LlmProviderTransport.SendAsync(_httpClient, message, request, recorder, cancellationToken).ConfigureAwait(false);
         }
         catch (HttpRequestException exception)
         {
@@ -107,6 +115,7 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
                         using var parsed = ParseEvent(data.ToString());
                         var root = parsed.RootElement;
                         var kind = GetString(root, "type") ?? eventName;
+                        LlmProviderObservations.Anthropic(recorder, root);
                         if (completed)
                             throw Failure("data_after_completion", LlmClientErrorKind.Transient);
                         switch (kind)

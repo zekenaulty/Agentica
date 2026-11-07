@@ -15,7 +15,7 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
     private const int MaxEventCharacters = 4_194_304;
     private const int MaxOutputCharacters = 4_194_304;
     private const int MaxSummaryCharacters = 262_144;
-    private static readonly HttpClient SharedHttpClient = new();
+    private static readonly HttpClient SharedHttpClient = LlmProviderTransport.CreateDefaultClient();
     private readonly OpenAiResponsesClientOptions _options;
     private readonly HttpClient _httpClient;
     private readonly string _providerName;
@@ -57,8 +57,17 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
         return completed ?? throw Failure("stream_incomplete", LlmClientErrorKind.Transient);
     }
 
-    public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
-        LlmRequest request,
+    public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var model = string.IsNullOrWhiteSpace(request.ModelId) ? _options.DefaultModelId : request.ModelId;
+        return LlmProviderAttempt.StreamAsync(request, _providerName, model,
+            recorder => StreamCoreAsync(request, recorder, cancellationToken), cancellationToken);
+    }
+
+    private async IAsyncEnumerable<LlmStreamEvent> StreamCoreAsync(
+        LlmRequest request, LlmAttemptRecorder recorder,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -82,8 +91,7 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
         HttpResponseMessage response;
         try
         {
-            response = await _httpClient.SendAsync(message,
-                HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            response = await LlmProviderTransport.SendAsync(_httpClient, message, request, recorder, cancellationToken).ConfigureAwait(false);
         }
         catch (HttpRequestException exception)
         {
@@ -128,6 +136,7 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
                         using var parsed = ParseEvent(data.ToString());
                         var root = parsed.RootElement;
                         var kind = GetString(root, "type") ?? eventName;
+                        LlmProviderObservations.Responses(recorder, root);
                         if (completed && kind is not null)
                         {
                             throw Failure("data_after_completion", LlmClientErrorKind.Transient);

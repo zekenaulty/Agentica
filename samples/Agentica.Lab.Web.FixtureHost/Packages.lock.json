@@ -30,11 +30,11 @@
       },
       "Google.GenAI": {
         "type": "Transitive",
-        "resolved": "1.6.1",
-        "contentHash": "ydKqbLdf1JF6hh49OM1cOOz9/CeAF1ZQ9dcA4KZaJKpACb9oxucGWAIciWvNC/Cci0rnMA8qn4o/3pw5Yy/EOg==",
+        "resolved": "1.13.0",
+        "contentHash": "UhpamMmHIjF6e6CupohffTDOfREoXBk2IzK6hGHgxjKqS91AZLGvKlJeBt9w9NajarA60J1B/tE4dUzjaPXLcQ==",
         "dependencies": {
           "Google.Apis.Auth": "1.69.0",
-          "Microsoft.Extensions.AI.Abstractions": "10.4.0",
+          "Microsoft.Extensions.AI.Abstractions": "10.6.0",
           "MimeTypes": "2.5.2"
         }
       },
@@ -58,8 +58,8 @@
       },
       "Microsoft.Extensions.AI.Abstractions": {
         "type": "Transitive",
-        "resolved": "10.4.0",
-        "contentHash": "t3S2H4do4YeNheIfE3GEl3MnKIrnxpbLu7a88spfApYR3in9ddhIq/GMtxgMaFjn/PUMTCFv5YH7Y6Q91dsDXQ=="
+        "resolved": "10.6.0",
+        "contentHash": "JCkVoyqBqi9r3Vs5Qo5PfZobT0+CWeOx+9y9yggBxtW9s/X5CAoa7Iw/tP/rfUdz+nxRKMSBmrytYgwmu60lgA=="
       },
       "MimeTypes": {
         "type": "Transitive",
@@ -126,7 +126,7 @@
         "type": "Project",
         "dependencies": {
           "Agentica": "[0.1.0-research.1, )",
-          "Google.GenAI": "[1.6.1, )"
+          "Google.GenAI": "[1.13.0, )"
         }
       },
       "agentica.lab.web": {

@@ -12,7 +12,7 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
     public const string ProviderName = "ollama";
     private const int MaxLineCharacters = 1_048_576;
     private const int MaxOutputCharacters = 4_194_304;
-    private static readonly HttpClient SharedHttpClient = new();
+    private static readonly HttpClient SharedHttpClient = LlmProviderTransport.CreateDefaultClient();
     private readonly HttpClient _httpClient;
     private readonly OllamaClientOptions _options;
 
@@ -44,8 +44,17 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
         return result ?? throw Failure("stream_incomplete", LlmClientErrorKind.Transient);
     }
 
-    public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
-        LlmRequest request,
+    public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var model = string.IsNullOrWhiteSpace(request.ModelId) ? _options.DefaultModelId : request.ModelId;
+        return LlmProviderAttempt.StreamAsync(request, ProviderName, model ?? "(unspecified)",
+            recorder => StreamCoreAsync(request, recorder, cancellationToken), cancellationToken);
+    }
+
+    private async IAsyncEnumerable<LlmStreamEvent> StreamCoreAsync(
+        LlmRequest request, LlmAttemptRecorder recorder,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -67,9 +76,7 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
         HttpResponseMessage response;
         try
         {
-            response = await _httpClient.SendAsync(message,
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken).ConfigureAwait(false);
+            response = await LlmProviderTransport.SendAsync(_httpClient, message, request, recorder, cancellationToken).ConfigureAwait(false);
         }
         catch (HttpRequestException exception)
         {
@@ -120,6 +127,7 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
                 using (document)
                 {
                     var root = document.RootElement;
+                    LlmProviderObservations.Ollama(recorder, root);
                     if (root.TryGetProperty("error", out var error) &&
                         error.ValueKind == JsonValueKind.String)
                     {

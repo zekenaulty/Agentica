@@ -16,7 +16,7 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
     private const int MaxEventCharacters = 1_048_576;
     private const int MaxOutputCharacters = 4_194_304;
     private const int MaxSummaryCharacters = 262_144;
-    private static readonly HttpClient SharedHttpClient = new();
+    private static readonly HttpClient SharedHttpClient = LlmProviderTransport.CreateDefaultClient();
     private readonly GeminiInteractionsClientOptions _options;
     private readonly HttpClient _httpClient;
 
@@ -44,8 +44,17 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
         return completed ?? throw Failure("stream_incomplete", LlmClientErrorKind.Transient);
     }
 
-    public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
-        LlmRequest request,
+    public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var model = string.IsNullOrWhiteSpace(request.ModelId) ? _options.DefaultModelId : request.ModelId;
+        return LlmProviderAttempt.StreamAsync(request, GeminiLlmClient.ProviderName, model,
+            recorder => StreamCoreAsync(request, recorder, cancellationToken), cancellationToken);
+    }
+
+    private async IAsyncEnumerable<LlmStreamEvent> StreamCoreAsync(
+        LlmRequest request, LlmAttemptRecorder recorder,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -76,10 +85,7 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
         HttpResponseMessage response;
         try
         {
-            response = await _httpClient.SendAsync(
-                message,
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken).ConfigureAwait(false);
+            response = await LlmProviderTransport.SendAsync(_httpClient, message, request, recorder, cancellationToken).ConfigureAwait(false);
         }
         catch (HttpRequestException exception)
         {
@@ -138,6 +144,7 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
                         using var envelope = ParseEvent(data.ToString());
                         var root = envelope.RootElement;
                         var kind = GetString(root, "event_type") ?? eventName;
+                        LlmProviderObservations.Interactions(recorder, root);
                         switch (kind)
                         {
                             case "interaction.created":
