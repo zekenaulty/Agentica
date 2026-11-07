@@ -227,8 +227,8 @@
         "contract",
         "offline"
       ],
-      "workflow_state": "in_progress",
-      "claim_owner": "root",
+      "workflow_state": "done",
+      "claim_owner": null,
       "workspace": "roadmap-reconciliation/Agentica",
       "publication_action": "created",
       "issue_url": "https://github.com/zekenaulty/Agentica/issues/48",
@@ -265,7 +265,7 @@
       "evidence_level": [
         "offline_transport"
       ],
-      "workflow_state": "todo",
+      "workflow_state": "done",
       "claim_owner": null,
       "workspace": null,
       "publication_action": "created",
@@ -280,7 +280,10 @@
       "title": "Add immutable request preparation and host-owned admission",
       "priority": "p0",
       "dependencies": [
-        "P01"
+        "P01",
+        "P02",
+        "P04",
+        "P05"
       ],
       "related_issues": [],
       "paths": [
@@ -300,9 +303,9 @@
         "offline_transport",
         "durable_host_fixture"
       ],
-      "workflow_state": "todo",
-      "claim_owner": null,
-      "workspace": null,
+      "workflow_state": "review",
+      "claim_owner": "root",
+      "workspace": "roadmap-reconciliation/Agentica",
       "publication_action": "created",
       "issue_url": "https://github.com/zekenaulty/Agentica/issues/50",
       "idempotency_marker": "<!-- agentica-plan:2026-11-06:P03 -->",
@@ -337,8 +340,8 @@
         "offline_contract",
         "capability_matrix"
       ],
-      "workflow_state": "in_progress",
-      "claim_owner": "provider_sdk_preflight",
+      "workflow_state": "done",
+      "claim_owner": null,
       "workspace": "provider-capability-report/Agentica",
       "publication_action": "created",
       "issue_url": "https://github.com/zekenaulty/Agentica/issues/51",
@@ -373,9 +376,9 @@
         "offline_codec",
         "process_reopen"
       ],
-      "workflow_state": "todo",
-      "claim_owner": null,
-      "workspace": null,
+      "workflow_state": "review",
+      "claim_owner": "root",
+      "workspace": "roadmap-reconciliation/Agentica",
       "publication_action": "created",
       "issue_url": "https://github.com/zekenaulty/Agentica/issues/52",
       "idempotency_marker": "<!-- agentica-plan:2026-11-06:P05 -->",
@@ -409,9 +412,9 @@
         "offline_transport",
         "lab_browser"
       ],
-      "workflow_state": "todo",
-      "claim_owner": null,
-      "workspace": null,
+      "workflow_state": "review",
+      "claim_owner": "root",
+      "workspace": "roadmap-reconciliation/Agentica",
       "publication_action": "created",
       "issue_url": "https://github.com/zekenaulty/Agentica/issues/53",
       "idempotency_marker": "<!-- agentica-plan:2026-11-06:P06 -->",
@@ -448,9 +451,9 @@
         "isolated_lab",
         "browser"
       ],
-      "workflow_state": "todo",
-      "claim_owner": null,
-      "workspace": null,
+      "workflow_state": "in_progress",
+      "claim_owner": "lab_provider_adoption",
+      "workspace": "lab-shared-provider-adoption/Agentica",
       "publication_action": "created",
       "issue_url": "https://github.com/zekenaulty/Agentica/issues/54",
       "idempotency_marker": "<!-- agentica-plan:2026-11-06:P07 -->",
@@ -491,8 +494,8 @@
         "durable_host_fixture"
       ],
       "workflow_state": "in_progress",
-      "claim_owner": "provider_story_plan_review",
-      "workspace": "provider-consumer-proof/Agentica",
+      "claim_owner": "packed_recovery_host",
+      "workspace": "provider-recovery-consumer/Agentica",
       "publication_action": "created",
       "issue_url": "https://github.com/zekenaulty/Agentica/issues/55",
       "idempotency_marker": "<!-- agentica-plan:2026-11-06:P08 -->",
@@ -530,9 +533,9 @@
         "live_openai",
         "external_handoff_only"
       ],
-      "workflow_state": "todo",
-      "claim_owner": null,
-      "workspace": null,
+      "workflow_state": "in_progress",
+      "claim_owner": "root",
+      "workspace": "roadmap-reconciliation/Agentica",
       "publication_action": "created",
       "issue_url": "https://github.com/zekenaulty/Agentica/issues/56",
       "idempotency_marker": "<!-- agentica-plan:2026-11-06:P09 -->",
