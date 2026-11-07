@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import './chat-markdown.test.mjs';
-import { actionErrorMessage, appendTraceWindow, catalogSelection, citationPresentation, classifyEvent, contextCheckSummary, depthPresets, exactSourceSelection, familyModelCatalog, instructionValue, isTerminal, knownFamilyModelIds, mergeTrace, mergeTurnPages, safeHttpUrl, summarizeTrace, usageLabel, validateSettings } from '../Agentica.Lab.Web/wwwroot/chat.mjs';
+import { actionErrorMessage, appendTraceWindow, catalogSelection, citationPresentation, classifyEvent, contextCheckSummary, depthPresets, exactSourceSelection, familyModelCatalog, instructionValue, isTerminal, knownFamilyModelIds, mergeTrace, mergeTurnPages, resumeTraceTail, safeHttpUrl, summarizeTrace, usageLabel, validateSettings } from '../Agentica.Lab.Web/wwwroot/chat.mjs';
 
 test('explicit context check displays provider tokens and evidence without using byte estimates', () => {
   const result = { inferenceDispatched: false, settingsRevision: 7, manifest: { inputAllowance: 62976, estimatedInputUnits: 999999, selectedMessageIds: ['u1', 'a1', 'u2', 'a2', 'current'], tokenCount: { tokens: 62600, method: 'openai.responses.input_tokens', providerCount: true } }, recall: { selected: [{ content: 'exact quote' }], presentedCharacters: 11 } };
@@ -172,6 +172,34 @@ test('retained inspection remains bounded with honest eviction and pending page 
   appendTraceWindow(trace, [{ sequence: 1101 }]);
   assert.equal(trace.hasMore, true); assert.equal(trace.inspectionEvents.at(-1).sequence, 1100);
   assert.equal(trace.events.at(-1).sequence, 1101); assert.equal(trace.windowOmitted, 1);
+});
+
+test('resuming a reopened completed trace fetches the newest bounded tail and preserves inspection paging', async () => {
+  const events = (start, count) => Array.from({ length: count }, (_, index) => ({ sequence: start + index }));
+  const head = events(1, 13);
+  const trace = { events: head, inspectionEvents: head, inspecting: true, inspectionOmitted: 0, windowOmitted: 0, after: 13, hasMore: true };
+  let reads = 0;
+  await resumeTraceTail(trace, async () => { reads++; return { events: events(2641, 13), next: 2653 }; });
+  assert.equal(reads, 1, 'A retained head cannot become a live tail by changing its label.');
+  assert.equal(trace.inspecting, false);
+  assert.deepEqual(trace.events.map(event => event.sequence), events(2641, 13).map(event => event.sequence));
+  assert.deepEqual(trace.inspectionEvents, head);
+  assert.equal(trace.after, 13); assert.equal(trace.hasMore, true);
+  assert.equal(trace.windowOmitted, 2640);
+});
+
+test('tail restoration preserves newer live arrivals and leaves inspection intact when unavailable or stale', async () => {
+  const trace = { events: [{ sequence: 1 }], inspectionEvents: [{ sequence: 1 }], inspecting: true, windowOmitted: 0, after: 1 };
+  await assert.rejects(resumeTraceTail(trace, async () => { throw new Error('offline'); }), /offline/);
+  assert.equal(trace.inspecting, true); assert.equal(trace.events[0].sequence, 1);
+  await resumeTraceTail(trace, async () => {
+    trace.events.push({ sequence: 103 });
+    return { events: [{ sequence: 101 }, { sequence: 102 }], next: 102 };
+  });
+  assert.deepEqual(trace.events.map(event => event.sequence), [101, 102, 103]);
+  assert.deepEqual(trace.inspectionEvents, [{ sequence: 1 }]);
+  assert.equal(await resumeTraceTail(trace, async () => ({ events: [{ sequence: 999 }] }), () => false), null);
+  assert.deepEqual(trace.events.map(event => event.sequence), [101, 102, 103]);
 });
 
 test('wrapped native completion summaries are visible and do not repeat streamed artifacts', () => {

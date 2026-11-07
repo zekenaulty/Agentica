@@ -338,16 +338,19 @@ public sealed partial class ExperimentStore : IDisposable
     public IReadOnlyList<ExperimentEvent> ReadEvents(string conversationId, string turnId, long after, int limit) =>
         ReadEventPage(conversationId, turnId, after, limit, citationsOnly: false);
 
+    public IReadOnlyList<ExperimentEvent> ReadTraceTail(string conversationId, string turnId, int limit) =>
+        ReadEventPage(conversationId, turnId, 0, limit, citationsOnly: false, tail: true);
+
     public IReadOnlyList<ExperimentEvent> ReadCitationEvents(string conversationId, string turnId, long after, int limit) =>
         ReadEventPage(conversationId, turnId, after, limit, citationsOnly: true);
 
-    private IReadOnlyList<ExperimentEvent> ReadEventPage(string conversationId, string turnId, long after, int limit, bool citationsOnly)
+    private IReadOnlyList<ExperimentEvent> ReadEventPage(string conversationId, string turnId, long after, int limit, bool citationsOnly, bool tail = false)
     {
         lock (_gate)
         {
             _ = GetTurn(conversationId, turnId);
             using var connection = Open();
-            using var command = Command(connection, "SELECT body_json FROM trace_events WHERE turn_id=$id AND sequence>$after AND ($citations=0 OR json_extract(body_json,'$.type')='provider.citations') ORDER BY sequence LIMIT $limit",
+            using var command = Command(connection, "SELECT body_json FROM trace_events WHERE turn_id=$id AND sequence>$after AND ($citations=0 OR json_extract(body_json,'$.type')='provider.citations') ORDER BY sequence " + (tail ? "DESC" : "ASC") + " LIMIT $limit",
                 ("$id", turnId), ("$after", Math.Max(0, after)), ("$limit", Math.Clamp(limit, 1, 100)), ("$citations", citationsOnly ? 1 : 0));
             using var reader = command.ExecuteReader();
             var result = new List<ExperimentEvent>();
@@ -359,6 +362,7 @@ public sealed partial class ExperimentStore : IDisposable
                 result.Add(Deserialize<ExperimentEvent>(body));
                 characters += body.Length;
             }
+            if (tail) result.Reverse();
             return result;
         }
     }
