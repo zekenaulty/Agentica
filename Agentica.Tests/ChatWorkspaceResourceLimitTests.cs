@@ -183,7 +183,14 @@ public sealed class ChatWorkspaceResourceLimitTests
         var tool = new LabWorkspaceFileSearchTool(
             fixture.WorkspaceRoot,
             InvalidUtf8OutputProcess(),
-            TestLimits());
+            TestLimits() with
+            {
+                // This fixture proves strict stdout decoding, not PowerShell's
+                // managed startup time on a contended Windows runner. Keep that
+                // startup allowance separate from the 250ms silent-process
+                // duration-limit proof below; production limits are unchanged.
+                MaxSearchDuration = TimeSpan.FromSeconds(15)
+            });
 
         var result = await tool.ExecuteAsync(
             Invocation(
