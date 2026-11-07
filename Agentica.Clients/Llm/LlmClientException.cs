@@ -4,6 +4,15 @@ namespace Agentica.Clients.Llm;
 
 public sealed class LlmClientException : Exception
 {
+    private LlmWebSearchEvidence? _webSearch;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public LlmWebSearchEvidence? WebSearch
+    {
+        get => Volatile.Read(ref _webSearch);
+        init => _webSearch = value;
+    }
+    internal void RetainWebSearch(LlmWebSearchEvidence? evidence) => Interlocked.CompareExchange(ref _webSearch, evidence, null);
+
     private LlmAttemptEvidence? _attemptEvidence;
 
     public LlmClientException(

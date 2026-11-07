@@ -5,6 +5,8 @@ This is a compact reference for packages and hosts that want to build on Agentic
 Provider-only consumers can use the additive
 [provider attempt evidence contracts](contracts/provider-attempt-evidence.md)
 without constructing a runner or planning request.
+Optional [exact prepared calls](contracts/prepared-provider-calls.md) add required
+host admission and separate native input counting at the provider boundary.
 
 Agentica is the bounded proof engine:
 

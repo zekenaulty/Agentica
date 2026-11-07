@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Agentica.Clients\Agentica.Clients.csproj" />
+    <ProjectReference Include="..\eng\NativeContinuationProbe\NativeContinuationProbe.csproj" ReferenceOutputAssembly="false" />
     <Using Include="Xunit" />
     <Compile Include="..\Agentica.Tests\SemanticEmbeddingClientTests.cs" Link="Memory\SemanticEmbeddingClientTests.cs" />
   </ItemGroup>

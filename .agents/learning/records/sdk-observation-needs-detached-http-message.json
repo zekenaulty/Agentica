@@ -9,7 +9,7 @@
   "guidance": "Google.GenAI 1.6.1 constructs a private HTTP client and cannot qualify injected observation or redirect control. The pinned 1.13.0 ClientOptions.HttpClientFactory supplies the supported seam. An SDK HTTP request must be detached before sending it through another HttpClient because .NET marks the original SDK message already sent. Copy method, URI, HTTP version policy, headers and exact body bytes; retain response fields before SDK deserialization. Guard the per-invocation handler against a second inference send and qualify retryable429/503 statuses with counted offline transport fixtures. The host remains responsible for injected inner handler chains and durable admission.",
   "evidence": [
     {
-      "kind": "test",
+      "kind": "offline_test",
       "reference": "Agentica.Clients.Tests/ProviderAttemptRetentionTests.cs",
       "revision": "P02 implementation based on a4d17b4; recorded with this source change",
       "note": "Pinned .NET 10.0.302 Release fixtures across six wire modes plus SDK 1.13.0; no live provider calls."

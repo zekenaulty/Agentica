@@ -13,6 +13,9 @@ public sealed record LlmResponse(
     IReadOnlyDictionary<string, string>? Metadata = null,
     [property: JsonIgnore] LlmNativeContinuation? NativeContinuation = null)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public LlmWebSearchEvidence? WebSearch { get; init; }
+
     /// <summary>Observed provider/client facts; a completed client call is not host acceptance.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public LlmAttemptEvidence? AttemptEvidence { get; init; }

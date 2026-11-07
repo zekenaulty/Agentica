@@ -49,7 +49,11 @@ public static class LlmConfigurationReports
         ArgumentNullException.ThrowIfNull(options);
         return Describe(request, "ollama", "chat", options.DefaultModelId,
             options.Endpoint ?? OllamaClientOptions.DefaultEndpoint,
-            model => OllamaLlmClient.BuildRequestBody(request, model), context);
+            model =>
+            {
+                _ = new OllamaLlmClient(options); // Reuse the actual endpoint policy too.
+                return OllamaLlmClient.BuildRequestBody(request, model);
+            }, context);
     }
 
     public static LlmConfigurationReport Describe(LlmRequest request,
@@ -122,7 +126,12 @@ public static class LlmConfigurationReports
         JsonElement wire = default;
         try
         {
-            if (string.IsNullOrWhiteSpace(model))
+            if (request.WebSearch is not null && provider != "openai")
+                throw new LlmClientException(provider, "Provider-native web search is unsupported by this route.",
+                    errorKind: LlmClientErrorKind.BadRequest, errorClass: "unsupported_web_search");
+            if (!endpoint.IsAbsoluteUri || endpoint.Scheme is not ("http" or "https"))
+                issues.Add(new("invalid_endpoint", "The configured endpoint must be an absolute HTTP(S) URL."));
+            else if (string.IsNullOrWhiteSpace(model))
                 issues.Add(new("missing_model", "No model was requested or configured; no substitute was selected."));
             else
             {
@@ -142,10 +151,15 @@ public static class LlmConfigurationReports
         {
             issues.Add(new("invalid_request_value", "The adapter could not serialize this request value."));
         }
-        var routeResolved = !string.IsNullOrWhiteSpace(model) && endpoint.IsAbsoluteUri;
+        var routeResolved = !string.IsNullOrWhiteSpace(model) && endpoint.IsAbsoluteUri &&
+            endpoint.Scheme is "http" or "https";
         if (resolveEndpoint is not null && !string.IsNullOrWhiteSpace(model))
         {
-            try { endpoint = resolveEndpoint(model); routeResolved = endpoint.IsAbsoluteUri; }
+            try
+            {
+                endpoint = resolveEndpoint(model);
+                routeResolved = endpoint.IsAbsoluteUri && endpoint.Scheme is "http" or "https";
+            }
             catch (LlmClientException exception)
             {
                 routeResolved = false;
@@ -159,8 +173,6 @@ public static class LlmConfigurationReports
         var endpointIdentity = endpoint.IsAbsoluteUri
             ? endpoint.GetComponents(UriComponents.SchemeAndServer | UriComponents.Path, UriFormat.UriEscaped)
             : "invalid-relative-endpoint";
-        if (!endpoint.IsAbsoluteUri)
-            issues.Add(new("invalid_endpoint", "The configured endpoint must be absolute."));
         // Only applied configuration enters this identity; no user messages, system instructions,
         // native history, request metadata, keys, endpoint query/userinfo or host bundle IDs.
         var providerConfiguration = new SortedDictionary<string, JsonElement>(StringComparer.Ordinal);
@@ -195,11 +207,14 @@ public static class LlmConfigurationReports
                 provider == "anthropic" ? "This adapter validates schema syntax but emits unconstrained text; host validation is required."
                     : "Reports the serialized format, not universal JSON Schema or model support."),
             Capability("native_continuation_replay", !legacy, "Replay is bound to provider, API mode, exact model and instructions."),
-            Capability("durable_continuation_exchange", false, "No public durable codec is implemented in this source snapshot."),
-            Capability("native_search", false, "No native search option exists in this shared request contract; Lab search is a separate path."),
-            Capability("native_input_count", false, "No native pre-dispatch token-count operation exists on this client surface."));
+            Capability("durable_continuation_exchange", !legacy,
+                "Explicit versioned sensitive codec; exact native bindings apply. Hosts own authenticated storage and retention."),
+            Capability("native_search", provider == "openai", "Optional OpenAI native web search; model/account readiness and host acceptance remain separate."),
+            Capability("native_input_count", provider == "openai", "OpenAI input counting is a separate admitted operation; generation does not count automatically."),
+            Capability("prepared_request_admission", !legacy, "Optional exact preparation requires host admission before inference; ordinary client entrypoints remain compatible."));
         return new LlmConfigurationReport(provider, apiMode, request.ModelId, model, identity,
-            "provider_usage_after_response; pre_dispatch_count_not_provided", controls, capabilities,
+            provider == "openai" ? "native_count_available_separately; unmeasured" :
+                "provider_usage_after_response; pre_dispatch_count_not_provided", controls, capabilities,
             issues.ToImmutable(), new(LlmCapabilitySupport.Supported, "Agentica.Clients/" + version,
                 asOf, "Actual installed serializer inspected without HTTP; as-of is report creation, not model qualification."),
             legacy
@@ -285,6 +300,10 @@ public static class LlmConfigurationReports
             Value(Read(wire, "text.format.strict")), provider == "xai"
                 ? "The strict compatibility flag is serialized; equal OpenAI enforcement guarantees are not claimed."
                 : "Only Responses schema requests emit a strict flag; other adapters retain provider-defined behavior.");
+        Add("web_search_mode", request.WebSearch?.Mode.ToString().ToLowerInvariant(), Value(Read(wire, "tool_choice")),
+            "Null leaves search disabled; auto and required retain their provider meanings.");
+        Add("max_web_search_calls", request.WebSearch?.MaxToolCalls.ToString(CultureInfo.InvariantCulture), Value(Read(wire, "max_tool_calls")),
+            "Requested provider ceiling and observed-call validation; cumulative admission and billing remain host-owned.");
         return result.ToImmutable();
 
         void Add(string name, string? requested, string? applied, string explanation)
@@ -308,6 +327,7 @@ public static class LlmConfigurationReports
     {
         var supported = control switch
         {
+            "web_search_mode" or "max_web_search_calls" => provider == "openai",
             "temperature" => provider == "ollama" || geminiContent,
             "thought_output" => provider != "ollama",
             "structured_output" => provider != "anthropic",
@@ -323,6 +343,7 @@ public static class LlmConfigurationReports
 
     private static bool RejectedControl(string code, string control) => code switch
     {
+        "unsupported_web_search" => control is "web_search_mode" or "max_web_search_calls",
         "unsupported_reasoning_effort" or "invalid_reasoning_effort" => control == "reasoning_effort",
         "unsupported_thinking_budget" or "invalid_thinking_budget" => control == "thinking_budget_tokens",
         "conflicting_thinking_controls" => control is "reasoning_effort" or "thinking_budget_tokens",

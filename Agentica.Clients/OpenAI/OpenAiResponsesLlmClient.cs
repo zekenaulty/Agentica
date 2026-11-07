@@ -26,7 +26,7 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
     public OpenAiResponsesLlmClient(
         OpenAiResponsesClientOptions? options = null, HttpClient? httpClient = null)
         : this(options ?? OpenAiResponsesClientOptions.FromEnvironment(), httpClient,
-            ProviderName, "OPENAI_API_KEY", includeEncryptedReasoning: false)
+            ProviderName, "OPENAI_API_KEY", includeEncryptedReasoning: options?.IncludeEncryptedReasoning ?? true)
     {
     }
 
@@ -79,6 +79,7 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
         var modelId = string.IsNullOrWhiteSpace(request.ModelId)
             ? _options.DefaultModelId : request.ModelId;
         var body = BuildRequestBody(request, modelId);
+        var search = request.WebSearch is { } searchOptions ? new OpenAiWebSearchState(searchOptions, recorder) : null;
         using var message = new HttpRequestMessage(HttpMethod.Post,
             _options.Endpoint ?? OpenAiResponsesClientOptions.DefaultEndpoint)
         {
@@ -137,6 +138,9 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
                         var root = parsed.RootElement;
                         var kind = GetString(root, "type") ?? eventName;
                         LlmProviderObservations.Responses(recorder, root);
+                        if (search?.Observe(root, kind) == true)
+                            yield return new LlmStreamEvent(LlmStreamEventKind.Activity, "web_search." + kind)
+                            { WebSearch = recorder.WebSearch };
                         if (completed && kind is not null)
                         {
                             throw Failure("data_after_completion", LlmClientErrorKind.Transient);
@@ -197,7 +201,9 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
                                         throw Failure("missing_output_item", LlmClientErrorKind.Transient);
                                     output = JsonSerializer.SerializeToElement(outputItems.Values);
                                 }
-                                var finalText = ExtractTextAndValidate(output);
+                                search?.ObserveOutput(output);
+                                var finalText = ExtractTextAndValidate(output, request.WebSearch is not null);
+                                search?.ValidateCompletion();
                                 if (text.Length > 0 && !string.Equals(text.ToString(), finalText,
                                         StringComparison.Ordinal))
                                     throw Failure("output_mismatch", LlmClientErrorKind.Transient);
@@ -291,9 +297,19 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
             ["stream"] = true,
             ["store"] = false
         };
+        if (request.WebSearch is { } search)
+        {
+            if (_providerName != ProviderName) throw Failure("unsupported_web_search", LlmClientErrorKind.BadRequest);
+            body["tools"] = new[] { new { type = "web_search" } };
+            body["tool_choice"] = search.Mode == LlmWebSearchMode.Required ? "required" : "auto";
+            body["max_tool_calls"] = search.MaxToolCalls;
+            body["include"] = new[] { "web_search_call.action.sources" };
+        }
         if (instruction.Length > 0) body["instructions"] = instruction;
         if (_includeEncryptedReasoning)
-            body["include"] = new[] { "reasoning.encrypted_content" };
+            body["include"] = request.WebSearch is null
+                ? new[] { "reasoning.encrypted_content" }
+                : new[] { "reasoning.encrypted_content", "web_search_call.action.sources" };
         if (request.GenerationOptions?.MaxOutputTokens is { } maxTokens)
         {
             if (maxTokens <= 0) throw Failure("invalid_max_output_tokens", LlmClientErrorKind.BadRequest);
@@ -311,7 +327,7 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
     protected virtual bool SupportsReasoningEffort(LlmReasoningEffort effort) =>
         Enum.IsDefined(effort);
 
-    private string ExtractTextAndValidate(JsonElement output)
+    private string ExtractTextAndValidate(JsonElement output, bool allowWebSearch)
     {
         if (output.ValueKind != JsonValueKind.Array)
             throw Failure("missing_output", LlmClientErrorKind.Transient);
@@ -321,7 +337,7 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
         foreach (var item in output.EnumerateArray())
         {
             var kind = GetString(item, "type");
-            if (kind == "reasoning") continue;
+            if (kind == "reasoning" || kind == "web_search_call" && allowWebSearch) continue;
             if (kind != "message" || GetString(item, "role") != "assistant")
                 throw Failure("unsupported_output_item", LlmClientErrorKind.BadRequest);
             var content = GetObject(item, "content");

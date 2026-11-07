@@ -14,14 +14,17 @@ namespace Agentica.Clients.Llm;
 public sealed class LlmNativeContinuation : IDisposable
 {
     internal const int MaxPayloadCharacters = 4_194_304;
+    private readonly object _gate = new();
     private string? _systemInstruction;
     private string? _historyStepsJson;
+    private LlmContinuationConfigurationBinding? _configurationBinding;
 
     internal LlmNativeContinuation(
         string providerName,
         string modelId,
         string systemInstruction,
-        string historyStepsJson)
+        string historyStepsJson,
+        LlmContinuationConfigurationBinding? configurationBinding = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerName);
         ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
@@ -46,25 +49,57 @@ public sealed class LlmNativeContinuation : IDisposable
         ModelId = modelId;
         _systemInstruction = systemInstruction;
         _historyStepsJson = historyStepsJson;
+        _configurationBinding = configurationBinding;
     }
 
     public string ProviderName { get; }
     public string ModelId { get; }
 
     [JsonIgnore]
-    internal string SystemInstruction => Volatile.Read(ref _systemInstruction) ??
-        throw new ObjectDisposedException(nameof(LlmNativeContinuation));
+    internal string SystemInstruction => SnapshotOwned().Instruction;
 
     [JsonIgnore]
-    internal string HistoryStepsJson => Volatile.Read(ref _historyStepsJson) ??
-        throw new ObjectDisposedException(nameof(LlmNativeContinuation));
+    internal string HistoryStepsJson => SnapshotOwned().History;
+
+    internal (string Instruction, string History, LlmContinuationConfigurationBinding? Binding) SnapshotOwned()
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_historyStepsJson is null || _systemInstruction is null, this);
+            return (_systemInstruction, _historyStepsJson, _configurationBinding);
+        }
+    }
+
+    /// <summary>Creates separately disposable ownership while retaining an imported/attached binding.</summary>
+    internal LlmNativeContinuation CloneOwned()
+    {
+        var snapshot = SnapshotOwned();
+        return new(ProviderName, ModelId, snapshot.Instruction, snapshot.History, snapshot.Binding);
+    }
+
+    internal bool TryBindConfiguration(LlmContinuationConfigurationBinding binding)
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_historyStepsJson is null, this);
+            if (_configurationBinding is not null) return _configurationBinding == binding;
+            _configurationBinding = binding;
+            return true;
+        }
+    }
 
     public void Dispose()
     {
-        Interlocked.Exchange(ref _historyStepsJson, null);
-        Interlocked.Exchange(ref _systemInstruction, null);
+        lock (_gate)
+        {
+            _historyStepsJson = null;
+            _systemInstruction = null;
+            _configurationBinding = null;
+        }
     }
 
     public override string ToString() =>
         $"Native continuation for {ProviderName}/{ModelId} (payload redacted)";
 }
+
+internal sealed record LlmContinuationConfigurationBinding(string ApiMode, string ConfigurationIdentity);

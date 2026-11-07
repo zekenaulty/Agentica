@@ -19,7 +19,8 @@ public sealed class RetryingLlmClient : ILlmClient
         LlmRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (request.AttemptCapture is not null && _options.EffectiveMaxAttempts != 1)
+        if ((request.AttemptCapture is not null || request.PreparedDispatch is not null) &&
+            _options.EffectiveMaxAttempts != 1)
             throw new InvalidOperationException("A retained provider attempt requires one physical attempt; the host owns replacement admission.");
         using var callTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         callTimeout.CancelAfter(_options.EffectiveCallTimeout);
@@ -290,7 +291,10 @@ public sealed class RetryingLlmClient : ILlmClient
             statusCode,
             attempts,
             errorClass)
-        { AttemptEvidence = (innerException as LlmClientException)?.AttemptEvidence ?? request.AttemptCapture?.Latest };
+        {
+            AttemptEvidence = (innerException as LlmClientException)?.AttemptEvidence ?? request.AttemptCapture?.Latest,
+            WebSearch = (innerException as LlmClientException)?.WebSearch ?? request.AttemptCapture?.LatestWebSearch
+        };
 
     private LlmClientException CallTimedOut(
         LlmRequest request,
@@ -304,7 +308,10 @@ public sealed class RetryingLlmClient : ILlmClient
             statusCode: null,
             attempts,
             errorClass: "llm_call_timeout")
-        { AttemptEvidence = (innerException as LlmClientException)?.AttemptEvidence ?? request.AttemptCapture?.Latest };
+        {
+            AttemptEvidence = (innerException as LlmClientException)?.AttemptEvidence ?? request.AttemptCapture?.Latest,
+            WebSearch = (innerException as LlmClientException)?.WebSearch ?? request.AttemptCapture?.LatestWebSearch
+        };
 
     private static string ReasonFor(LlmClientException exception) =>
         $"{exception.ErrorKind.ToString().ToLowerInvariant()}:{exception.ErrorClass}:{exception.StatusCode?.ToString() ?? "none"}";

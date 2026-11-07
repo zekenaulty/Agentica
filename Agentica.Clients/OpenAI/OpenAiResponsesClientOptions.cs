@@ -5,6 +5,9 @@ public sealed record OpenAiResponsesClientOptions(
     string DefaultModelId = "gpt-4.1",
     Uri? Endpoint = null)
 {
+    /// <summary>Requests opaque replay state for stateless reasoning continuity; never public thought text.</summary>
+    public bool IncludeEncryptedReasoning { get; init; } = true;
+
     public static Uri DefaultEndpoint { get; } =
         new("https://api.openai.com/v1/responses");
 

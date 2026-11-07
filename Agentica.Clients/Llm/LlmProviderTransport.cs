@@ -14,6 +14,8 @@ internal static class LlmProviderTransport
     {
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
+        if (request.PreparedDispatch is { } prepared)
+            await prepared.AdmitAsync(message, recorder, cancellationToken).ConfigureAwait(false);
         recorder.Observe(dispatchCertainty: LlmDispatchCertainty.MayHaveDispatched);
         var response = await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead,
             cancellationToken).ConfigureAwait(false);

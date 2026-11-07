@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "prepared-admission-binds-protocol-and-body",
+  "scope": "agentica",
+  "kind": "technical",
+  "status": "accepted",
+  "title": "Qualify prepared admission against the actual transport protocol",
+  "trigger": "prepared request admission exact body hash protocol headers Gemini GenerateContent mismatch",
+  "guidance": "Reuse actual serializers and compare the effective method, full endpoint, protocol headers, content type and bytes at the configured transport boundary before required host reservation. Do not infer wire headers from an earlier source revision or a similar provider mode. A six-mode counted HTTP fixture caught a legitimate GenerateContent call being denied because preparation omitted its newly emitted SSE Accept header. Preserve exact identity across native counting and inference, keep sizes separate from tokens, and keep count work separately admitted. Snapshot private native state with its imported binding rather than reconstructing it through a constructor that drops that metadata.",
+  "evidence": [
+    { "kind": "source_review", "reference": "Agentica.Clients/Llm/LlmPreparedCall.cs; LlmCallPreparation.cs; OpenAI/OpenAiInputTokenCounter.cs; docs/contracts/prepared-provider-calls.md", "revision": "P03 integrated on bde0d99 and 7ffc305, 2026-11-06" },
+    { "kind": "offline_test", "reference": "LlmPreparedCallTests; OpenAiInputTokenCounterTests; .agentica/verification/provider-readiness/p03/p03-full-focused-transport-binding.trx", "note": "Exact SDK10.0.302; integrated client suite452passed, including imported-binding, model attribution and mutable HTTP defaults. Tests qualify the configured offline boundary and sequential host reopen only." }
+  ],
+  "recheck": "Reinspect all protocol headers/builders after adapter changes. Injected handlers can rewrite or retry later; their physical-send behavior still needs host qualification. This does not prove concurrent production journal transactions, installed Lab or live model behavior.",
+  "tags": ["admission", "preparation", "providers", "protocol", "identity", "counting"],
+  "recorded_on": "2026-11-06"
+}
