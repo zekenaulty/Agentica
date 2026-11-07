@@ -8,7 +8,7 @@
   "source_commit": "cb9154dacb327880585d518d66ee24773b8cc1b9",
   "source_bridge_review_commit": "187b203c45d316e8f166dcb1cbd239e5a564a321",
   "implementation_scope": "Agentica repository and Agentica-owned workspaces",
-  "goal_status": "not_created",
+  "goal_status": "active",
   "publication_body_contract": {
     "source": "PLAN.md",
     "story_selector": "Exact heading identified by each story plan_anchor; include its entire section.",
@@ -227,9 +227,9 @@
         "contract",
         "offline"
       ],
-      "workflow_state": "todo",
-      "claim_owner": null,
-      "workspace": null,
+      "workflow_state": "in_progress",
+      "claim_owner": "root",
+      "workspace": "roadmap-reconciliation/Agentica",
       "publication_action": "created",
       "issue_url": "https://github.com/zekenaulty/Agentica/issues/48",
       "idempotency_marker": "<!-- agentica-plan:2026-11-06:P01 -->",
@@ -337,9 +337,9 @@
         "offline_contract",
         "capability_matrix"
       ],
-      "workflow_state": "todo",
-      "claim_owner": null,
-      "workspace": null,
+      "workflow_state": "in_progress",
+      "claim_owner": "provider_sdk_preflight",
+      "workspace": "provider-capability-report/Agentica",
       "publication_action": "created",
       "issue_url": "https://github.com/zekenaulty/Agentica/issues/51",
       "idempotency_marker": "<!-- agentica-plan:2026-11-06:P04 -->",
@@ -490,9 +490,9 @@
         "packed_consumer",
         "durable_host_fixture"
       ],
-      "workflow_state": "todo",
-      "claim_owner": null,
-      "workspace": null,
+      "workflow_state": "in_progress",
+      "claim_owner": "provider_story_plan_review",
+      "workspace": "provider-consumer-proof/Agentica",
       "publication_action": "created",
       "issue_url": "https://github.com/zekenaulty/Agentica/issues/55",
       "idempotency_marker": "<!-- agentica-plan:2026-11-06:P08 -->",
@@ -544,7 +544,7 @@
     "date": "2026-11-06",
     "timezone": "America/Chicago",
     "source": "Owner instruction in current Codex chat: approval granted; create GitHub issues.",
-    "scope": "Approved v1.1 program and epic/story publication; execution goal remains a subsequent explicit step."
+    "scope": "Approved v1.1 program, epic/story publication and execution goal. Owner authorized stable reviewed PR merges and key learning capture on 2026-11-06."
   },
   "publication": {
     "date": "2026-11-06",

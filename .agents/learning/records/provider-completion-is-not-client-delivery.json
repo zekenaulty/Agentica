@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "provider-completion-is-not-client-delivery",
+  "scope": "agentica",
+  "kind": "technical",
+  "status": "accepted",
+  "title": "Retain completed provider facts through failed client delivery",
+  "trigger": "provider attempt stream completed late error cancellation usage retained evidence wrapper",
+  "guidance": "Record provider status, IDs and cumulative usage before validating or delivering output. A provider-completed response can still fail client validation, encounter data after completion or lose delivery to cancellation. Keep provider status and client outcome separate, buffer success until stream enumeration ends, and retain facts through the original exception or an explicitly owned capture. Correct a capture only when the completed snapshot proves this invocation owns it; rejection of capture reuse must not rewrite an earlier attempt. Best-effort UI callbacks cannot be the only evidence channel. Preserve ordinary cancellation types and tokens.",
+  "evidence": [
+    {
+      "kind": "source_review",
+      "reference": "Agentica.Clients/Llm/LlmAttemptCapture.cs; LlmStreamCompletion.cs; docs/contracts/provider-attempt-evidence.md",
+      "revision": "P01 on base ae69a2f00eac164dc9bc3ab8526b2ddbee383cb7, 2026-11-06"
+    },
+    {
+      "kind": "offline_test",
+      "reference": "LlmAttemptEvidenceTests and LlmStreamCompletionEvidenceTests; .agentica/verification/provider-readiness/p01/p01-full-clients.trx",
+      "note": "Exact SDK 10.0.302; focused client suite 254 passed. Synthetic contracts prove wrapper/capture behavior, not all provider adapters or installed hosts."
+    }
+  ],
+  "recheck": "Reinspect ownership, iterator disposal and exception enrichment when changing adapters or completion helpers. P02 must separately qualify protocol parsing and transport; durable host admission, paid settlement and external migration are not proven by these fixtures.",
+  "tags": ["providers", "streaming", "cancellation", "usage", "evidence", "ownership"],
+  "recorded_on": "2026-11-06"
+}
