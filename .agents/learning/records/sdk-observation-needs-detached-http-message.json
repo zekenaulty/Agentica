@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "id": "sdk-observation-needs-detached-http-message",
+  "scope": "agentica",
+  "kind": "technical",
+  "status": "accepted",
+  "title": "Use the supported SDK transport seam with a detached HTTP message",
+  "trigger": "SDK provider transport injected HttpClient already sent message physical attempt retries",
+  "guidance": "Google.GenAI 1.6.1 constructs a private HTTP client and cannot qualify injected observation or redirect control. The pinned 1.13.0 ClientOptions.HttpClientFactory supplies the supported seam. An SDK HTTP request must be detached before sending it through another HttpClient because .NET marks the original SDK message already sent. Copy method, URI, HTTP version policy, headers and exact body bytes; retain response fields before SDK deserialization. Guard the per-invocation handler against a second inference send and qualify retryable429/503 statuses with counted offline transport fixtures. The host remains responsible for injected inner handler chains and durable admission.",
+  "evidence": [
+    {
+      "kind": "test",
+      "reference": "Agentica.Clients.Tests/ProviderAttemptRetentionTests.cs",
+      "revision": "P02 implementation based on a4d17b4; recorded with this source change",
+      "note": "Pinned .NET 10.0.302 Release fixtures across six wire modes plus SDK 1.13.0; no live provider calls."
+    },
+    {
+      "kind": "source_review",
+      "reference": "https://github.com/googleapis/dotnet-genai/blob/6bea845f6bddc5215ff4a89aed521ae4084678c9/Google.GenAI/HttpApiClient.cs",
+      "revision": "6bea845f6bddc5215ff4a89aed521ae4084678c9",
+      "note": "One SDK SendAsync per request method; supported client factory exists in matching ApiClient source."
+    }
+  ],
+  "recheck": "Recheck when the SDK version, injected handler chain, stream enumeration, cancellation boundary or native mapper changes. Fixture results do not prove live service behavior or host durable admission.",
+  "tags": [
+    "provider",
+    "sdk",
+    "http",
+    "single-attempt",
+    "observation"
+  ],
+  "recorded_on": "2026-11-06"
+}

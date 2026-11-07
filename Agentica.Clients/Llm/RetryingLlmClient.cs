@@ -19,6 +19,8 @@ public sealed class RetryingLlmClient : ILlmClient
         LlmRequest request,
         CancellationToken cancellationToken = default)
     {
+        if (request.AttemptCapture is not null && _options.EffectiveMaxAttempts != 1)
+            throw new InvalidOperationException("A retained provider attempt requires one physical attempt; the host owns replacement admission.");
         using var callTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         callTimeout.CancelAfter(_options.EffectiveCallTimeout);
         var callToken = callTimeout.Token;
@@ -287,7 +289,8 @@ public sealed class RetryingLlmClient : ILlmClient
             errorKind,
             statusCode,
             attempts,
-            errorClass);
+            errorClass)
+        { AttemptEvidence = (innerException as LlmClientException)?.AttemptEvidence ?? request.AttemptCapture?.Latest };
 
     private LlmClientException CallTimedOut(
         LlmRequest request,
@@ -300,7 +303,8 @@ public sealed class RetryingLlmClient : ILlmClient
             LlmClientErrorKind.Transient,
             statusCode: null,
             attempts,
-            errorClass: "llm_call_timeout");
+            errorClass: "llm_call_timeout")
+        { AttemptEvidence = (innerException as LlmClientException)?.AttemptEvidence ?? request.AttemptCapture?.Latest };
 
     private static string ReasonFor(LlmClientException exception) =>
         $"{exception.ErrorKind.ToString().ToLowerInvariant()}:{exception.ErrorClass}:{exception.StatusCode?.ToString() ?? "none"}";

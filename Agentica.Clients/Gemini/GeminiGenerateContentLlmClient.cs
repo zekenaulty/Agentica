@@ -20,7 +20,7 @@ public sealed class GeminiGenerateContentLlmClient : ILlmStreamingClient
     private const int MaxOutputCharacters = 4_194_304;
     private const int MaxSummaryCharacters = 262_144;
     private const int MaxParts = 8192;
-    private static readonly HttpClient SharedHttpClient = new();
+    private static readonly HttpClient SharedHttpClient = LlmProviderTransport.CreateDefaultClient();
     private readonly GeminiGenerateContentClientOptions _options;
     private readonly HttpClient _httpClient;
 
@@ -39,8 +39,17 @@ public sealed class GeminiGenerateContentLlmClient : ILlmStreamingClient
         return completed ?? throw Failure("stream_incomplete");
     }
 
-    public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
-        LlmRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var model = string.IsNullOrWhiteSpace(request.ModelId) ? _options.DefaultModelId : request.ModelId;
+        return LlmProviderAttempt.StreamAsync(request, ProviderName, model,
+            recorder => StreamCoreAsync(request, recorder, cancellationToken), cancellationToken);
+    }
+
+    private async IAsyncEnumerable<LlmStreamEvent> StreamCoreAsync(
+        LlmRequest request, LlmAttemptRecorder recorder, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         var apiKey = _options.ApiKey ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY")
@@ -55,7 +64,7 @@ public sealed class GeminiGenerateContentLlmClient : ILlmStreamingClient
         };
         message.Headers.TryAddWithoutValidation("x-goog-api-key", apiKey);
         message.Headers.Accept.ParseAdd("text/event-stream");
-        using var response = await SendAsync(message, cancellationToken).ConfigureAwait(false);
+        using var response = await SendAsync(message, request, recorder, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
             throw new LlmClientException(ProviderName,
                 $"Gemini GenerateContent returned HTTP {(int)response.StatusCode}.",
@@ -78,6 +87,7 @@ public sealed class GeminiGenerateContentLlmClient : ILlmStreamingClient
                 if (data.Length > 0)
                 {
                     using var chunk = ParseEvent(data.ToString());
+                        LlmProviderObservations.GenerateContent(recorder, chunk.RootElement);
                     foreach (var item in state.Apply(chunk.RootElement)) yield return item;
                     data.Clear();
                 }
@@ -108,11 +118,11 @@ public sealed class GeminiGenerateContentLlmClient : ILlmStreamingClient
             NativeContinuation: continuation));
     }
 
-    private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage message, CancellationToken cancellationToken)
+    private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage message, LlmRequest request, LlmAttemptRecorder recorder, CancellationToken cancellationToken)
     {
         try
         {
-            return await _httpClient.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+            return await LlmProviderTransport.SendAsync(_httpClient, message, request, recorder, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (HttpRequestException)
