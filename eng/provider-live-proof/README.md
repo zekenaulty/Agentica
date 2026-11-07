@@ -24,11 +24,23 @@ missing usage, and late errors. Reasoning tokens are retained separately and are
 never added a second time to the inclusive output-token cost.
 
 Implementation qualification on **2026-11-06**: exact SDK **10.0.302**, Release
-build with warnings as errors passed; all **13 offline guard cases passed**.
+build with warnings as errors passed; all **14 offline guard cases passed**.
 Independent source review checked guard custody and matched the scenario verifier
 to the current saved receipt/event/artifact shapes. No host startup, credential
 read, live model call, browser acceptance or completed real-provider loop is
 claimed by this offline result.
+
+The three-phase fixture also exercises the real Lab executor, native replay,
+shared client and AgenticaRunner with fake HTTP/count responses. At the proof's
+40,000-character setting its wire bodies measured approximately 17.6k / 35.1k /
+24.7k characters and input item counts 1 / 4 / 1: replay was retained for the second
+planning decision and reset for the third while both scratch and calculation
+evidence remained visible. Native token counts in this fixture are synthetic;
+the real 8,000-token guard remains authoritative. The setting leaves a fresh
+planning ceiling of 21,952 characters after the existing 18,048-character repair
+reserve. A 32,000-character setting leaves only 13,952 and cannot fit the observed
+16,674-character fresh refinement. These character and native-token limits are
+independent; reducing one does not prove the other fits.
 
 ## Explicit live invocation
 

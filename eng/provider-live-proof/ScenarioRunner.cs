@@ -30,7 +30,7 @@ internal static class ScenarioRunner
         ContextWindowTokens = 131072,
         // Character bounds include planner instructions/schema and repair reserve.
         // The guarded native count independently enforces the 8,000-token limit.
-        MaxInputCharacters = 80000,
+        MaxInputCharacters = 40000,
         MaxHistoryMessages = 0,
         HistoryPolicy = "stop",
         MaxSteps = 6,

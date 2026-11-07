@@ -27,7 +27,8 @@ internal static class ProofSelfTests
             ("contradictory-usage-preserves-maxima-and-blocks-further-work", ContradictoryUsage),
             ("lost-response-is-not-replayed-after-reopen", LostResponse),
             ("cancellation-after-terminal-retains-reservation", Cancellation),
-            ("unapproved-route-and-controls-denied", Controls)
+            ("unapproved-route-and-controls-denied", Controls),
+            ("three-phase-harness-bounds-native-replay", HarnessBudgetSelfTest.RunAsync)
         };
         foreach (var item in cases)
         {
