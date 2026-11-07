@@ -50,8 +50,13 @@ public static partial class LabWebApplication
             () => services.GetRequiredService<SemanticMemoryStorageProvider>(), () => memoryEmbeddingProvider ??
                 new OpenAiEmbeddingClient(new(ExperimentSemanticRecall.Profile, openAi.Capture().ApiKey))));
         if (experimentExecutor is null) builder.Services.AddSingleton<IExperimentExecutor>(services =>
-            new OpenAiExperimentExecutor(services.GetRequiredService<OpenAiProviderConfiguration>()));
-        else builder.Services.AddSingleton(experimentExecutor);
+            new OpenAiExperimentExecutor(services.GetRequiredService<OpenAiProviderConfiguration>(), inputCountJournal: services.GetRequiredService<ExperimentStore>()));
+        else builder.Services.AddSingleton<IExperimentExecutor>(services =>
+        {
+            if (experimentExecutor is IExperimentInputCountJournalConsumer consumer)
+                consumer.BindInputCountJournal(services.GetRequiredService<ExperimentStore>());
+            return experimentExecutor;
+        });
         builder.Services.AddSingleton<ExperimentService>();
         builder.Services.AddHostedService(services => services.GetRequiredService<ExperimentService>());
         builder.Services.AddSingleton<ExperimentHistoryMaintenance>();

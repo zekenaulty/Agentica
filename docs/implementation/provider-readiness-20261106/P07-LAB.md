@@ -116,3 +116,26 @@ The accepted reusable lesson is recorded in
 `.agents/learning/records/agentica-optional-inspection-cannot-own-provider-outcome.json`.
 Its proof is deterministic host behavior at the implementation pin, not live or
 installed acceptance. No shared/global memory store was modified.
+
+
+## Borrowed transport and native-count custody correction
+
+Independent review identified that binding the outer observed client did not bind
+actual borrowed forwarding defaults. The Lab now captures the actual inner default
+headers, timeout and HTTP version policy into an opaque route fingerprint. Required
+count/request journals and the final physical forwarding boundary recheck that
+binding. A changed OpenAI project header prevents dispatch under the old identity.
+
+Native count preparation can precede creation of a durable chat turn. Its required
+reservation and final observed capture therefore live in a separate Lab-owned
+`input_count_attempts` SQLite table, rather than the lossy native event feed. Success,
+HTTP error and cancellation retain observed request IDs/status on reopen. Failed
+reservation yields zero count POSTs. A count measurement includes its attempt ID.
+The default app and supplied cooperating executor/wrapper composition bind this
+journal to the app's actual ExperimentStore. Standalone component constructors keep
+an explicitly named non-durable compatibility journal and claim only their fixture
+boundary.
+
+Final focused custody/executor/counter suite: **60/60 PASS**, including the count-journal project-mutation negative. No paid
+request or host startup occurred in this correction lane. Required CI remains with
+root integration.

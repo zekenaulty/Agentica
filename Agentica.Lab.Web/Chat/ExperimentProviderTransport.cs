@@ -12,6 +12,7 @@ namespace Agentica.Lab.Web.Chat;
 internal sealed class ExperimentProviderTransport : HttpMessageHandler
 {
     private readonly HttpClient _inner;
+    private readonly ExperimentBorrowedTransportBinding _binding;
     private readonly ExperimentExecutionContext _context;
     private readonly Dictionary<string, (string CallId, string Purpose)> _admitted = new(StringComparer.Ordinal);
     private readonly List<LlmAttemptEvidence> _attempts = [];
@@ -34,6 +35,7 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
     public ExperimentProviderTransport(HttpClient inner, ExperimentExecutionContext context)
     {
         _inner = inner;
+        _binding = new(inner);
         _context = context;
     }
 
@@ -45,7 +47,7 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
     {
         AdmissionFailure = null; ProviderErrorCode = null; ProviderErrorMessage = null;
         return new(_context.Turn.Id + "-attempt-" + Interlocked.Increment(ref _prepared),
-            "lab.chat", purpose, executionBundleReference: _context.Turn.Id + ":settings:" + _context.Turn.SettingsRevision);
+            "lab.chat", purpose, routeFingerprint: _binding.Identity, executionBundleReference: _context.Turn.Id + ":settings:" + _context.Turn.SettingsRevision);
     }
 
     internal ILlmCallAdmission Admission(LlmPreparedCall prepared, string purpose) => new TurnAdmission(this, prepared, purpose);
@@ -127,9 +129,16 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
         }
     }
 
+    private void ValidateBinding()
+    {
+        try { _binding.Validate(); }
+        catch (ExperimentException error) { AdmissionFailure = error.Code; throw; }
+    }
+
     private async ValueTask AdmitAsync(LlmPreparedCall prepared, string purpose,
         LlmPreparedRequestDescriptor descriptor, CancellationToken cancellationToken)
     {
+        ValidateBinding();
         if (descriptor != prepared.Descriptor) throw new InvalidOperationException("Prepared admission identity changed.");
         var settings = _context.Turn.Settings;
         var callId = descriptor.References.AttemptId;
@@ -209,6 +218,14 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
                 throw new ExperimentException(AdmissionFailure, $"The complete provider request has {measurement.Tokens} input tokens, exceeding the {allowance}-token allowance. No generation request was dispatched.");
             }
             cancellationToken.ThrowIfCancellationRequested();
+            ValidateBinding();
+            await _context.Trace(new("provider.dispatch", new
+            {
+                status = "admitted; awaiting single send",
+                providerCalls = Calls + 1,
+                borrowedTransportIdentity = _binding.Identity
+            }, callId)).ConfigureAwait(false);
+            ValidateBinding();
             lock (_gate)
                 if (!_admitted.TryAdd(descriptor.BodyHash, (callId, purpose)))
                     throw new InvalidOperationException("An equal prepared request already owns an unused reservation.");
@@ -226,6 +243,7 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        ValidateBinding();
         var bytes = request.Content is null ? [] : await request.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
         var hash = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(bytes));
         (string CallId, string Purpose) reservation;
@@ -244,7 +262,7 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
         foreach (var header in request.Headers) forwarded.Headers.TryAddWithoutValidation(header.Key, header.Value);
         if (request.Content is not null)
             foreach (var header in request.Content.Headers) forwarded.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
-        await _context.Trace(new("provider.dispatch", new { status = "dispatching", providerCalls = Calls }, reservation.CallId)).ConfigureAwait(false);
+        ValidateBinding();
         var response = await _inner.SendAsync(forwarded, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {

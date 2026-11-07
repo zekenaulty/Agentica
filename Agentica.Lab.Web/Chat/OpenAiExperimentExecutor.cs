@@ -16,7 +16,7 @@ using Agentica.Tools;
 namespace Agentica.Lab.Web.Chat;
 
 /// <summary>Lab-owned direct experiment transport and opt-in real Agentica harness host.</summary>
-public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentInputCounterSource, IDisposable
+public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentInputCounterSource, IExperimentInputCountJournalConsumer, IDisposable
 {
     public const string ResponseToolId = "experiment.response.emit";
     public const string ResponseArtifactKind = "experiment.response";
@@ -24,14 +24,16 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentI
     private readonly HttpClient _http;
     private readonly ILabPlannerFactory? _plannerFactory;
     private readonly bool _ownsHttp;
+    private IExperimentInputCountJournal? _countJournal;
 
     public OpenAiExperimentExecutor(OpenAiProviderConfiguration configuration, HttpClient? httpClient = null,
-        ILabPlannerFactory? plannerFactory = null)
+        ILabPlannerFactory? plannerFactory = null, IExperimentInputCountJournal? inputCountJournal = null)
     {
         _configuration = configuration;
         _ownsHttp = httpClient is null;
         _http = httpClient ?? new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
         _plannerFactory = plannerFactory;
+        _countJournal = inputCountJournal;
     }
 
     public async Task<ExperimentExecutionResult> ExecuteAsync(ExperimentExecutionContext context, CancellationToken cancellationToken)
@@ -46,7 +48,7 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentI
         {
             var snapshot = _configuration.Capture();
             var key = snapshot.ApiKey ?? throw new ExperimentException("provider.not_configured", "Configure the existing OpenAI provider credential before sending a turn.");
-            transport.AttachCounter(context.InputTokenCounter ?? new OpenAiExperimentInputTokenCounter(_http, key, settings.MaxProviderCalls + 32),
+            transport.AttachCounter(context.InputTokenCounter ?? new OpenAiExperimentInputTokenCounter(_http, key, settings.MaxProviderCalls + 32, _countJournal),
                 ownsCounter: context.InputTokenCounter is null, key);
             if (settings.MemoryEnabled)
                 throw new ExperimentException("memory.disabled", "The experiment memory adapter is not enabled.");
@@ -59,32 +61,40 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentI
         catch (OperationCanceledException)
         {
             return new(cancellationToken.IsCancellationRequested ? "cancelled" : "failed", state.Text.ToString(),
-                new { providerCalls = transport.Calls, attempts = transport.Attempts, webSearchOutcomes = transport.SearchOutcomes, telemetryDeliveryFailed = transport.TelemetryDeliveryFailed, provider = state.Usage }, cancellationToken.IsCancellationRequested ? "turn.cancelled" : "turn.timeout",
+                new { providerCalls = transport.Calls, attempts = transport.Attempts, webSearchOutcomes = transport.SearchOutcomes, inputCountAttempts = (context.InputTokenCounter as IExperimentInputCountEvidenceSource)?.CountAttempts, telemetryDeliveryFailed = transport.TelemetryDeliveryFailed, provider = state.Usage }, cancellationToken.IsCancellationRequested ? "turn.cancelled" : "turn.timeout",
                 cancellationToken.IsCancellationRequested ? "Turn cancelled. Partial output is retained." : "The turn time limit expired. No automatic retry was made.");
         }
         catch (ExperimentException exception)
         {
-            return new("failed", state.Text.ToString(), new { providerCalls = transport.Calls, attempts = transport.Attempts, webSearchOutcomes = transport.SearchOutcomes, telemetryDeliveryFailed = transport.TelemetryDeliveryFailed, provider = state.Usage }, exception.Code, exception.Message);
+            return new("failed", state.Text.ToString(), new { providerCalls = transport.Calls, attempts = transport.Attempts, webSearchOutcomes = transport.SearchOutcomes, inputCountAttempts = (context.InputTokenCounter as IExperimentInputCountEvidenceSource)?.CountAttempts, telemetryDeliveryFailed = transport.TelemetryDeliveryFailed, provider = state.Usage }, exception.Code, exception.Message);
         }
         catch (LlmClientException exception)
         {
-            return new("failed", state.Text.ToString(), new { providerCalls = transport.Calls, attempts = transport.Attempts, webSearchOutcomes = transport.SearchOutcomes, telemetryDeliveryFailed = transport.TelemetryDeliveryFailed, provider = state.Usage },
+            return new("failed", state.Text.ToString(), new { providerCalls = transport.Calls, attempts = transport.Attempts, webSearchOutcomes = transport.SearchOutcomes, inputCountAttempts = (context.InputTokenCounter as IExperimentInputCountEvidenceSource)?.CountAttempts, telemetryDeliveryFailed = transport.TelemetryDeliveryFailed, provider = state.Usage },
                 transport.AdmissionFailure ?? transport.ProviderErrorCode ?? "provider." + (exception.ErrorClass switch
                 { "stream_incomplete" => "incomplete_stream", "unsupported_output_item" => "unsupported_item", _ => exception.ErrorClass ?? "failure" }),
                 transport.ProviderErrorMessage ?? "The provider could not complete the configured request. No automatic retry was made.");
         }
         catch (Exception exception) when (exception is HttpRequestException or IOException or JsonException or InvalidOperationException)
         {
-            return new("failed", state.Text.ToString(), new { providerCalls = transport.Calls, attempts = transport.Attempts, webSearchOutcomes = transport.SearchOutcomes, telemetryDeliveryFailed = transport.TelemetryDeliveryFailed, provider = state.Usage }, "provider.stream_failed",
+            return new("failed", state.Text.ToString(), new { providerCalls = transport.Calls, attempts = transport.Attempts, webSearchOutcomes = transport.SearchOutcomes, inputCountAttempts = (context.InputTokenCounter as IExperimentInputCountEvidenceSource)?.CountAttempts, telemetryDeliveryFailed = transport.TelemetryDeliveryFailed, provider = state.Usage }, "provider.stream_failed",
                 "The provider stream did not complete. Partial output is retained; no automatic retry was made.");
         }
+    }
+
+    public void BindInputCountJournal(IExperimentInputCountJournal journal)
+    {
+        ArgumentNullException.ThrowIfNull(journal);
+        if (_countJournal is not null && !ReferenceEquals(_countJournal, journal))
+            throw new InvalidOperationException("The executor already owns a different input-count journal.");
+        _countJournal = journal;
     }
 
     public IExperimentInputTokenCounter CreateInputTokenCounter(ExperimentSettings settings)
     {
         var key = _configuration.Capture().ApiKey ?? throw new ExperimentException("provider.not_configured",
             "Configure the existing OpenAI credential before counting this conversation's input.");
-        return new OpenAiExperimentInputTokenCounter(_http, key, settings.MaxProviderCalls + 32);
+        return new OpenAiExperimentInputTokenCounter(_http, key, settings.MaxProviderCalls + 32, _countJournal);
     }
 
     /// <summary>Provider-owned accessible IDs; this makes no generation request.</summary>
@@ -136,7 +146,7 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentI
             providerCalls = transport.Calls
         }, transport.LatestCallId)).ConfigureAwait(false);
         return new("completed", state.FinalText ?? state.Text.ToString(), new
-        { providerCalls = transport.Calls, attempts = transport.Attempts, webSearchOutcomes = transport.SearchOutcomes, telemetryDeliveryFailed = transport.TelemetryDeliveryFailed, webSearchCalls = state.WebSearchCalls, provider = state.Usage });
+        { providerCalls = transport.Calls, attempts = transport.Attempts, webSearchOutcomes = transport.SearchOutcomes, inputCountAttempts = (context.InputTokenCounter as IExperimentInputCountEvidenceSource)?.CountAttempts, telemetryDeliveryFailed = transport.TelemetryDeliveryFailed, webSearchCalls = state.WebSearchCalls, provider = state.Usage });
     }
 
     private async Task<ExperimentExecutionResult> HarnessAsync(ExperimentExecutionContext context, HttpClient observed,
@@ -206,6 +216,7 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentI
             providerCalls = transport.Calls,
             attempts = transport.Attempts,
             webSearchOutcomes = transport.SearchOutcomes,
+            inputCountAttempts = (context.InputTokenCounter as IExperimentInputCountEvidenceSource)?.CountAttempts,
             telemetryDeliveryFailed = transport.TelemetryDeliveryFailed,
             webSearchCalls = webBudget.CompletedCalls,
             unresolvedWebSearchReservation = webBudget.UnresolvedReservation,
@@ -221,6 +232,7 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentI
                 providerCalls = transport.Calls,
                 attempts = transport.Attempts,
                 webSearchOutcomes = transport.SearchOutcomes,
+                inputCountAttempts = (context.InputTokenCounter as IExperimentInputCountEvidenceSource)?.CountAttempts,
                 telemetryDeliveryFailed = transport.TelemetryDeliveryFailed,
                 webSearchCalls = webBudget.CompletedCalls,
                 unresolvedWebSearchReservation = webBudget.UnresolvedReservation,
@@ -233,6 +245,7 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentI
                 providerCalls = transport.Calls,
                 attempts = transport.Attempts,
                 webSearchOutcomes = transport.SearchOutcomes,
+                inputCountAttempts = (context.InputTokenCounter as IExperimentInputCountEvidenceSource)?.CountAttempts,
                 telemetryDeliveryFailed = transport.TelemetryDeliveryFailed,
                 webSearchCalls = webBudget.CompletedCalls,
                 unresolvedWebSearchReservation = webBudget.UnresolvedReservation,
