@@ -133,6 +133,38 @@ public sealed class ExperimentPersistenceTests
     }
 
     [Fact]
+    public void Reopened_trace_tail_includes_the_latest_event_when_payload_size_shortens_each_page()
+    {
+        using var fixture = new StoreFixture();
+        string chatId, turnId, otherId;
+        long latest;
+        using (var store = new ExperimentStore(fixture.Path))
+        {
+            chatId = store.Create(new(), "Trace owner").Id;
+            otherId = store.Create(new(), "Other conversation").Id;
+            var turn = store.Begin(chatId, new("inspect saved trace")).Turn;
+            turnId = turn.Id;
+            for (var index = 0; index < 40; index++)
+                store.Append(chatId, turnId, new("provider.item", new { text = new string('x', 5000), index }));
+            store.CompleteAndTrace(chatId, turnId, new("completed", "Saved answer"));
+            latest = store.GetTurn(chatId, turnId).TraceCount;
+        }
+        using var reopened = new ExperimentStore(fixture.Path);
+        var head = reopened.ReadEvents(chatId, turnId, 0, 100);
+        var tail = reopened.ReadTraceTail(chatId, turnId, 100);
+        Assert.Equal(1, head[0].Sequence);
+        Assert.True(head[^1].Sequence < latest);
+        Assert.True(tail[0].Sequence > head[^1].Sequence);
+        Assert.Equal(latest, tail[^1].Sequence);
+        Assert.Equal("turn.completed", tail[^1].Type);
+        Assert.Equal(tail.OrderBy(item => item.Sequence), tail);
+        Assert.InRange(tail.Sum(item => JsonSerializer.Serialize(item, HostProtocol.Json).Length), 1, 32000);
+        Assert.Single(reopened.ReadTraceTail(chatId, turnId, 1));
+        Assert.Throws<ExperimentException>(() => reopened.ReadTraceTail(otherId, turnId, 100));
+        Assert.Equal("Saved answer", reopened.GetTurn(chatId, turnId).AssistantText);
+    }
+
+    [Fact]
     public void Failed_schema_open_releases_the_process_lease_for_repair()
     {
         using var fixture = new StoreFixture();

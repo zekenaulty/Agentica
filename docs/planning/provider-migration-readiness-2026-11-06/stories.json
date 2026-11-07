@@ -457,14 +457,16 @@
         "isolated_lab",
         "browser"
       ],
-      "workflow_state": "in_progress",
+      "workflow_state": "complete",
       "claim_owner": "lab_provider_adoption",
       "workspace": "lab-shared-provider-adoption/Agentica",
       "publication_action": "created",
       "issue_url": "https://github.com/zekenaulty/Agentica/issues/54",
       "idempotency_marker": "<!-- agentica-plan:2026-11-06:P07 -->",
       "issue_number": 54,
-      "github_issue_id": 6251971699
+      "github_issue_id": 6251971699,
+      "implementation_pr_url": "https://github.com/zekenaulty/Agentica/pull/63",
+      "merge_commit": "8b466e5f2795a26bf4f49756dc3d76592936053e"
     },
     {
       "id": "P08",
@@ -499,7 +501,7 @@
         "packed_consumer",
         "durable_host_fixture"
       ],
-      "workflow_state": "review",
+      "workflow_state": "complete",
       "claim_owner": "packed_recovery_host",
       "workspace": "provider-recovery-consumer/Agentica",
       "publication_action": "created",
@@ -507,7 +509,8 @@
       "idempotency_marker": "<!-- agentica-plan:2026-11-06:P08 -->",
       "issue_number": 55,
       "github_issue_id": 6251972404,
-      "implementation_pr_url": "https://github.com/zekenaulty/Agentica/pull/62"
+      "implementation_pr_url": "https://github.com/zekenaulty/Agentica/pull/62",
+      "merge_commit": "74d470a7f820ff0a0290a26e6ccd8c137e712395"
     },
     {
       "id": "P09",
@@ -540,14 +543,16 @@
         "live_openai",
         "external_handoff_only"
       ],
-      "workflow_state": "in_progress",
+      "workflow_state": "release_review",
       "claim_owner": "root",
       "workspace": "roadmap-reconciliation/Agentica",
       "publication_action": "created",
       "issue_url": "https://github.com/zekenaulty/Agentica/issues/56",
       "idempotency_marker": "<!-- agentica-plan:2026-11-06:P09 -->",
       "issue_number": 56,
-      "github_issue_id": 6251972988
+      "github_issue_id": 6251972988,
+      "qualification_file": "../../implementation/provider-readiness-20261106/P09-QUALIFICATION.md",
+      "completion_record": "Final exact-head CI and merge recorded on GitHub issue #56; this manifest is the pre-merge execution cut."
     }
   ],
   "approval": {

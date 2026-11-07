@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "id": "agentica-live-proof-custody-survives-restart",
+  "scope": "agentica",
+  "kind": "technical",
+  "status": "accepted",
+  "title": "Provider proof custody must cover physical count work, exact generation input and uncertain usage across restart",
+  "trigger": "live provider proof native count compiler budget physical POST durable ledger restart streaming conflicting usage reservation",
+  "guidance": "Place the cumulative proof guard below the borrowed HTTP client used by both context compilation and generation. Reserve and persist before every physical POST; a new counter or host must not reset capacity. Freeze the complete generation bytes once and bind native input measurements to their full hash and the separately observed count attempt, rather than only the count endpoint's filtered fields. Revalidate stored links on reopen. Unknown dispatch or usage retains its reservation and never authorizes an automatic replay. Preserve maximum observed token facts and mark contradictory response identities or decreasing counts ambiguous; a later terminal must not erase known exposure. Reasoning is part of inclusive Responses output tokens. If known exposure exceeds the original reservation, retain it and stop further work. Keep private output and credentials outside the structural ledger.",
+  "evidence": [
+    {
+      "kind": "offline_test",
+      "reference": "eng/provider-live-proof/ProofSelfTests.cs",
+      "revision": "cccb960bba32768f6f3adf76432d2e001d3ddec3",
+      "note": "Exact SDK 10.0.302 Release: 13 fake-handler guard cases passed, including restart caps, required-journal failure, changed full body, fabricated persisted link, lost response, cancellation, late error and contradictory usage. No network, credential read or host startup."
+    },
+    {
+      "kind": "source_review",
+      "reference": "eng/provider-live-proof/ProofLedger.cs;eng/provider-live-proof/DurableProviderGuard.cs;eng/provider-live-proof/LinkedCountExecutor.cs",
+      "revision": "cccb960bba32768f6f3adf76432d2e001d3ddec3",
+      "note": "A process-exclusive ledger, full frozen generation hash and actual successful count attempt jointly govern inference admission. The narrowed live cohort rejects native provider tools."
+    }
+  ],
+  "recheck": "Recheck when provider billing semantics, model limits, native search or other provider-side tool context, count request projection, storage trust, retry behavior or transport composition changes. The isolated proof driver trusts its host state files; this is offline qualification and does not establish a completed paid run, billing invoice, browser acceptance or production migration.",
+  "tags": ["provider", "counting", "budget", "restart", "streaming", "evidence", "privacy"],
+  "recorded_on": "2026-11-06"
+}

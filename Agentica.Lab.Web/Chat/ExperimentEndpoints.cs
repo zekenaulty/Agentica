@@ -75,10 +75,11 @@ public static class ExperimentEndpoints
         group.MapGet("/{id}/turns/{turnId}", (string id, string turnId, ExperimentStore store) => store.GetTurn(id, turnId));
         group.MapPost("/{id}/turns/{turnId}/cancel", (string id, string turnId, ExperimentService service) =>
         { service.Cancel(id, turnId); return Results.Ok(new { status = "cancel_requested" }); });
-        group.MapGet("/{id}/turns/{turnId}/trace", (string id, string turnId, long? after, int? limit, ExperimentStore store) =>
+        group.MapGet("/{id}/turns/{turnId}/trace", (string id, string turnId, long? after, int? limit, bool? tail, ExperimentStore store) =>
         {
-            var events = store.ReadEvents(id, turnId, after ?? 0, limit ?? 100);
-            var next = events.Count > 0 ? events[^1].Sequence : after ?? 0;
+            var events = tail == true ? store.ReadTraceTail(id, turnId, limit ?? 100)
+                : store.ReadEvents(id, turnId, after ?? 0, limit ?? 100);
+            var next = events.Count > 0 ? events[^1].Sequence : tail == true ? 0 : after ?? 0;
             return new { events, next, hasMore = store.GetTurn(id, turnId).TraceCount > next };
         });
         group.MapGet("/{id}/turns/{turnId}/events/{sequence:long}/payload", (string id, string turnId, long sequence, ExperimentStore store) => store.ReadPayload(id, turnId, sequence));

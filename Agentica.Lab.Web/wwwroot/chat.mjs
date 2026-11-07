@@ -195,6 +195,18 @@ export function appendTraceWindow(trace, incoming, retained = false) {
     trace.inspectionEvents = inspected.events; trace.inspectionOmitted += inspected.omitted; trace.inspecting = true;
   } else if (incoming.some(event => Number.isSafeInteger(event.sequence) && event.sequence > trace.after)) trace.hasMore = true;
 }
+export async function resumeTraceTail(trace, readTail, isCurrent = () => true) {
+  const result = await readTail();
+  if (!isCurrent()) return null;
+  const incoming = result.events ?? [];
+  const last = incoming.at(-1)?.sequence ?? 0;
+  // Retained head pages are not a live tail. Replace them with the latest
+  // bounded service window, preserving SSE arrivals newer than this snapshot.
+  trace.events = mergeTrace(incoming, trace.events.filter(event => event.sequence > last)).events;
+  trace.windowOmitted = Math.max(0, (trace.events[0]?.sequence ?? 1) - 1);
+  trace.inspecting = false;
+  return result;
+}
 
 if (typeof document !== 'undefined') startChat();
 
@@ -386,7 +398,7 @@ function startChat() {
       retained.inspectionEvents = []; retained.after = 0; retained.loaded = false; retained.hasMore = true; retained.inspectionOmitted = 0;
       loadTrace(turn.id);
     });
-    resumeLive.addEventListener('click', () => { const retained = state.traces.get(turn.id); if (retained) { retained.inspecting = false; renderTrace(turn.id); } });
+    resumeLive.addEventListener('click', () => loadTraceTail(turn.id));
     $('transcript').append(article); updateTurn(turn); renderTrace(turn.id);
   }
   function makeInspector(title) { const section = node('details', 'trace-inspector'); section.append(node('summary', '', title)); const body = node('pre', 'json-view', 'No retained record loaded.'); section.append(body); return { section, body }; }
@@ -481,7 +493,7 @@ function startChat() {
     elements.absence.hidden = Boolean(summary);
     elements.absence.textContent = !turn.settings?.reasoningSummary ? 'Provider reasoning summary was not requested. Private reasoning is not exposed.' : !isTerminal(turn.status) ? 'Summary requested; none emitted in the loaded trace yet.' : !fullCoverage ? 'Summary status is incomplete in this trace window; inspect retained pages before inferring absence.' : 'Provider reasoning summary was not emitted or is unsupported. Private reasoning is not exposed.';
     const latest = trace.events.at(-1); elements.activity.replaceChildren(node('span', `status-dot${isTerminal(turn.status) ? '' : ' busy'}`), node('span', '', latest ? `Latest activity: ${label(latest.type)}` : 'Waiting for retained trace'));
-    const coverage = [trace.streamError, trace.gap, trace.inspecting ? 'Inspecting retained pages. Live activity continues separately; Resume live shows the latest tail.' : '', summary && !fullCoverage ? 'The summary shown covers this window only; inspect retained pages for other summary events.' : '', omitted ? `${omitted} events left this 1,000-event ${trace.inspecting ? 'inspection' : 'live'} window; the service trace remains available through Read from start.` : '', turn.droppedTraceCount ? `${turn.droppedTraceCount} service trace events were dropped. Coverage is incomplete.` : ''].filter(Boolean);
+    const coverage = [trace.streamError, trace.gap, trace.inspecting ? 'Inspecting retained pages. Live activity continues separately; Resume live shows the latest tail.' : '', summary && !fullCoverage ? 'The summary shown covers this window only; inspect retained pages for other summary events.' : '', omitted ? `${omitted} earlier events are outside this bounded ${trace.inspecting ? 'inspection' : 'live'} window; the service trace remains available through Read from start.` : '', turn.droppedTraceCount ? `${turn.droppedTraceCount} service trace events were dropped. Coverage is incomplete.` : ''].filter(Boolean);
     elements.coverage.textContent = coverage.join(' '); elements.coverage.hidden = !coverage.length; elements.coverage.classList.toggle('warning', Boolean(coverage.length));
     if (elements.attemptInspector.section.open) {
       const attempts = events.filter(event => event.type === 'provider.attempt');
@@ -529,6 +541,7 @@ function startChat() {
     }
     elements.load.disabled = trace.loading || fullCoverage || (trace.loaded && !trace.hasMore);
     elements.resumeLive.hidden = !trace.inspecting;
+    elements.resumeLive.disabled = trace.loading;
     elements.load.textContent = trace.loading ? 'Loading…' : fullCoverage ? 'Retained trace loaded' : !trace.loaded ? 'Load retained trace' : trace.hasMore ? 'Load next 100 events' : 'Retained trace loaded';
     const range = events.length ? ` · sequences ${events[0].sequence}–${events.at(-1).sequence}` : '';
     elements.pageInfo.textContent = `${trace.inspecting ? 'Retained inspection' : 'Live tail'} · ${events.length.toLocaleString()} visible${range} · ${fullCoverage ? 'full retained sequence loaded' : `page cursor ${trace.after}`}`;
@@ -543,6 +556,19 @@ function startChat() {
       trace.hasMore = Boolean(result.hasMore) || trace.after < (turnById(id)?.traceCount ?? 0);
       appendEvents(id, result.events ?? [], true);
     } catch (error) { if (generation === state.generation) { trace.streamError = `Retained trace unavailable: ${error.message}`; notice(trace.streamError); } }
+    finally { trace.loading = false; if (generation === state.generation) renderTrace(id); }
+  }
+  async function loadTraceTail(id) {
+    const trace = state.traces.get(id); if (!trace || trace.loading) return;
+    const generation = state.generation; trace.loading = true; renderTrace(id);
+    try {
+      const result = await resumeTraceTail(trace,
+        () => api(`${turnBase(id)}/trace?tail=true&limit=100`),
+        () => generation === state.generation && state.traces.get(id) === trace);
+      if (!result) return;
+      const turn = turnById(id); if (turn) { turn.traceCount = Math.max(turn.traceCount ?? 0, result.next ?? 0); updateTurn(turn); }
+      trace.streamError = '';
+    } catch (error) { if (generation === state.generation) { trace.streamError = `Latest trace unavailable: ${error.message}`; notice(trace.streamError); } }
     finally { trace.loading = false; if (generation === state.generation) renderTrace(id); }
   }
   async function hydrateCitations(id) {
