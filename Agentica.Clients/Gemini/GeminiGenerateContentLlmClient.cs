@@ -87,7 +87,7 @@ public sealed class GeminiGenerateContentLlmClient : ILlmStreamingClient
                 if (data.Length > 0)
                 {
                     using var chunk = ParseEvent(data.ToString());
-                        LlmProviderObservations.GenerateContent(recorder, chunk.RootElement);
+                    LlmProviderObservations.GenerateContent(recorder, chunk.RootElement);
                     foreach (var item in state.Apply(chunk.RootElement)) yield return item;
                     data.Clear();
                 }

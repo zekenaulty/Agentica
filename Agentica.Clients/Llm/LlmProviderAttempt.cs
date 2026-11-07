@@ -66,8 +66,11 @@ internal static class LlmProviderAttempt
             }
             var evidence = recorder.Finish(LlmAttemptOutcome.Succeeded);
             delivered = true;
-            yield return completed with { Response = response with { AttemptEvidence = evidence },
-                AttemptEvidence = evidence };
+            yield return completed with
+            {
+                Response = response with { AttemptEvidence = evidence },
+                AttemptEvidence = evidence
+            };
         }
         finally
         {
@@ -114,7 +117,8 @@ internal static class LlmProviderAttempt
         return new LlmClientException(recorder.Evidence.ProviderName,
             "Provider stream could not be delivered completely.", exception,
             exception is IOException ? LlmClientErrorKind.Network : LlmClientErrorKind.Unknown,
-            errorClass: "stream_delivery_failed") { AttemptEvidence = recorder.Evidence };
+            errorClass: "stream_delivery_failed")
+        { AttemptEvidence = recorder.Evidence };
     }
 
     internal static void RetainFailure(LlmAttemptRecorder recorder, Exception exception)

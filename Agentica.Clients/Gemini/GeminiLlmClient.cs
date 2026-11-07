@@ -75,7 +75,8 @@ public sealed class GeminiLlmClient : ILlmClient
                 exception,
                 LlmClientErrorKind.Transient,
                 attempts: 1,
-                errorClass: "operation_canceled") { AttemptEvidence = recorder.Evidence };
+                errorClass: "operation_canceled")
+            { AttemptEvidence = recorder.Evidence };
         }
         catch (LlmClientException exception)
         {
@@ -93,7 +94,8 @@ public sealed class GeminiLlmClient : ILlmClient
                 classification.ErrorKind,
                 classification.StatusCode,
                 attempts: 1,
-                classification.ErrorClass) { AttemptEvidence = recorder.Evidence };
+                classification.ErrorClass)
+            { AttemptEvidence = recorder.Evidence };
         }
     }
 

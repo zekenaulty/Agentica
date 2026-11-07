@@ -19,7 +19,7 @@ internal static class LlmProviderObservations
             usage: usage.ValueKind == JsonValueKind.Object ? new LlmUsage(Number(usage, "input_tokens"),
                 Number(usage, "output_tokens"), Number(Object(usage, "output_tokens_details"), "reasoning_tokens"),
                 Number(usage, "total_tokens"), Number(Object(usage, "input_tokens_details"), "cached_tokens"))
-                { OutputTokenSemantics = LlmOutputTokenSemantics.IncludesThinking } : null);
+            { OutputTokenSemantics = LlmOutputTokenSemantics.IncludesThinking } : null);
     }
 
     internal static void Interactions(LlmAttemptRecorder recorder, JsonElement root)
@@ -34,7 +34,7 @@ internal static class LlmProviderObservations
             usage: usage.ValueKind == JsonValueKind.Object ? new LlmUsage(Number(usage, "total_input_tokens"),
                 Number(usage, "total_output_tokens"), Number(usage, "total_thought_tokens"),
                 Number(usage, "total_tokens"), Number(usage, "total_cached_tokens"), Number(usage, "total_tool_use_tokens"))
-                { OutputTokenSemantics = LlmOutputTokenSemantics.ExcludesThinking } : null);
+            { OutputTokenSemantics = LlmOutputTokenSemantics.ExcludesThinking } : null);
     }
 
     internal static void Anthropic(LlmAttemptRecorder recorder, JsonElement root)
@@ -51,7 +51,7 @@ internal static class LlmProviderObservations
                 reason == "refusal" ? LlmFinishReason.Blocked : reason == "end_turn" ? LlmFinishReason.Stop : null,
             usage: usage.ValueKind == JsonValueKind.Object ? new LlmUsage(input, output,
                 TotalTokens: LlmUsage.SumTokenCounts(input, output), CachedPromptTokens: Number(usage, "cache_read_input_tokens"))
-                { OutputTokenSemantics = LlmOutputTokenSemantics.IncludesThinking } : null);
+            { OutputTokenSemantics = LlmOutputTokenSemantics.IncludesThinking } : null);
     }
 
     internal static void Ollama(LlmAttemptRecorder recorder, JsonElement root)
@@ -89,7 +89,7 @@ internal static class LlmProviderObservations
             usage: usage.ValueKind == JsonValueKind.Object ? new LlmUsage(Number(usage, "promptTokenCount"),
                 Number(usage, "candidatesTokenCount"), Number(usage, "thoughtsTokenCount"),
                 Number(usage, "totalTokenCount"), Number(usage, "cachedContentTokenCount"), Number(usage, "toolUsePromptTokenCount"))
-                { OutputTokenSemantics = LlmOutputTokenSemantics.ExcludesThinking } : null);
+            { OutputTokenSemantics = LlmOutputTokenSemantics.ExcludesThinking } : null);
     }
 
     private static JsonElement Object(JsonElement value, string key) =>

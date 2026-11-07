@@ -127,7 +127,7 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
                 using (document)
                 {
                     var root = document.RootElement;
-                        LlmProviderObservations.Ollama(recorder, root);
+                    LlmProviderObservations.Ollama(recorder, root);
                     if (root.TryGetProperty("error", out var error) &&
                         error.ValueKind == JsonValueKind.String)
                     {
