@@ -38,7 +38,8 @@ public sealed class LlmConfigurationReportTests
         Assert.Contains("Agentica.Clients/", report.AdapterEvidence.Source);
         Assert.Equal(LlmCapabilitySupport.Unknown, report.TechnicalReadiness.State);
         Assert.Equal(LlmCapabilitySupport.Unknown, report.ModelAccountQualification.State);
-        Assert.Contains("pre_dispatch_count_not_provided", report.InputAccountingBasis);
+        Assert.Contains(provider == "openai" ? "native_count_available_separately" :
+            "pre_dispatch_count_not_provided", report.InputAccountingBasis);
         Assert.Equal(provider is "gemini-sdk" or "gemini-vertex" ? LlmCapabilitySupport.Unknown
             : LlmCapabilitySupport.Supported, report.RouteResolution.State);
     }

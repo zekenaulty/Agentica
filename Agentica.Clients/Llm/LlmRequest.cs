@@ -20,4 +20,7 @@ public sealed record LlmRequest(
     /// </summary>
     [JsonIgnore]
     public LlmAttemptCapture? AttemptCapture { get; init; }
+
+    [JsonIgnore]
+    internal LlmPreparedDispatch? PreparedDispatch { get; init; }
 }

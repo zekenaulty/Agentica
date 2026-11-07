@@ -19,7 +19,8 @@ public sealed class RetryingLlmClient : ILlmClient
         LlmRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (request.AttemptCapture is not null && _options.EffectiveMaxAttempts != 1)
+        if ((request.AttemptCapture is not null || request.PreparedDispatch is not null) &&
+            _options.EffectiveMaxAttempts != 1)
             throw new InvalidOperationException("A retained provider attempt requires one physical attempt; the host owns replacement admission.");
         using var callTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         callTimeout.CancelAfter(_options.EffectiveCallTimeout);

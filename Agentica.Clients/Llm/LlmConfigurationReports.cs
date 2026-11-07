@@ -198,9 +198,11 @@ public static class LlmConfigurationReports
             Capability("durable_continuation_exchange", !legacy,
                 "Explicit versioned sensitive codec; exact native bindings apply. Hosts own authenticated storage and retention."),
             Capability("native_search", false, "No native search option exists in this shared request contract; Lab search is a separate path."),
-            Capability("native_input_count", false, "No native pre-dispatch token-count operation exists on this client surface."));
+            Capability("native_input_count", provider == "openai", "OpenAI input counting is a separate admitted operation; generation does not count automatically."),
+            Capability("prepared_request_admission", !legacy, "Optional exact preparation requires host admission before inference; ordinary client entrypoints remain compatible."));
         return new LlmConfigurationReport(provider, apiMode, request.ModelId, model, identity,
-            "provider_usage_after_response; pre_dispatch_count_not_provided", controls, capabilities,
+            provider == "openai" ? "native_count_available_separately; unmeasured" :
+                "provider_usage_after_response; pre_dispatch_count_not_provided", controls, capabilities,
             issues.ToImmutable(), new(LlmCapabilitySupport.Supported, "Agentica.Clients/" + version,
                 asOf, "Actual installed serializer inspected without HTTP; as-of is report creation, not model qualification."),
             legacy
