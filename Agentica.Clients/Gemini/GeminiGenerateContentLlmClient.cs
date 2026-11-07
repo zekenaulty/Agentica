@@ -122,7 +122,7 @@ public sealed class GeminiGenerateContentLlmClient : ILlmStreamingClient
         }
     }
 
-    private static Uri Endpoint(string model)
+    internal static Uri Endpoint(string model)
     {
         var id = model.StartsWith("models/", StringComparison.Ordinal) ? model[7..] : model;
         if (string.IsNullOrWhiteSpace(id) || id.Length > 200 || id.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not '-' and not '_' and not '.'))
@@ -130,7 +130,7 @@ public sealed class GeminiGenerateContentLlmClient : ILlmStreamingClient
         return new Uri("https://generativelanguage.googleapis.com/v1beta/models/" + id + ":streamGenerateContent?alt=sse");
     }
 
-    private static JsonObject BuildRequest(LlmRequest request, string model, out string instruction)
+    internal static JsonObject BuildRequest(LlmRequest request, string model, out string instruction)
     {
         if (request.Messages.Any(item => item.Role is not (LlmMessageRole.System or LlmMessageRole.Developer or LlmMessageRole.User)))
             throw Failure("native_history_required", LlmClientErrorKind.BadRequest);
