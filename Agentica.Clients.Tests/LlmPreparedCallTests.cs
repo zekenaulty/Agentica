@@ -280,6 +280,31 @@ public sealed class LlmPreparedCallTests
     }
 
     [Fact]
+    public async Task Defaulted_model_native_followup_binds_effective_configuration_and_preserves_requested_report()
+    {
+        using var handler = new CaptureHandler();
+        using var http = new HttpClient(handler);
+        var options = new OpenAiResponsesClientOptions("fixture-secret-key", "fixture-default", Endpoint);
+        using var native = new LlmNativeContinuation("openai", "fixture-default", "",
+            """[{"type":"reasoning","encrypted_content":"bound-default-private-cipher"}]""");
+        var request = Request() with { ModelId = "", NativeContinuation = native };
+        var originalReport = LlmConfigurationReports.Describe(request, options);
+        using var binding = LlmNativeContinuationBinding.FromRequest(originalReport, request);
+        var exported = LlmNativeContinuationCodec.ExportSensitive(native, binding);
+        using var payload = exported.SensitivePayload;
+        Assert.True(exported.Succeeded, exported.Rejection.ToString());
+
+        using var prepared = LlmCallPreparation.Prepare(request, options, References(), "scope-1", http);
+
+        var report = Assert.IsType<LlmConfigurationReport>(prepared.ConfigurationReport);
+        Assert.Equal("", report.RequestedModelId);
+        Assert.Equal(originalReport.ConfigurationIdentity, report.ConfigurationIdentity);
+        await Assert.ThrowsAsync<LlmClientException>(() => prepared.GenerateAsync(new Admission()));
+        Assert.Equal(1, handler.Sends);
+        Assert.Contains("bound-default-private-cipher", Encoding.UTF8.GetString(handler.Bodies.Single()), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Display_endpoint_omits_query_secrets_while_exact_identity_retains_the_actual_route()
     {
         using var http = new HttpClient(new CaptureHandler());

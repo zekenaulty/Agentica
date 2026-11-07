@@ -104,7 +104,7 @@ public static class LlmCallPreparation
         var snapshot = Snapshot(request, defaultModel);
         try
         {
-            var configuration = report(snapshot) with { RequestedModelId = request.ModelId };
+            var configuration = report(snapshot);
             if (!configuration.AdapterAcceptsRequest)
                 throw new LlmClientException(configuration.ProviderName, "The exact request is unsupported by this adapter.",
                     errorKind: LlmClientErrorKind.BadRequest, errorClass: configuration.Issues[0].Code);
@@ -126,7 +126,8 @@ public static class LlmCallPreparation
             // Keep the caller's requested model distinct from the frozen effective
             // default. The captured options resolve the same wire model at dispatch.
             return new(client(snapshot), snapshot with { ModelId = request.ModelId },
-                descriptor, body, endpoint, protocol, transportBinding, configuration);
+                descriptor, body, endpoint, protocol, transportBinding,
+                configuration with { RequestedModelId = request.ModelId });
         }
         catch { snapshot.NativeContinuation?.Dispose(); throw; }
     }
