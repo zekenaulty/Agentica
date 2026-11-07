@@ -1,4 +1,10 @@
-# Packed provider-only consumer: early A5 proof
+# Packed provider-only consumer: A5 and full recovery proof
+
+The [P08 recovery host](RECOVERY.md) extends this original A5 consumer with actual
+prepared streaming inference, required durable admission, fresh-process reopen,
+native exchange, captured routes, explicit unknown-attempt recovery and host
+completion checks. The current entrypoint runs both suites. Historical A5-only
+qualification below remains evidence for its earlier source cut.
 
 This standalone console consumer references packed `Agentica.Clients` through a
 local feed. It has no project reference, Agentica runner, live endpoint, index,
@@ -21,7 +27,7 @@ available for review; no cleanup of other workspaces or packages occurs.
 The script verifies an already provisioned SDK; it does not download/install one.
 It gives the CLI a run-local home, disables first-use HTTPS certificate generation
 and CLI telemetry, and restores the caller's process environment on exit.
-Only the three named consumer source files and `global.json` are copied;
+Only the explicitly named consumer source files and `global.json` are copied;
 native continuation exports and private captures are outside that copy list.
 
 ## Host embedding example
@@ -51,17 +57,16 @@ the packaged client's indexing behavior.
 
 ## Evidence limits
 
-This proves only P08's early A5 package/embedding boundary using synthetic data.
-It does not complete P08: the future LLM call contracts, captured route bundles,
-durable host reopen/recovery and multi-call reasoning loop still need their own
-qualification. No paid embedding or inference call, canonical reindex, Bridge
+This original section describes the early A5 package/embedding boundary using
+synthetic data. The linked recovery proof covers P08's subsequent LLM calls,
+captured routes, durable reopen and multi-call loop. No paid call, canonical reindex, Bridge
 deployment, model-quality assessment or installed acceptance occurs here.
 
 New P01–P06 LLM contracts do not implicitly extend `IMemoryEmbeddingProvider`.
 Bridge PM11 owns its embedding interface adaptation and durable admitted/observed
 transport; PM12–PM14 own historical indexing, eligibility and source-set coverage.
 
-## Local qualification — 2026-11-06
+## Original early A5 qualification — 2026-11-06
 
 - Library source base: `ae69a2f`; consumer sources are this bounded change.
 - Exact SDK: **10.0.302**, invoked explicitly; `global.json` unchanged.
