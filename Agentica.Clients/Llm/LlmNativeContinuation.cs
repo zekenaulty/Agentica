@@ -24,7 +24,8 @@ public sealed class LlmNativeContinuation : IDisposable
         string modelId,
         string systemInstruction,
         string historyStepsJson,
-        LlmContinuationConfigurationBinding? configurationBinding = null)
+        LlmContinuationConfigurationBinding? configurationBinding = null,
+        LlmMessageMode messageMode = LlmMessageMode.Legacy)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerName);
         ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
@@ -47,6 +48,7 @@ public sealed class LlmNativeContinuation : IDisposable
 
         ProviderName = providerName;
         ModelId = modelId;
+        MessageMode = messageMode;
         _systemInstruction = systemInstruction;
         _historyStepsJson = historyStepsJson;
         _configurationBinding = configurationBinding;
@@ -54,6 +56,9 @@ public sealed class LlmNativeContinuation : IDisposable
 
     public string ProviderName { get; }
     public string ModelId { get; }
+
+    [JsonIgnore]
+    internal LlmMessageMode MessageMode { get; }
 
     [JsonIgnore]
     internal string SystemInstruction => SnapshotOwned().Instruction;
@@ -74,7 +79,7 @@ public sealed class LlmNativeContinuation : IDisposable
     internal LlmNativeContinuation CloneOwned()
     {
         var snapshot = SnapshotOwned();
-        return new(ProviderName, ModelId, snapshot.Instruction, snapshot.History, snapshot.Binding);
+        return new(ProviderName, ModelId, snapshot.Instruction, snapshot.History, snapshot.Binding, MessageMode);
     }
 
     internal bool TryBindConfiguration(LlmContinuationConfigurationBinding binding)

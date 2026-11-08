@@ -21,7 +21,8 @@ public enum LlmNativeContinuationRejection
     ModelMismatch,
     InstructionMismatch,
     ConfigurationMismatch,
-    IntegrityMismatch
+    IntegrityMismatch,
+    MessageModeMismatch
 }
 
 /// <summary>Exact target/source bindings. Instructions are sensitive and excluded from ordinary
@@ -31,7 +32,8 @@ public sealed class LlmNativeContinuationBinding : IDisposable
     private string? _instructions;
 
     public LlmNativeContinuationBinding(string providerName, string apiMode, string modelId,
-        string configurationIdentity, string systemInstruction)
+        string configurationIdentity, string systemInstruction,
+        LlmMessageMode messageMode = LlmMessageMode.Legacy)
     {
         ProviderName = Identity(providerName, nameof(providerName), 128);
         ApiMode = Identity(apiMode, nameof(apiMode), 128);
@@ -41,12 +43,15 @@ public sealed class LlmNativeContinuationBinding : IDisposable
         if (systemInstruction.Length > LlmNativeContinuationCodec.MaximumInstructionCharacters)
             throw new ArgumentOutOfRangeException(nameof(systemInstruction));
         _instructions = systemInstruction;
+        if (!Enum.IsDefined(messageMode)) throw new ArgumentOutOfRangeException(nameof(messageMode));
+        MessageMode = messageMode;
     }
 
     public string ProviderName { get; }
     public string ApiMode { get; }
     public string ModelId { get; }
     public string ConfigurationIdentity { get; }
+    public LlmMessageMode MessageMode { get; }
     [JsonIgnore]
     internal string SystemInstruction => Volatile.Read(ref _instructions) ?? throw new ObjectDisposedException(nameof(LlmNativeContinuationBinding));
 
@@ -59,11 +64,12 @@ public sealed class LlmNativeContinuationBinding : IDisposable
         if (!report.AdapterAcceptsRequest || report.RouteResolution.State != LlmCapabilitySupport.Supported ||
             report.RequestedModelId != request.ModelId)
             throw new ArgumentException("A matching accepted request and resolved configuration report are required.", nameof(report));
-        var instructions = report.ProviderName == "ollama"
+        var instructions = request.MessageMode == LlmMessageMode.Ordered ? ""
+            : report.ProviderName == "ollama"
             ? string.Join("\n\n", request.Messages.Where(message => message.Role == LlmMessageRole.System).Select(message => message.Content))
             : string.Join("\n\n", request.Messages.Where(message => message.Role is LlmMessageRole.System or LlmMessageRole.Developer)
                 .Select(message => message.Content).Where(content => !string.IsNullOrWhiteSpace(content)));
-        return new(report.ProviderName, report.ApiMode, report.EffectiveModelId, report.ConfigurationIdentity, instructions);
+        return new(report.ProviderName, report.ApiMode, report.EffectiveModelId, report.ConfigurationIdentity, instructions, request.MessageMode);
     }
 
     public void Dispose() => Interlocked.Exchange(ref _instructions, null);

@@ -9,7 +9,7 @@ namespace Agentica.Clients.Llm;
 /// in a host-owned authenticated envelope; hosts own authorization, scope, expiry and deletion.</summary>
 public static class LlmNativeContinuationCodec
 {
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
     public const int MaximumSerializedBytes = 16_777_216;
     public const int MaximumInstructionCharacters = 1_048_576;
     public const int MaximumDepth = 64;
@@ -27,10 +27,12 @@ public static class LlmNativeContinuationCodec
         try
         {
             var snapshot = continuation.SnapshotOwned();
+            if (continuation.MessageMode != expectedBinding.MessageMode)
+                return new(false, LlmNativeContinuationRejection.MessageModeMismatch, snapshot.Binding is not null);
             var rejection = BindingRejection(continuation.ProviderName, continuation.ModelId,
                 snapshot.Instruction, snapshot.Binding, expectedBinding);
             if (rejection == LlmNativeContinuationRejection.None)
-                rejection = ValidateHistory(continuation.ProviderName, snapshot.History);
+                rejection = ValidateHistory(continuation.ProviderName, snapshot.History, continuation.MessageMode);
             return new(rejection == LlmNativeContinuationRejection.None, rejection, snapshot.Binding is not null);
         }
         catch (ObjectDisposedException) { return new(false, LlmNativeContinuationRejection.Disposed, false); }
@@ -54,7 +56,8 @@ public static class LlmNativeContinuationCodec
             {
                 writer.WriteStartObject();
                 writer.WriteString("format", Format);
-                writer.WriteNumber("version", CurrentVersion);
+                writer.WriteNumber("version", continuation.MessageMode == LlmMessageMode.Ordered ? CurrentVersion : 1);
+                if (continuation.MessageMode == LlmMessageMode.Ordered) writer.WriteString("message_mode", "ordered");
                 writer.WriteString("provider", continuation.ProviderName);
                 writer.WriteString("api_mode", sourceBinding.ApiMode);
                 writer.WriteString("model", continuation.ModelId);
@@ -141,8 +144,12 @@ public static class LlmNativeContinuationCodec
             finally { CryptographicOperations.ZeroMemory(bodyBytes); }
             if (String(body, "format") != Format || !body.TryGetProperty("version", out var version) ||
                 version.ValueKind != JsonValueKind.Number || !version.TryGetInt32(out var number)) return new(LlmNativeContinuationRejection.MalformedPayload);
-            if (number != CurrentVersion) return new(LlmNativeContinuationRejection.UnsupportedVersion);
-            if (body.EnumerateObject().Count() != 8 ||
+            if (number is not (1 or CurrentVersion)) return new(LlmNativeContinuationRejection.UnsupportedVersion);
+            var messageMode = number == 1 ? LlmMessageMode.Legacy : LlmMessageMode.Ordered;
+            if (number == CurrentVersion && String(body, "message_mode") != "ordered")
+                return new(LlmNativeContinuationRejection.MalformedPayload);
+            if (messageMode != expectedBinding.MessageMode) return new(LlmNativeContinuationRejection.MessageModeMismatch);
+            if (body.EnumerateObject().Count() != (number == 1 ? 8 : 9) ||
                 String(body, "provider") is not { } provider || String(body, "api_mode") is not { } apiMode ||
                 String(body, "model") is not { } model || String(body, "configuration") is not { } configuration ||
                 String(body, "instructions") is not { } instructions || !body.TryGetProperty("history", out var history))
@@ -152,9 +159,9 @@ public static class LlmNativeContinuationCodec
             var storedBinding = new LlmContinuationConfigurationBinding(apiMode, configuration);
             var mismatch = BindingRejection(provider, model, instructions, storedBinding, expectedBinding);
             if (mismatch != LlmNativeContinuationRejection.None) return new(mismatch);
-            if (!ValidNativeShape(provider, history)) return new(LlmNativeContinuationRejection.InvalidNativeShape);
+            if (!ValidNativeShape(provider, history, messageMode)) return new(LlmNativeContinuationRejection.InvalidNativeShape);
             return new(LlmNativeContinuationRejection.None,
-                new(provider, model, instructions, history.GetRawText(), storedBinding));
+                new(provider, model, instructions, history.GetRawText(), storedBinding, messageMode));
         }
         catch (ObjectDisposedException) { return new(LlmNativeContinuationRejection.Disposed); }
         catch (JsonException) { return new(LlmNativeContinuationRejection.MalformedPayload); }
@@ -184,7 +191,7 @@ public static class LlmNativeContinuationCodec
         return LlmNativeContinuationRejection.None;
     }
 
-    private static LlmNativeContinuationRejection ValidateHistory(string provider, string history)
+    private static LlmNativeContinuationRejection ValidateHistory(string provider, string history, LlmMessageMode messageMode)
     {
         if (history.Length > LlmNativeContinuation.MaxPayloadCharacters) return LlmNativeContinuationRejection.PayloadTooLarge;
         var bytes = Encoding.UTF8.GetBytes(history);
@@ -193,15 +200,16 @@ public static class LlmNativeContinuationCodec
             var bounded = ValidateJson(bytes);
             if (bounded != LlmNativeContinuationRejection.None) return bounded;
             using var document = JsonDocument.Parse(bytes);
-            return ValidNativeShape(provider, document.RootElement)
+            return ValidNativeShape(provider, document.RootElement, messageMode)
                 ? LlmNativeContinuationRejection.None : LlmNativeContinuationRejection.InvalidNativeShape;
         }
         catch (JsonException) { return LlmNativeContinuationRejection.MalformedPayload; }
         finally { CryptographicOperations.ZeroMemory(bytes); }
     }
 
-    private static bool ValidNativeShape(string provider, JsonElement history)
+    private static bool ValidNativeShape(string provider, JsonElement history, LlmMessageMode messageMode)
     {
+        if (messageMode == LlmMessageMode.Ordered && provider != "openai") return false;
         if (history.ValueKind != JsonValueKind.Array || history.GetArrayLength() == 0) return false;
         var outputObserved = false;
         foreach (var item in history.EnumerateArray())
@@ -213,6 +221,7 @@ public static class LlmNativeContinuationCodec
             {
                 case "openai":
                 case "xai":
+                    if (messageMode == LlmMessageMode.Ordered && ValidOrderedInput(item)) break;
                     if (role == "user" && type is null or "message" && String(item, "content") is not null) break;
                     if (type == "reasoning" && !string.IsNullOrWhiteSpace(String(item, "encrypted_content"))) { outputObserved = true; break; }
                     if (provider == "openai" && type == "web_search_call")
@@ -263,6 +272,22 @@ public static class LlmNativeContinuationCodec
             }
         }
         return outputObserved;
+    }
+
+    private static bool ValidOrderedInput(JsonElement item)
+    {
+        if (String(item, "type") is not (null or "message") ||
+            String(item, "role") is not ("system" or "developer" or "user" or "assistant")) return false;
+        if (item.TryGetProperty("phase", out var phase) &&
+            (String(item, "role") != "assistant" || phase.ValueKind != JsonValueKind.String ||
+             phase.GetString() is not ("commentary" or "final_answer"))) return false;
+        if (String(item, "content") is not null) return true;
+        if (!Array(item, "content", out var blocks) || blocks.GetArrayLength() != 1) return false;
+        var block = blocks[0];
+        if (String(block, "type") != "input_text" || String(block, "text") is null) return false;
+        if (!block.TryGetProperty("prompt_cache_breakpoint", out var cache)) return true;
+        return cache.ValueKind == JsonValueKind.Object && String(cache, "mode") == "explicit" &&
+            (!cache.TryGetProperty("ttl", out _) || String(cache, "ttl") is "30m" or "12h");
     }
 
     private static bool ValidWebSearchCall(JsonElement item)
