@@ -92,12 +92,13 @@ public static class LlmConfigurationReports
 
     private static object LegacyConfig(LlmRequest request)
     {
-        LlmMessageMapping.Validate(request, GeminiLlmClient.ProviderName);
-        if (request.NativeContinuation is not null || request.Messages.Any(message =>
+        LlmMessageMapping.Validate(request, GeminiLlmClient.ProviderName, supportsOrdered: true);
+        if (request.NativeContinuation is not null || request.MessageMode != LlmMessageMode.Ordered && request.Messages.Any(message =>
             message.Role is LlmMessageRole.Assistant or LlmMessageRole.Tool))
             throw new LlmClientException(GeminiLlmClient.ProviderName, "Native history is unsupported by this adapter.",
                 errorKind: LlmClientErrorKind.BadRequest, errorClass: "native_history_required");
         var config = GeminiLlmClient.CreateConfig(request);
+        if (request.MessageMode == LlmMessageMode.Ordered) _ = GeminiLlmClient.BuildOrderedContents(request);
         return new
         {
             generationConfig = new
@@ -203,6 +204,8 @@ public static class LlmConfigurationReports
         var identity = "sha256:" + Hash(request.MessageMode == LlmMessageMode.Legacy
             ? JsonSerializer.Serialize(identitySource)
             : JsonSerializer.Serialize(new { configuration = identitySource, messageMode = request.MessageMode }));
+        if (request.InstructionRolePolicy != LlmInstructionRolePolicy.AllowInterpretedFallback)
+            identity = "sha256:" + Hash(JsonSerializer.Serialize(new { identity, request.InstructionRolePolicy }));
         if (legacy) identity = "unresolved:" + identity;
         var asOf = context?.AsOf ?? DateTimeOffset.UtcNow;
         var version = typeof(LlmConfigurationReports).Assembly
@@ -221,9 +224,11 @@ public static class LlmConfigurationReports
             Capability("native_search", provider == "openai", "Optional OpenAI native web search; model/account readiness and host acceptance remain separate."),
             Capability("native_input_count", provider == "openai", "OpenAI input counting is a separate admitted operation; generation does not count automatically."),
             Capability("prepared_request_admission", !legacy, "Optional exact preparation requires host admission before inference; ordinary client entrypoints remain compatible."),
-            Capability("ordered_messages", provider == "openai", "Explicit native roles and text boundaries; other routes reject this opt-in until mapped."),
+            Capability("ordered_messages", true, "Native dialogue and explicit instruction translation; exact-route limitations remain reported."),
             Capability("assistant_phase", provider == "openai", "Only supplied assistant phase is serialized; model support requires separate qualification."),
-            Capability("explicit_prompt_cache_boundary", provider == "openai", "Serialized content boundary and policy; no cache-hit or account/model support claim."));
+            Capability("explicit_prompt_cache_boundary", provider == "openai", "Serialized content boundary and policy; no cache-hit or account/model support claim."),
+            Capability("linked_function_history_input", provider is "openai" or "xai",
+                "Supplied observed call/result linkage in Ordered input only; no tool-definition, execution or orchestration contract."));
         return new LlmConfigurationReport(provider, apiMode, request.ModelId, model, identity,
             provider == "openai" ? "native_count_available_separately; unmeasured" :
                 "provider_usage_after_response; pre_dispatch_count_not_provided", controls, capabilities,
@@ -318,6 +323,10 @@ public static class LlmConfigurationReports
         Add("message_mode", request.MessageMode.ToString(),
             wire.ValueKind == JsonValueKind.Object ? request.MessageMode.ToString() : null,
             "Ordered maps native text items. Native carrier input must explicitly append only new items.");
+        Add("instruction_role_mapping", request.MessageMode == LlmMessageMode.Ordered ? request.InstructionRolePolicy.ToString() : null,
+            request.MessageMode == LlmMessageMode.Ordered && wire.ValueKind == JsonValueKind.Object
+                ? provider == "openai" ? "native" : "labelled_system_fallback" : null,
+            "Developer fallback is qualified co-location, not a second provider-enforced priority level.");
         Add("prompt_cache_mode", request.PromptCache?.Mode.ToString().ToLowerInvariant(),
             Value(Read(wire, "prompt_cache_options.mode")), "Supported wire policy; actual cache use remains provider evidence.");
         Add("web_search_mode", request.WebSearch?.Mode.ToString().ToLowerInvariant(), Value(Read(wire, "tool_choice")),
@@ -348,7 +357,7 @@ public static class LlmConfigurationReports
         var supported = control switch
         {
             "history_mode" or "web_search_mode" or "max_web_search_calls" or "prompt_cache_mode" => provider == "openai",
-            "message_mode" => true,
+            "message_mode" or "instruction_role_mapping" => true,
             "temperature" => provider == "ollama" || geminiContent,
             "thought_output" => provider != "ollama",
             "structured_output" => provider != "anthropic",
@@ -365,6 +374,8 @@ public static class LlmConfigurationReports
     private static bool RejectedControl(string code, string control) => code switch
     {
         "unsupported_message_mode" or "ordered_message_mode_required" or "ordered_history_mode_conflict" => control == "message_mode",
+        "native_developer_role_required" or "invalid_instruction_role_policy" => control == "instruction_role_mapping",
+        "unsupported_message_metadata" => control == "prompt_cache_mode",
         "invalid_prompt_cache_options" or "prompt_cache_breakpoint_limit" => control == "prompt_cache_mode",
         "unsupported_history_mode" or "transcript_continuation_conflict" => control == "history_mode",
         "unsupported_web_search" => control is "web_search_mode" or "max_web_search_calls",

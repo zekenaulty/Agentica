@@ -268,7 +268,7 @@ public sealed class ProviderAttemptRetentionTests
     private static LlmRequest Request() => new("fixture-model", [new(LlmMessageRole.User, "fixture")])
     { AttemptCapture = new(new("attempt:" + Guid.NewGuid().ToString("N"))) };
 
-    private static ILlmStreamingClient Client(string protocol, HttpClient http) => protocol switch
+    internal static ILlmStreamingClient Client(string protocol, HttpClient http) => protocol switch
     {
         "openai" => new OpenAiResponsesLlmClient(new(ApiKey: "test-key"), http),
         "xai" => new XaiResponsesLlmClient(new(ApiKey: "test-key"), http),
@@ -280,7 +280,7 @@ public sealed class ProviderAttemptRetentionTests
     };
 
     private static string Event(string json) => "data: " + json + "\n\n";
-    private static string Success(string protocol) => protocol switch
+    internal static string Success(string protocol) => protocol switch
     {
         "openai" or "xai" => Event("""{"type":"response.completed","response":{"id":"response-1","model":"reported","status":"completed","usage":{"input_tokens":7,"output_tokens":3,"output_tokens_details":{"reasoning_tokens":1}},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}"""),
         "anthropic" => Event("""{"type":"message_start","message":{"id":"response-1","model":"reported","usage":{"input_tokens":7,"output_tokens":0}}}""") + Event("""{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"ok"}}""") + Event("""{"type":"content_block_stop","index":0}""") + Event("""{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}""") + Event("""{"type":"message_stop"}"""),

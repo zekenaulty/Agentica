@@ -13,4 +13,14 @@ public sealed record LlmMessage(
     /// <summary>Marks the end of this text block, not a promise of a cache hit.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public LlmPromptCacheBreakpoint? CacheBreakpoint { get; init; }
+
+    /// <summary>Previously observed provider call metadata, not a request for host execution.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public LlmFunctionCall? FunctionCall { get; init; }
+
+    /// <summary>Actual matching provider call ID for a Tool result; never synthesized.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ToolCallId { get; init; }
 }
+
+public sealed record LlmFunctionCall(string CallId, string Name, string ArgumentsJson);

@@ -351,7 +351,8 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
 
     internal static Dictionary<string, object?> BuildRequestBody(LlmRequest request, string modelId)
     {
-        LlmHistoryModeGuard.RequireNativeMode(request, GeminiLlmClient.ProviderName);
+        LlmHistoryModeGuard.RequireNativeMode(request, GeminiLlmClient.ProviderName, supportsOrdered: true);
+        var ordered = request.MessageMode == LlmMessageMode.Ordered;
         if (request.GenerationOptions?.Temperature is not null)
         {
             throw Failure("unsupported_temperature", LlmClientErrorKind.BadRequest);
@@ -364,7 +365,7 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
         {
             throw Failure("unsupported_thinking_budget", LlmClientErrorKind.BadRequest);
         }
-        if (request.Messages.Any(message => message.Role is LlmMessageRole.Assistant or LlmMessageRole.Tool))
+        if (!ordered && request.Messages.Any(message => message.Role is LlmMessageRole.Assistant or LlmMessageRole.Tool))
         {
             throw Failure("native_history_required", LlmClientErrorKind.BadRequest);
         }
@@ -377,13 +378,13 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
             .Where(message => message.Role == LlmMessageRole.User)
             .Select(message => message.Content)
             .Where(content => !string.IsNullOrWhiteSpace(content)));
-        if (string.IsNullOrWhiteSpace(input))
+        if (!ordered && string.IsNullOrWhiteSpace(input))
         {
             throw Failure("empty_input", LlmClientErrorKind.BadRequest);
         }
 
         object inputPayload = input;
-        if (request.NativeContinuation is { } continuation)
+        if (!ordered && request.NativeContinuation is { } continuation)
         {
             if (!string.Equals(continuation.ProviderName,
                     GeminiLlmClient.ProviderName, StringComparison.Ordinal) ||
@@ -395,6 +396,12 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
                 throw Failure("continuation_binding_mismatch", LlmClientErrorKind.BadRequest);
             }
             inputPayload = AppendUserStep(continuation.HistoryStepsJson, input);
+        }
+        if (ordered)
+        {
+            var projection = LlmOrderedProjection.Dialogue(request, GeminiLlmClient.ProviderName, modelId, interactions: true);
+            instruction = projection.Instructions;
+            inputPayload = projection.Dialogue;
         }
 
         var config = new Dictionary<string, object?>(StringComparer.Ordinal);
@@ -511,6 +518,14 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
             }
         }
 
+        if (request.MessageMode == LlmMessageMode.Ordered)
+        {
+            var projection = LlmOrderedProjection.Dialogue(request, GeminiLlmClient.ProviderName, modelId, interactions: true);
+            projection.Dialogue.AddRange(steps.Select(step => (object)step.Clone()));
+            var json = JsonSerializer.Serialize(projection.Dialogue);
+            return json.Length <= LlmNativeContinuation.MaxPayloadCharacters
+                ? new(GeminiLlmClient.ProviderName, modelId, projection.Instructions, json, messageMode: LlmMessageMode.Ordered) : null;
+        }
         var instruction = string.Join("\n\n", request.Messages
             .Where(message => message.Role is LlmMessageRole.System or LlmMessageRole.Developer)
             .Select(message => message.Content)

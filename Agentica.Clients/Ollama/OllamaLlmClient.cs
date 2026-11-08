@@ -220,8 +220,9 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
 
     internal static Dictionary<string, object?> BuildRequestBody(LlmRequest request, string model)
     {
-        LlmHistoryModeGuard.RequireNativeMode(request, ProviderName);
-        if (request.Messages.Any(message =>
+        LlmHistoryModeGuard.RequireNativeMode(request, ProviderName, supportsOrdered: true);
+        var ordered = request.MessageMode == LlmMessageMode.Ordered;
+        if (!ordered && request.Messages.Any(message =>
             message.Role is LlmMessageRole.Assistant or LlmMessageRole.Tool))
         {
             throw Failure("native_history_required", LlmClientErrorKind.BadRequest);
@@ -242,12 +243,12 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
             .Select(message => message.Content));
         var userMessages = request.Messages
             .Where(message => message.Role == LlmMessageRole.User).ToArray();
-        if (userMessages.Length == 0)
+        if (!ordered && userMessages.Length == 0)
         {
             throw Failure("empty_input", LlmClientErrorKind.BadRequest);
         }
         var messages = new List<object>();
-        if (request.NativeContinuation is { } continuation)
+        if (!ordered && request.NativeContinuation is { } continuation)
         {
             if (continuation.ProviderName != ProviderName ||
                 continuation.ModelId != model ||
@@ -261,7 +262,7 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
                 .Select(item => (object)item.Clone()));
             messages.Add(new { role = "user", content = userMessages[0].Content });
         }
-        else
+        else if (!ordered)
         {
             messages.AddRange(request.Messages.Select(message => (object)new
             {
@@ -274,6 +275,7 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
                 content = message.Content
             }));
         }
+        if (ordered) messages = LlmOrderedProjection.Ollama(request, model);
         if (JsonSerializer.Serialize(messages).Length > LlmNativeContinuation.MaxPayloadCharacters)
             throw Failure("continuation_too_large", LlmClientErrorKind.BadRequest);
         var body = new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -357,7 +359,7 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
         var system = string.Join("\n\n", request.Messages
             .Where(message => message.Role == LlmMessageRole.System)
             .Select(message => message.Content));
-        return new LlmNativeContinuation(ProviderName, model, system, json);
+        return new LlmNativeContinuation(ProviderName, model, system, json, messageMode: request.MessageMode);
     }
 
     private static JsonElement GetObject(JsonElement element, string name) =>

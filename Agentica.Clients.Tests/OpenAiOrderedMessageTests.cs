@@ -189,8 +189,8 @@ public sealed class OpenAiOrderedMessageTests
             _ => LlmConfigurationReports.Describe(request, new GeminiClientOptions("fixture"))
         };
         Assert.False(report.AdapterAcceptsRequest);
-        Assert.Contains(report.Issues, item => item.Code == "unsupported_message_mode");
-        Assert.Equal(LlmCapabilitySupport.Unsupported, report.Controls.Single(item => item.Name == "message_mode").AdapterSupport);
+        Assert.Contains(report.Issues, item => item.Code == "unsupported_message_metadata");
+        Assert.Equal(LlmCapabilitySupport.Unsupported, report.Capabilities.Single(item => item.Name == "explicit_prompt_cache_boundary").AdapterSupport);
     }
 
     private static LlmRequest Frame() => new("fixture-model",

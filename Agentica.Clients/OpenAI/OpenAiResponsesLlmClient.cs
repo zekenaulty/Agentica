@@ -259,7 +259,7 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
 
     internal Dictionary<string, object?> BuildRequestBody(LlmRequest request, string modelId)
     {
-        LlmMessageMapping.Validate(request, _providerName, supportsOrdered: _providerName == ProviderName);
+        LlmMessageMapping.Validate(request, _providerName, supportsOrdered: true);
         var ordered = request.MessageMode == LlmMessageMode.Ordered;
         if (!Enum.IsDefined(request.OpenAiHistoryMode))
             throw Failure("unsupported_history_mode", LlmClientErrorKind.BadRequest);
@@ -296,7 +296,7 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
             using var history = JsonDocument.Parse(continuation.HistoryStepsJson);
             input.AddRange(history.RootElement.EnumerateArray().Select(item => (object)item.Clone()));
         }
-        if (ordered) input = OpenAiOrderedMessages.Input(request, modelId);
+        if (ordered) input = OpenAiOrderedMessages.Input(request, modelId, _providerName);
         else if (transcriptOnly)
             input.AddRange(request.Messages.Where(message => message.Role is LlmMessageRole.User or LlmMessageRole.Assistant)
                 .Select(message => (object)new { role = message.Role == LlmMessageRole.User ? "user" : "assistant", content = message.Content }));
@@ -383,7 +383,7 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
     private LlmNativeContinuation? CreateContinuation(
         LlmRequest request, string modelId, JsonElement output)
     {
-        if (request.MessageMode == LlmMessageMode.Ordered) return OpenAiOrderedMessages.Continue(request, modelId, output);
+        if (request.MessageMode == LlmMessageMode.Ordered) return OpenAiOrderedMessages.Continue(request, modelId, output, _providerName);
         if (request.OpenAiHistoryMode == OpenAiHistoryMode.TranscriptOnly || output.GetArrayLength() == 0) return null;
         foreach (var item in output.EnumerateArray())
         {

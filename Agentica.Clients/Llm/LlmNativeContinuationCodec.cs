@@ -185,7 +185,8 @@ public static class LlmNativeContinuationCodec
         if (expected.ApiMode != apiMode) return LlmNativeContinuationRejection.UnsupportedApiMode;
         if (stored is not null && stored.ApiMode != expected.ApiMode) return LlmNativeContinuationRejection.ApiModeMismatch;
         if (model != expected.ModelId) return LlmNativeContinuationRejection.ModelMismatch;
-        if (instructions != expected.SystemInstruction) return LlmNativeContinuationRejection.InstructionMismatch;
+        if (expected.MessageMode == LlmMessageMode.Legacy && instructions != expected.SystemInstruction)
+            return LlmNativeContinuationRejection.InstructionMismatch;
         if (stored is not null && stored.ConfigurationIdentity != expected.ConfigurationIdentity)
             return LlmNativeContinuationRejection.ConfigurationMismatch;
         return LlmNativeContinuationRejection.None;
@@ -209,9 +210,10 @@ public static class LlmNativeContinuationCodec
 
     private static bool ValidNativeShape(string provider, JsonElement history, LlmMessageMode messageMode)
     {
-        if (messageMode == LlmMessageMode.Ordered && provider != "openai") return false;
         if (history.ValueKind != JsonValueKind.Array || history.GetArrayLength() == 0) return false;
         var outputObserved = false;
+        var calls = new HashSet<string>(StringComparer.Ordinal);
+        var allCalls = new HashSet<string>(StringComparer.Ordinal);
         foreach (var item in history.EnumerateArray())
         {
             if (item.ValueKind != JsonValueKind.Object) return false;
@@ -221,6 +223,19 @@ public static class LlmNativeContinuationCodec
             {
                 case "openai":
                 case "xai":
+                    if (messageMode == LlmMessageMode.Ordered && type == "function_call")
+                    {
+                        var call = new LlmFunctionCall(String(item, "call_id")!, String(item, "name")!, String(item, "arguments")!);
+                        if (!LlmMessageMapping.ValidCall(call) || !allCalls.Add(call.CallId)) return false;
+                        calls.Add(call.CallId);
+                        outputObserved = true;
+                        break;
+                    }
+                    if (messageMode == LlmMessageMode.Ordered && type == "function_call_output")
+                    {
+                        if (String(item, "call_id") is not { } id || !calls.Remove(id) || String(item, "output") is null) return false;
+                        break;
+                    }
                     if (messageMode == LlmMessageMode.Ordered && ValidOrderedInput(item)) break;
                     if (role == "user" && type is null or "message" && String(item, "content") is not null) break;
                     if (type == "reasoning" && !string.IsNullOrWhiteSpace(String(item, "encrypted_content"))) { outputObserved = true; break; }
@@ -234,6 +249,7 @@ public static class LlmNativeContinuationCodec
                     outputObserved = true;
                     break;
                 case "anthropic":
+                    if (messageMode == LlmMessageMode.Ordered && role == "assistant" && String(item, "content") is not null) break;
                     if (role == "user" && String(item, "content") is not null) break;
                     if (role != "assistant" || !Array(item, "content", out var blocks)) return false;
                     foreach (var block in blocks.EnumerateArray())
