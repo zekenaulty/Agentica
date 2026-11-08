@@ -361,11 +361,14 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
             ? PrivateReasoningMetadata(item, type)
             : Sanitize(item, _credential);
         await _context.Trace(new("provider.record", record, callId, itemId)).ConfigureAwait(false);
+        var source = new LlmStreamSource("openai", type,
+            item.TryGetProperty("sequence_number", out var sequence) && sequence.ValueKind == JsonValueKind.Number && sequence.TryGetInt64(out var ordinal) ? ordinal : null,
+            itemId, ReadableIndex(item, "output_index"), ReadableIndex(item, "content_index"), ReadableIndex(item, "summary_index"));
         if (type == "response.output_text.delta")
-            await _context.Trace(new("provider.text.delta", new { text = Redact(String(item, "delta") ?? "", _credential) }, callId,
+            await _context.Trace(new("provider.text.delta", new { text = Redact(String(item, "delta") ?? "", _credential), source }, callId,
                 itemId)).ConfigureAwait(false);
         else if (type == "response.reasoning_summary_text.delta")
-            await _context.Trace(new("provider.summary.delta", new { text = Redact(String(item, "delta") ?? "", _credential) }, callId,
+            await _context.Trace(new("provider.summary.delta", new { text = Redact(String(item, "delta") ?? "", _credential), source }, callId,
                 itemId)).ConfigureAwait(false);
         else if (!type.StartsWith("response.reasoning_text.", StringComparison.Ordinal))
         {
@@ -378,6 +381,9 @@ internal sealed class ExperimentProviderTransport : HttpMessageHandler
             await _context.Trace(new("provider.web-search", new { phase = type, item = Sanitize(searchItem, _credential) }, callId,
                 String(searchItem, "id"))).ConfigureAwait(false);
     }
+
+    private static int? ReadableIndex(JsonElement item, string field) => item.TryGetProperty(field, out var value) &&
+        value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var index) && index >= 0 ? index : null;
 
     private JsonElement PrivateReasoningMetadata(JsonElement item, string type)
     {

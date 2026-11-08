@@ -275,3 +275,153 @@ test('retained attempts expose known failed-call usage without inventing unknown
   assert.match(rejected, /not dispatched/); assert.doesNotMatch(rejected, /usage unknown/);
   assert.match(usageLabel({ provider: { input_tokens: 12, output_tokens: 8 } }), /12 input tokens/);
 });
+import { readableWork, recentWorkExcerpt } from '../Agentica.Lab.Web/wwwroot/chat-work.mjs';
+
+test('work payload coverage remains explicit until separately retained records are loaded', () => {
+  const text = 'Exact large summary. '.repeat(2500); const source = { version: 1, itemId: 'r', summaryIndex: 0 };
+  const events = [
+    { sequence: 1, type: 'provider.summary.delta', callId: 'c', data: { payloadRef: '/separate/1', preview: '{"text":"partial' } },
+    { sequence: 2, type: 'provider.item', callId: 'c', data: { payloadRef: '/separate/2' } },
+    { sequence: 3, type: 'provider.record', data: { payloadRef: '/raw/3' } }
+  ];
+  const original = JSON.stringify(events); const payloads = new Map();
+  const before = readableWork(events, 'completed', payloads);
+  assert.deepEqual(before.blocks, []); assert.deepEqual(before.unresolvedPayloads.map(payload => payload.sequence), [1, 2]);
+  payloads.set(1, { text, source });
+  const partial = readableWork(events, 'completed', payloads);
+  assert.equal(partial.blocks[0].capturedText, text); assert.equal(partial.blocks[0].status, 'end-not-observed');
+  assert.deepEqual(partial.unresolvedPayloads.map(payload => payload.sequence), [2]);
+  payloads.set(2, { type: 'response.reasoning_summary_part.done', item_id: 'r', summary_index: 0, part: { type: 'summary_text', text } });
+  const complete = readableWork(events, 'completed', payloads);
+  assert.equal(complete.blocks.length, 1); assert.equal(complete.blocks[0].text, text);
+  assert.equal(complete.blocks[0].capturedText, text); assert.equal(complete.blocks[0].gap, false);
+  assert.equal(complete.blocks[0].status, 'complete'); assert.deepEqual(complete.unresolvedPayloads, []);
+  assert.equal(JSON.stringify(events), original, 'Hydration never rewrites the retained trace envelope.');
+});
+
+test('retention-truncated work is unavailable rather than parsed from a JSON preview', () => {
+  const result = readableWork([
+    { sequence: 1, type: 'provider.summary.delta', data: { truncated: true, preview: '{"text":"partial summary' } },
+    { sequence: 2, type: 'harness.event', data: { payloadRef: '/separate/2' } },
+    { sequence: 3, type: 'provider.web-search', data: { payloadRef: '/separate/3' } }
+  ], 'completed');
+  assert.deepEqual(result.blocks, []); assert.deepEqual(result.operations, []);
+  assert.deepEqual(result.unresolvedPayloads, [
+    { sequence: 1, type: 'provider.summary.delta', canLoad: false },
+    { sequence: 2, type: 'harness.event', canLoad: true },
+    { sequence: 3, type: 'provider.web-search', canLoad: true }
+  ]);
+});
+
+test('compact current summary advances past its old prefix without changing the retained text', () => {
+  const earlier = 'Old approach. '.repeat(40);
+  const current = earlier + 'The new source check is complete.';
+  assert.equal(recentWorkExcerpt('Short exact text.'), 'Short exact text.');
+  assert.notEqual(recentWorkExcerpt(earlier), recentWorkExcerpt(current));
+  assert.match(recentWorkExcerpt(current), /^… /);
+  assert.ok(recentWorkExcerpt(current).endsWith('The new source check is complete.'));
+  assert.equal(Array.from(recentWorkExcerpt(current).slice(2)).length, 220);
+  assert.equal(current, earlier + 'The new source check is complete.');
+});
+
+test('recent excerpts preserve Unicode pairs and start at a complete grapheme boundary', () => {
+  const text = 'Earlier material. ' + '🧭👩‍🔬e\u0301'.repeat(100) + ' latest';
+  const result = recentWorkExcerpt(text, 13); const tail = result.slice(2);
+  assert.match(result, /^… /); assert.ok(text.endsWith(tail));
+  assert.ok(Array.from(tail).length <= 13); assert.equal(tail.isWellFormed(), true);
+  const start = text.length - tail.length;
+  assert.equal(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text).containing(start).index, start);
+});
+
+test('equal-length snapshot disagreements are visible even when raw capture length matches', () => {
+  const work = readableWork([
+    { sequence: 1, type: 'provider.summary.delta', callId: 'c', data: { text: 'ABXD', source: { version: 1, itemId: 'r', summaryIndex: 0 } } },
+    { sequence: 2, type: 'provider.item', callId: 'c', data: { type: 'response.reasoning_summary_part.done', item_id: 'r', summary_index: 0, part: { text: 'ABCD' } } }
+  ], 'completed');
+  assert.equal(work.blocks[0].capturedText.length, work.blocks[0].text.length);
+  assert.equal(work.blocks[0].gap, true); assert.equal(work.blocks[0].capturedText, 'ABXD'); assert.equal(work.blocks[0].text, 'ABCD');
+});
+
+test('readable work preserves forty exact fragments in one real summary block across replayed pages', () => {
+  const fragments = Array.from({ length: 40 }, (_, index) => index % 3 === 0 ? ' ' : index % 3 === 1 ? 'same' : '\r\n');
+  const start = { sequence: 1, type: 'provider.item', callId: 'c', data: { type: 'response.reasoning_summary_part.added', item_id: 'r', summary_index: 0, part: { text: '' } } };
+  const deltas = fragments.map((text, index) => ({ sequence: index + 2, type: 'provider.summary.delta', callId: 'c', itemId: 'r', data: { text, source: { version: 1, itemId: 'r', summaryIndex: 0 } } }));
+  const end = { sequence: 42, type: 'provider.item', callId: 'c', data: { type: 'response.reasoning_summary_part.done', item_id: 'r', summary_index: 0, part: { text: fragments.join('') } } };
+  const events = [end, ...deltas.slice(20), start, ...deltas.slice(0, 25)]; const original = JSON.stringify(events);
+  const work = readableWork(events, 'completed');
+  assert.equal(work.blocks.length, 1); assert.equal(work.blocks[0].text, fragments.join(''));
+  assert.equal(work.blocks[0].capturedText, fragments.join('')); assert.equal(work.blocks[0].reconstructed, false);
+  assert.equal(work.blocks[0].status, 'complete'); assert.equal(work.blocks[0].gap, false);
+  assert.equal(JSON.stringify(events), original, 'Projection never rewrites raw evidence.');
+});
+
+test('native summary parts stay separate when their deltas interleave', () => {
+  const event = (sequence, index, text) => ({ sequence, type: 'provider.summary.delta', callId: 'c', data: { text, source: { version: 1, itemId: 'r', summaryIndex: index } } });
+  const work = readableWork([event(1, 0, 'Alpha '), event(2, 1, 'Beta '), event(3, 0, 'continues.'), event(4, 1, 'ends.')], 'cancelled');
+  assert.deepEqual(work.blocks.map(block => block.text), ['Alpha continues.', 'Beta ends.']);
+  assert.ok(work.blocks.every(block => block.status === 'end-not-observed'));
+});
+
+test('completion snapshots are not appended as new text and capture differences stay visible', () => {
+  const work = readableWork([
+    { sequence: 2, type: 'provider.summary.delta', callId: 'c', data: { text: 'tail', source: { version: 1, itemId: 'r', summaryIndex: 0 } } },
+    { sequence: 3, type: 'provider.item', callId: 'c', data: { type: 'response.reasoning_summary_part.done', item_id: 'r', summary_index: 0, status: 'incomplete', part: { text: 'Full tail' } } }
+  ], 'failed');
+  assert.equal(work.blocks[0].text, 'Full tail'); assert.equal(work.blocks[0].capturedText, 'tail');
+  assert.equal(work.blocks[0].gap, true); assert.equal(work.blocks[0].status, 'incomplete');
+});
+
+test('legacy call grouping is explicit and never removes repeated words', () => {
+  const work = readableWork([
+    { sequence: 1, type: 'provider.summary.delta', callId: 'old', data: { text: 'same ' } },
+    { sequence: 2, type: 'provider.summary.delta', callId: 'old', data: { text: 'same' } },
+    { sequence: 3, type: 'provider.item', callId: 'old', data: { type: 'reasoning', summary: [{ type: 'summary_text', text: 'same same' }] } }
+  ], 'completed');
+  assert.equal(work.blocks.length, 1); assert.equal(work.blocks[0].text, 'same same');
+  assert.equal(work.blocks[0].reconstructed, true); assert.equal(work.blocks[0].status, 'end-not-observed');
+});
+
+test('planner JSON and opaque reasoning are not promoted into readable thoughts or answers', () => {
+  const work = readableWork([
+    { sequence: 1, type: 'planner.stream', data: { kind: 'TextDelta', text: '{"tool":"delete"}', block: { kind: 0, lifecycle: 1 } } },
+    { sequence: 2, type: 'provider.item', data: { type: 'reasoning', encrypted_content: 'private', content: [{ text: 'private' }] } }
+  ]);
+  assert.deepEqual(work, { blocks: [], operations: [], unresolvedPayloads: [] });
+});
+
+test('empty and whitespace-only summaries create no reading scaffold', () => {
+  assert.deepEqual(readableWork([{ sequence: 1, type: 'provider.summary.delta', data: { text: ' \r\n\t' } }]).blocks, []);
+});
+
+test('unknown metadata versions remain exact reconstructed deltas with no invented boundary', () => {
+  const work = readableWork([{ sequence: 1, type: 'planner.stream', callId: 'c', data: { kind: 'ThoughtSummaryDelta', text: 'Exact delta',
+    source: { version: 2, itemId: 'unqualified', summaryIndex: 0 }, block: { kind: 1, lifecycle: 3, textSnapshot: 'unqualified snapshot' } } }], 'completed');
+  assert.equal(work.blocks[0].text, 'Exact delta'); assert.equal(work.blocks[0].reconstructed, true); assert.equal(work.blocks[0].status, 'end-not-observed');
+});
+
+test('real tool receipts update the observed operation while narration supplies no completion', () => {
+  const execution = (type, status, message) => ({ type, context: { runId: 'run', stepId: 'step', toolId: 'clock', receiptId: type === 'receipt.emitted' ? 'receipt' : null }, data: { status }, payload: { message } });
+  const work = readableWork([
+    { sequence: 1, type: 'planner.stream', data: { kind: 'TextDelta', text: 'The tool succeeded.' } },
+    { sequence: 2, type: 'harness.event', data: { executionEvent: execution('step.started') } },
+    { sequence: 3, type: 'harness.event', data: { executionEvent: execution('receipt.emitted', 'succeeded', 'Returned the current time.') } }
+  ]);
+  assert.equal(work.operations.length, 1); assert.equal(work.operations[0].status, 'succeeded');
+  assert.equal(work.operations[0].preview, 'Returned the current time.'); assert.equal(work.operations[0].receiptId, 'receipt');
+});
+
+test('one versus one thousand transport fragments yields the same passages and observed operations', () => {
+  const text = '**Approach**\n\nInspect the evidence.\n\n**Finding**\n\nTwo sources agree. '.repeat(20);
+  const project = count => {
+    const events = [{ sequence: 1, type: 'provider.item', callId: 'c', data: { type: 'response.reasoning_summary_part.added', item_id: 'r', summary_index: 0, part: { text: '' } } }];
+    for (let index = 0; index < count; index++) events.push({ sequence: events.length + 1, type: 'provider.summary.delta', callId: 'c',
+      data: { text: text.slice(Math.floor(index * text.length / count), Math.floor((index + 1) * text.length / count)), source: { version: 1, itemId: 'r', summaryIndex: 0 } } });
+    events.push({ sequence: events.length + 1, type: 'provider.item', callId: 'c', data: { type: 'response.reasoning_summary_part.done', item_id: 'r', summary_index: 0, part: { text } } });
+    events.push({ sequence: events.length + 1, type: 'harness.event', data: { executionEvent: { type: 'receipt.emitted', context: { runId: 'run', stepId: 'step', toolId: 'inspect' }, data: { status: 'succeeded' }, payload: { message: 'Two sources returned.' } } } });
+    const work = readableWork(events, 'completed');
+    return { passages: work.blocks.map(block => ({ text: block.text, status: block.status, gap: block.gap, reconstructed: block.reconstructed })),
+      operations: work.operations.map(operation => ({ title: operation.title, status: operation.status, preview: operation.preview })) };
+  };
+  assert.deepEqual(project(1), project(1000)); assert.equal(project(1000).passages.length, 1);
+  assert.equal(project(1000).operations.length, 1, 'Neither token count nor paragraph count manufactures progress steps.');
+});

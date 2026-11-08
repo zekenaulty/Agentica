@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "id": "readable-work-preserves-source-fragments-and-native-boundaries",
+  "scope": "agentica",
+  "kind": "practice",
+  "status": "accepted",
+  "title": "Project readable work from source identity without manufacturing progress",
+  "trigger": "reasoning summary streaming fragment native block snapshot progress milestone readable Lab trace diagnostics",
+  "guidance": "Keep exact legacy delta values and raw trace granularity while carrying additive native item/index/lifecycle metadata. Concatenate chunks exactly within a qualified source block; keep text-completion snapshots separate and never append them again. Missing/unknown metadata yields labelled reconstruction, and interrupted blocks stay open unless a native end was observed. Native parts and paragraphs are content boundaries, not semantic progress milestones. One versus1,000 fragments of the same logical evidence must yield the same completed reading passages and observed operations. Host receipts and operation/recovery transitions establish execution; model text can describe an approach or finding but cannot establish an effect. OutputText may be a structured plan, so only the host selects a user-facing answer. Keep the answer available while inspection is open, preserve selected text during updates, and expose pending display updates explicitly without stopping capture. A bounded loaded-window projection must declare omissions and cannot establish complete long-run readability or unlimited retention.",
+  "evidence": [
+    {
+      "kind": "source_review",
+      "reference": "docs/contracts/readable-provider-stream.md; Agentica.Clients/Llm/LlmStreamContent.cs; global-readable-work-preserves-lossless-traces",
+      "revision": "60c7e50",
+      "note": "Applies the existing shared readable-work method to the Agentica producer and Lab. No new executor, semantic milestone detector or paid summarizer."
+    },
+    {
+      "kind": "offline_test",
+      "reference": "ReadableStreamTests; ExperimentExecutorTests; ExperimentPersistenceTests; chat-ui.test.mjs; browser-tests/ui-readable-work.mjs",
+      "revision": "60c7e50",
+      "note": "569 client,42 selected Lab and41 UI logic checks pass. Intercepted Edge browser fixtures qualify reading/selection/progressive host-answer/observed result/inspection/reopen and narrow viewport. Baseline interleaved summaries collapse into one incorrect passage; the corrected projection preserves separate source blocks. All model streams are synthetic; no live-summary usefulness or installed-host claim."
+    }
+  ],
+  "recheck": "Recheck source fields, block/status semantics, retention limits, provider mappings and host acceptance when another host adopts the contract. Add semantic-block pagination/correlation and real emitted-sequence review before claiming complete long-run or live UX acceptance.",
+  "tags": [
+    "streaming",
+    "reasoning",
+    "trace",
+    "presentation",
+    "blocks",
+    "progress",
+    "snapshots",
+    "host-boundary"
+  ],
+  "recorded_on": "2026-11-08"
+}

@@ -9,6 +9,8 @@ Optional [exact prepared calls](contracts/prepared-provider-calls.md) add requir
 host admission and separate native input counting at the provider boundary.
 Opt-in [ordered provider messages](contracts/ordered-provider-messages.md) preserve
 native roles and qualified text boundaries without changing host ownership.
+Additive [readable stream metadata v1](contracts/readable-provider-stream.md)
+preserves native content coordinates/lifecycle alongside unchanged raw deltas.
 
 Agentica is the bounded proof engine:
 

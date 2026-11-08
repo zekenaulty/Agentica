@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "id": "lab-reader-distinguishes-cursors-payloads-and-recency",
+  "scope": "agentica",
+  "kind": "technical",
+  "status": "accepted",
+  "title": "Qualify readable work through real page and payload boundaries",
+  "trigger": "Lab work reader pagination payloadRef missing summary incomplete coverage interleaved current preview audit",
+  "guidance": "When projecting readable work from retained traces, qualify three independent coordinates: the retained page cursor, availability of separately stored payloads, and latest observed activity within stable reading order. A nonzero cursor means a page was consumed, not that the reader should restart. Complete sequence coverage does not imply complete payload coverage. Use explicit turn-scoped reads, retryable failures and the existing bounded display cache; preserve raw envelopes and never parse retention previews as evidence. Keep unresolved or retention-lost payloads visible. Select the current excerpt by latest update sequence while retaining original block order for reading. Browser fixtures must honor actual page limits, payload references and failed-read behavior; returning every event for every request can conceal a broken reader even when reducer tests pass.",
+  "evidence": [
+    {
+      "kind": "source_review",
+      "reference": "Agentica.Lab.Web/wwwroot/chat.mjs; Agentica.Lab.Web/wwwroot/chat-work.mjs; docs/contracts/readable-provider-stream.md",
+      "revision": "b89af3d",
+      "note": "Corrects the three final-audit Lab findings without changing core/client source, provider requests, raw storage or the frozen 3217c8d package pair. Large payloads are read explicitly through existing scope checks and the shared eight-payload cache."
+    },
+    {
+      "kind": "offline_test",
+      "reference": "browser-tests/ui-work-reader-regressions.mjs; Agentica.Lab.Web.Tests/chat-ui.test.mjs; .agentica/reader-fixes-red.log; .agentica/reader-fixes-final/work-reader-regressions.json",
+      "revision": "b89af3d",
+      "note": "All three browser regressions fail on d62cc26 and pass after correction: interleaved preview, 205-record three-page progression, separate 60k-character payloads with failed-read retry and per-event loss disclosure.46 UI/Markdown checks and both prior intercepted Edge reading/Markdown journeys pass. No live provider, running user service or installed-host proof."
+    }
+  ],
+  "recheck": "Recheck cursor transitions, payload cache eviction/scope, retention envelopes and source ordering if the raw trace store or reader changes. This qualifies a bounded loaded-window reader, not durable semantic-block pagination or unlimited retention.",
+  "tags": [
+    "lab",
+    "streaming",
+    "reader",
+    "pagination",
+    "payloads",
+    "coverage",
+    "recency",
+    "browser-tests"
+  ],
+  "recorded_on": "2026-11-08"
+}

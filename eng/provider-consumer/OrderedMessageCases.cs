@@ -34,7 +34,7 @@ internal static class OrderedMessageCases
             new(LlmMessageRole.System, "Stable fixture identity. Host observations are evidence; only the host executes effects.") { CacheBreakpoint = new() },
             new(LlmMessageRole.Assistant, "Prior published fixture reply.") { Phase = LlmAssistantPhase.FinalAnswer },
             Observation("initial"), new(LlmMessageRole.Developer, "Accept eligible pending items, then report complete.")
-        ], new(MaxOutputTokens: 256), new(JsonSchema: Schema))
+        ], new(MaxOutputTokens: 256, Thinking: new(IncludeThoughts: true)), new(JsonSchema: Schema))
         { MessageMode = LlmMessageMode.Ordered, PromptCache = new(LlmPromptCacheMode.Explicit) };
         byte[]? retained = null;
         var completed = false;
@@ -62,7 +62,20 @@ internal static class OrderedMessageCases
                 new(new("ordered-count-" + index, "fixture.accept", "count", "fixture-route", "fixture-bundle")), admission);
             Check.Equal(prepared.Descriptor.RequestIdentity, measurement.GenerationRequestIdentity);
             Check.Equal(prepared.Descriptor.BodyHash, measurement.GenerationBodyHash);
-            var response = await prepared.GenerateAsync(admission);
+            LlmResponse? terminal = null;
+            var readableEvents = new List<LlmStreamEvent>();
+            await foreach (var item in prepared.StreamAsync(admission))
+            {
+                readableEvents.Add(item);
+                if (item.Kind == LlmStreamEventKind.Completed) terminal = item.Response;
+            }
+            var response = terminal ?? throw new InvalidOperationException("Ordered readable stream did not complete.");
+            var summaryEvents = readableEvents.Where(item => item.Block?.Kind == LlmStreamBlockKind.ReasoningSummary).ToArray();
+            Check.Equal("Inspect current authoritative fixture state.", string.Concat(summaryEvents
+                .Where(item => item.Kind == LlmStreamEventKind.ThoughtSummaryDelta).Select(item => item.Text)));
+            Check.Equal(LlmStreamBlockLifecycle.Started, summaryEvents[0].Block!.Lifecycle);
+            Check.Equal(LlmStreamBlockLifecycle.Completed, summaryEvents[^1].Block!.Lifecycle);
+            Check.That(summaryEvents.All(item => item.Source?.Version == 1 && item.Source.SummaryIndex == 0), "native readable identity survives paired package consumption");
             using (response.NativeContinuation)
             {
                 using var result = JsonDocument.Parse(response.Text);
@@ -157,11 +170,29 @@ internal static class OrderedMessageCases
             var proposal = JsonSerializer.Serialize(new { action = pending.GetArrayLength() > 0 ? "accept" : "complete",
                 item = pending.GetArrayLength() > 0 ? pending[0].GetString() : null,
                 expectedVersion = state.RootElement.GetProperty("version").GetInt32() });
-            var response = JsonSerializer.Serialize(new { type = "response.completed", response = new
+            const string summary = "Inspect current authoritative fixture state.";
+            var reasoningId = "ordered-reasoning-" + Inferences;
+            var answerId = "ordered-answer-" + Inferences;
+            var response = JsonSerializer.Serialize(new { type = "response.completed", sequence_number = 10, response = new
             { id = "ordered-response-" + Inferences, model = "fixture-model", status = "completed",
-                output = new[] { new { type = "message", role = "assistant", phase = "final_answer", content = new[] { new { type = "output_text", text = proposal } } } },
+                output = new object[] { new { type = "reasoning", id = reasoningId, encrypted_content = "offline-opaque-fixture", summary = new[] { new { type = "summary_text", text = summary } } },
+                    new { type = "message", id = answerId, role = "assistant", phase = "final_answer", content = new[] { new { type = "output_text", text = proposal } } } },
                 usage = new { input_tokens = 128, output_tokens = 32 } } });
-            return new(HttpStatusCode.OK) { Content = new StringContent("data: " + response + "\n\n", Encoding.UTF8, "text/event-stream") };
+            var pieces = new[] { "Inspect ", "current authoritative ", "fixture state." };
+            var frames = new List<object> { new { type = "response.reasoning_summary_part.added", item_id = reasoningId,
+                output_index = 0, summary_index = 0, sequence_number = 1, part = new { type = "summary_text", text = "" } } };
+            frames.AddRange(pieces.Select((delta, index) => (object)new { type = "response.reasoning_summary_text.delta", item_id = reasoningId,
+                output_index = 0, summary_index = 0, sequence_number = index + 2, delta }));
+            frames.Add(new { type = "response.reasoning_summary_text.done", item_id = reasoningId, output_index = 0, summary_index = 0, sequence_number = 5, text = summary });
+            frames.Add(new { type = "response.reasoning_summary_part.done", item_id = reasoningId, output_index = 0, summary_index = 0,
+                sequence_number = 6, part = new { type = "summary_text", text = summary } });
+            frames.Add(new { type = "response.content_part.added", item_id = answerId, output_index = 1, content_index = 0,
+                sequence_number = 7, part = new { type = "output_text", text = "" } });
+            frames.Add(new { type = "response.output_text.delta", item_id = answerId, output_index = 1, content_index = 0, sequence_number = 8, delta = proposal });
+            frames.Add(new { type = "response.content_part.done", item_id = answerId, output_index = 1, content_index = 0,
+                sequence_number = 9, part = new { type = "output_text", text = proposal } });
+            var stream = string.Concat(frames.Select(frame => "data: " + JsonSerializer.Serialize(frame) + "\n\n")) + "data: " + response + "\n\n";
+            return new(HttpStatusCode.OK) { Content = new StringContent(stream, Encoding.UTF8, "text/event-stream") };
         }
     }
 }

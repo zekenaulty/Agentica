@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Agentica.Clients.Llm;
 using Agentica.Lab.Web.Chat;
 using Agentica.Lab.Web.Contracts;
 using Agentica.Lab.Web.Providers;
@@ -10,6 +11,43 @@ namespace Agentica.Lab.Web.Tests;
 
 public sealed class ExperimentPersistenceTests
 {
+    [Fact]
+    public void Readable_coordinates_and_exact_fragments_survive_paged_reopen_without_rewriting_raw_events()
+    {
+        using var fixture = new StoreFixture();
+        string room, turnId, other;
+        string[] fragments = ["same ", "same", "\r\n🧭"];
+        using (var store = new ExperimentStore(fixture.Path))
+        {
+            room = store.Create(new(), "Readable fixture").Id;
+            other = store.Create(new(), "Isolated fixture").Id;
+            turnId = store.Begin(room, new("Inspect", "readable-request")).Turn.Id;
+            foreach (var fragment in fragments)
+            {
+                store.Append(room, turnId, new("provider.record", new { type = "response.reasoning_summary_text.delta", delta = fragment }, "call", "reason"));
+                store.Append(room, turnId, new("provider.summary.delta", new
+                {
+                    text = fragment,
+                    source = new LlmStreamSource("openai", "response.reasoning_summary_text.delta", ItemId: "reason", OutputIndex: 0, SummaryIndex: 2)
+                }, "call", "reason"));
+            }
+            store.Complete(room, turnId, new("completed", "Answer"));
+        }
+        using var reopened = new ExperimentStore(fixture.Path);
+        var events = new List<ExperimentEvent>(); long after = 0;
+        while (true)
+        {
+            var page = reopened.ReadEvents(room, turnId, after, 2);
+            if (page.Count == 0) break;
+            events.AddRange(page); after = page[^1].Sequence;
+        }
+        var deltas = events.Where(item => item.Type == "provider.summary.delta").Select(item => JsonSerializer.SerializeToElement(item.Data, HostProtocol.Json)).ToArray();
+        Assert.Equal(fragments, deltas.Select(item => item.GetProperty("text").GetString()));
+        Assert.All(deltas, item => Assert.Equal(2, item.GetProperty("source").GetProperty("summaryIndex").GetInt32()));
+        Assert.Equal(3, events.Count(item => item.Type == "provider.record"));
+        Assert.Throws<ExperimentException>(() => reopened.ReadEvents(other, turnId, 0, 100));
+    }
+
     [Fact]
     public void Conversation_settings_transcript_and_trace_survive_restart_without_cross_chat_context()
     {

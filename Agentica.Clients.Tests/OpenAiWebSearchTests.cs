@@ -44,6 +44,7 @@ public sealed class OpenAiWebSearchTests
         Assert.Equal(10, evidence.Citations[0].AnswerEndIndex);
         Assert.Same(evidence, request.AttemptCapture!.LatestWebSearch);
         Assert.Contains(events, item => item.Kind == LlmStreamEventKind.Activity && item.WebSearch?.Calls[0].Status == "in_progress");
+        Assert.Contains(events, item => item.Source?.ItemId == "ws1" && item.Source.OutputIndex == 0 && item.Source.EventType == "response.web_search_call.in_progress");
         Assert.Equal(1, handler.Count);
     }
 
