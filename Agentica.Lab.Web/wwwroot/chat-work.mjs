@@ -2,6 +2,7 @@
 // canonical chat text, provider state, host acceptance or tool execution.
 const field = (value, name) => value?.[name] ?? value?.[name[0].toUpperCase() + name.slice(1)];
 const validIndex = value => Number.isSafeInteger(value) && value >= 0;
+const workEventTypes = new Set(['provider.summary.delta', 'provider.item', 'planner.stream', 'provider.web-search', 'harness.event']);
 const terminal = status => !['queued', 'pending', 'running', 'active', 'starting', 'cancelling'].includes(String(status ?? '').toLowerCase());
 const graphemes = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
 
@@ -25,8 +26,13 @@ export function recentWorkExcerpt(value, maximumCodePoints = 220) {
   return '… ' + text.slice(start);
 }
 
-export function readableWork(events, turnStatus = 'running') {
-  const ordered = [...new Map(events.map(event => [event.sequence, event])).values()].sort((a, b) => a.sequence - b.sequence);
+export function readableWork(events, turnStatus = 'running', payloads = new Map()) {
+  // Hydrate a presentation copy only. Sequence coverage alone does not prove
+  // that separately stored or retention-truncated payloads are available.
+  const ordered = [...new Map(events.map(event => [event.sequence, event])).values()].sort((a, b) => a.sequence - b.sequence)
+    .map(event => event.data?.payloadRef && payloads.has(event.sequence) ? { ...event, data: payloads.get(event.sequence) } : event);
+  const unresolvedPayloads = ordered.filter(event => workEventTypes.has(event.type) && (event.data?.payloadRef || event.data?.truncated))
+    .map(event => ({ sequence: event.sequence, type: event.type, canLoad: Boolean(event.data.payloadRef) && !event.data.truncated }));
   const blocks = new Map(); const operations = new Map();
   const wireCalls = new Set(ordered.filter(event => event.type === 'provider.summary.delta' || event.type === 'provider.item').map(event => event.callId));
   for (const event of ordered) {
@@ -83,7 +89,8 @@ export function readableWork(events, turnStatus = 'running') {
         status: block.incomplete ? 'incomplete' : block.ended ? 'complete' : block.snapshotOnly ? 'snapshot'
           : terminal(turnStatus) ? 'end-not-observed' : 'streaming' };
     }).filter(block => block.text.trim()).sort((a, b) => a.firstSequence - b.firstSequence),
-    operations: [...operations.values()].sort((a, b) => a.firstSequence - b.firstSequence)
+    operations: [...operations.values()].sort((a, b) => a.firstSequence - b.firstSequence),
+    unresolvedPayloads
   };
 }
 

@@ -277,6 +277,42 @@ test('retained attempts expose known failed-call usage without inventing unknown
 });
 import { readableWork, recentWorkExcerpt } from '../Agentica.Lab.Web/wwwroot/chat-work.mjs';
 
+test('work payload coverage remains explicit until separately retained records are loaded', () => {
+  const text = 'Exact large summary. '.repeat(2500); const source = { version: 1, itemId: 'r', summaryIndex: 0 };
+  const events = [
+    { sequence: 1, type: 'provider.summary.delta', callId: 'c', data: { payloadRef: '/separate/1', preview: '{"text":"partial' } },
+    { sequence: 2, type: 'provider.item', callId: 'c', data: { payloadRef: '/separate/2' } },
+    { sequence: 3, type: 'provider.record', data: { payloadRef: '/raw/3' } }
+  ];
+  const original = JSON.stringify(events); const payloads = new Map();
+  const before = readableWork(events, 'completed', payloads);
+  assert.deepEqual(before.blocks, []); assert.deepEqual(before.unresolvedPayloads.map(payload => payload.sequence), [1, 2]);
+  payloads.set(1, { text, source });
+  const partial = readableWork(events, 'completed', payloads);
+  assert.equal(partial.blocks[0].capturedText, text); assert.equal(partial.blocks[0].status, 'end-not-observed');
+  assert.deepEqual(partial.unresolvedPayloads.map(payload => payload.sequence), [2]);
+  payloads.set(2, { type: 'response.reasoning_summary_part.done', item_id: 'r', summary_index: 0, part: { type: 'summary_text', text } });
+  const complete = readableWork(events, 'completed', payloads);
+  assert.equal(complete.blocks.length, 1); assert.equal(complete.blocks[0].text, text);
+  assert.equal(complete.blocks[0].capturedText, text); assert.equal(complete.blocks[0].gap, false);
+  assert.equal(complete.blocks[0].status, 'complete'); assert.deepEqual(complete.unresolvedPayloads, []);
+  assert.equal(JSON.stringify(events), original, 'Hydration never rewrites the retained trace envelope.');
+});
+
+test('retention-truncated work is unavailable rather than parsed from a JSON preview', () => {
+  const result = readableWork([
+    { sequence: 1, type: 'provider.summary.delta', data: { truncated: true, preview: '{"text":"partial summary' } },
+    { sequence: 2, type: 'harness.event', data: { payloadRef: '/separate/2' } },
+    { sequence: 3, type: 'provider.web-search', data: { payloadRef: '/separate/3' } }
+  ], 'completed');
+  assert.deepEqual(result.blocks, []); assert.deepEqual(result.operations, []);
+  assert.deepEqual(result.unresolvedPayloads, [
+    { sequence: 1, type: 'provider.summary.delta', canLoad: false },
+    { sequence: 2, type: 'harness.event', canLoad: true },
+    { sequence: 3, type: 'provider.web-search', canLoad: true }
+  ]);
+});
+
 test('compact current summary advances past its old prefix without changing the retained text', () => {
   const earlier = 'Old approach. '.repeat(40);
   const current = earlier + 'The new source check is complete.';
@@ -350,7 +386,7 @@ test('planner JSON and opaque reasoning are not promoted into readable thoughts 
     { sequence: 1, type: 'planner.stream', data: { kind: 'TextDelta', text: '{"tool":"delete"}', block: { kind: 0, lifecycle: 1 } } },
     { sequence: 2, type: 'provider.item', data: { type: 'reasoning', encrypted_content: 'private', content: [{ text: 'private' }] } }
   ]);
-  assert.deepEqual(work, { blocks: [], operations: [] });
+  assert.deepEqual(work, { blocks: [], operations: [], unresolvedPayloads: [] });
 });
 
 test('empty and whitespace-only summaries create no reading scaffold', () => {

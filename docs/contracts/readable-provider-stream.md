@@ -123,10 +123,22 @@ The compact current excerpt shows recent text, bounded to 220 Unicode code
 points plus an omission marker. It preserves surrogate pairs and uses native
 grapheme segmentation when available to avoid beginning inside a cluster. It
 does not freeze at the beginning of a long growing part. Full retained text is
-unchanged. Snapshot comparisons check content, including equal-length
+unchanged. Interleaved blocks retain their original reading order, while the
+compact excerpt follows the block with the latest observed update sequence.
+Snapshot comparisons check content, including equal-length
 disagreements. Lab currently compares loaded captured text with a complete
 available snapshot; it has no separate semantic-block page/snapshot-slice
 contract to change.
+
+The Work reader starts retained inspection at the beginning and then advances
+the existing cursor on each **Load more retained work** action. Sequence
+coverage and payload availability are separate: large work records stored
+behind payload references have explicit load controls and coverage warnings.
+Loads use the existing turn-scoped payload endpoint and shared eight-payload
+display cache; opening Work does not eagerly fetch them. Failed reads remain
+retryable. Loaded payloads are projected without rewriting the trace envelope,
+and snapshots remain separate from deltas. Records exceeding per-event
+retention are labelled unavailable rather than reconstructed from JSON previews.
 
 **Bounded first slice:** the reading view covers the currently loaded trace
 window and clearly labels omitted pages, incomplete blocks, snapshot mismatch,
@@ -153,6 +165,10 @@ parsing for future hosts.
   progressive host-owned answer, tool result, inspection, completion, reload
   and narrow viewport. `ui-experiment-markdown.mjs` retains prior Markdown,
   citation, disclosure and reconnect checks. Neither uses a live provider.
+- `ui-work-reader-regressions.mjs`: interleaved current preview, three-page
+  cursor progression, separate large payloads, failed-read retry and explicit
+  per-event retention loss. All three audited regressions fail before the
+  corrections and pass afterward against intercepted Edge browser fixtures.
 
 These are producer/offline/browser evidence. Live emissions, installed Bridge
 behavior and the owner's judgment of usefulness remain separate acceptance.

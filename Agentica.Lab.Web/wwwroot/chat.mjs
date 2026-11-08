@@ -376,8 +376,9 @@ function startChat() {
     const workExcerpt = node('p', 'work-excerpt');
     const work = node('details', 'turn-work'); const workLabel = node('summary', '', 'Work');
     const workBody = node('div', 'work-body'); const workBlocks = node('div', 'work-blocks'); const workOperations = node('div', 'work-operations');
+    const workPayloads = node('div', 'work-payloads');
     const workCoverage = node('p', 'trace-coverage'); const workRead = node('button', 'button secondary', 'Read retained work'); workRead.type = 'button';
-    workBody.append(workOperations, workBlocks, workCoverage, workRead); work.append(workLabel, workBody);
+    workBody.append(workOperations, workBlocks, workPayloads, workCoverage, workRead); work.append(workLabel, workBody);
     const meta = node('div', 'turn-meta'); const error = node('div', 'turn-error'); const continuity = node('div', 'continuity-label'); const answerSources = node('div', 'answer-sources');
     assistant.append(assistantLabel, workStatus, workExcerpt, work, content, answerPending, placeholder, answerSources, meta, error, continuity); article.append(assistant);
     const trace = node('details', 'turn-trace'); const traceLabel = node('summary'); trace.append(traceLabel);
@@ -397,14 +398,17 @@ function startChat() {
     const pageInfo = node('span'); pageControls.append(load, restart, resumeLive, pageInfo);
     traceContent.append(activity, summary, absence, coverage, attemptInspector.section, requestInspector.section, contextInspector.section, recallInspector.section, searchInspector.section, nativeInspector.section, sourceInspector.section, settingsInspector.section, timelineSection, pageControls); trace.append(traceContent); article.append(trace);
     const entry = { article, content, placeholder, answerSources, meta, error, continuity, trace, traceLabel, activity, summary, summaryText, absence, coverage, timeline, timelineSection, timelineLabel, attemptInspector, requestInspector, contextInspector, nativeInspector, sourceInspector, searchInspector, recallInspector, load, resumeLive, pageInfo,
-      work, workLabel, workStatus, workExcerpt, workBlocks, workOperations, workCoverage, workRead, workNodes: new Map(), answerPending };
+      work, workLabel, workStatus, workExcerpt, workBlocks, workOperations, workPayloads, workCoverage, workRead, workNodes: new Map(), workPayloadLoading: new Set(), workPayloadErrors: new Map(), answerPending };
     state.nodes.set(turn.id, entry); state.traces.set(turn.id, newTrace(turn));
     trace.addEventListener('toggle', () => { if (trace.open && !state.traces.get(turn.id)?.loaded) loadTrace(turn.id); });
     work.addEventListener('toggle', () => {
       if (work.open && !state.traces.get(turn.id)?.loaded) loadTraceTail(turn.id);
       renderTrace(turn.id);
     });
-    workRead.addEventListener('click', () => { if (state.traces.get(turn.id)?.after) restart.click(); else loadTrace(turn.id); });
+    workRead.addEventListener('click', () => {
+      const retained = state.traces.get(turn.id); if (!retained || retained.loading) return;
+      if (!retained.inspecting || !retained.hasMore) restart.click(); else loadTrace(turn.id);
+    });
     answerPending.addEventListener('click', () => { document.getSelection()?.removeAllRanges(); renderAnswer(turn, entry); });
     for (const inspector of [timelineSection, attemptInspector.section, requestInspector.section, contextInspector.section, nativeInspector.section, sourceInspector.section, searchInspector.section, recallInspector.section]) inspector.addEventListener('toggle', () => { if (inspector.open) renderTrace(turn.id); });
     load.addEventListener('click', () => loadTrace(turn.id));
@@ -567,12 +571,13 @@ function startChat() {
     elements.pageInfo.textContent = `${trace.inspecting ? 'Retained inspection' : 'Live tail'} · ${events.length.toLocaleString()} visible${range} · ${fullCoverage ? 'full retained sequence loaded' : `page cursor ${trace.after}`}`;
   }
   function renderWork(turn, elements, events, fullCoverage, trace) {
-    const work = readableWork(events, turn.status); const finished = isTerminal(turn.status);
+    const work = readableWork(events, turn.status, trace.payloads); const finished = isTerminal(turn.status);
     const current = work.operations.at(-1);
     const status = turn.assistantText ? 'Writing the answer' : current?.status === 'running' ? `Running ${current.title}` : work.blocks.length ? 'Working through the request' : 'Waiting for provider response';
     if (elements.workStatus.textContent !== status) elements.workStatus.textContent = status;
     elements.workStatus.hidden = finished;
-    const excerpt = recentWorkExcerpt(work.blocks.at(-1)?.text);
+    const latestBlock = work.blocks.reduce((latest, block) => !latest || block.lastSequence > latest.lastSequence ? block : latest, null);
+    const excerpt = recentWorkExcerpt(latestBlock?.text);
     if (elements.workExcerpt.textContent !== excerpt && !selectionIn(elements.workExcerpt)) elements.workExcerpt.textContent = excerpt;
     elements.workExcerpt.hidden = finished || !excerpt || elements.work.open;
     elements.work.hidden = !events.length && !turn.traceCount;
@@ -611,10 +616,36 @@ function startChat() {
       }));
       elements.operationSignature = operationSignature;
     }
+    elements.workPayloads.replaceChildren(...work.unresolvedPayloads.map(payload => {
+      const row = node('section', 'work-payload');
+      if (!payload.canLoad) row.append(node('p', 'micro', `Work record #${payload.sequence} exceeded per-event retention; its full payload was not retained.`));
+      else {
+        const load = node('button', 'work-inspect', `Load retained work record #${payload.sequence}`); load.type = 'button';
+        load.disabled = elements.workPayloadLoading.has(payload.sequence);
+        load.addEventListener('click', async () => {
+          elements.workPayloadLoading.add(payload.sequence); elements.workPayloadErrors.delete(payload.sequence); renderTrace(turn.id);
+          try { await retainedPayload(turn.id, { sequence: payload.sequence }); }
+          catch (error) { elements.workPayloadErrors.set(payload.sequence, `Cannot load record: ${error.message}`); }
+          finally {
+            elements.workPayloadLoading.delete(payload.sequence);
+            if (state.nodes.get(turn.id) === elements) renderTrace(turn.id);
+          }
+        });
+        row.append(load);
+        const failure = elements.workPayloadErrors.get(payload.sequence);
+        if (failure) row.append(node('p', 'micro', failure));
+      }
+      return row;
+    }));
+    const unloaded = work.unresolvedPayloads.filter(payload => payload.canLoad).length;
+    const unavailable = work.unresolvedPayloads.length - unloaded;
     const coverage = [!fullCoverage ? 'Showing work from the loaded trace window. Read retained work for earlier evidence.' : '', trace.gap, trace.streamError,
+      unloaded ? `${unloaded} work record payload${unloaded === 1 ? ' is' : 's are'} stored separately and not loaded. Load individual records above; the display cache holds up to eight large payloads.` : '',
+      unavailable ? `${unavailable} work record payload${unavailable === 1 ? ' was' : 's were'} not retained in full. Reading coverage is incomplete.` : '',
       turn.droppedTraceCount ? `${turn.droppedTraceCount} events exceeded service retention; this view has a capture gap.` : ''].filter(Boolean).join(' ');
     elements.workCoverage.textContent = coverage; elements.workCoverage.hidden = !coverage;
     elements.workRead.hidden = fullCoverage; elements.workRead.disabled = trace.loading;
+    elements.workRead.textContent = trace.inspecting && trace.hasMore ? 'Load more retained work' : 'Read retained work from start';
   }
   function selectionIn(element) {
     const selection = document.getSelection();
