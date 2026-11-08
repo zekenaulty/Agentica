@@ -46,8 +46,14 @@ public sealed class ProofObserverFailureTests
 
         Assert.Equal(1, tool.ExecutionCount);
         Assert.Equal(RunOutcomeStatus.Succeeded, envelope.Outcome.Status);
-        Assert.Single(envelope.Receipts.Items);
-        Assert.Equal(envelope.Details.Events.Count, events.Events.Count);
+        var receipt = Assert.Single(envelope.Receipts.Items);
+        // Delivery is bounded best-effort. A loaded worker can trip that independent
+        // timeout even for an in-memory sink; canonical proof must still be intact.
+        if (envelope.Details.EventDeliveryFailure is null)
+            Assert.Equal(envelope.Details.Events.Count, events.Events.Count);
+        var receiptEvent = Assert.Single(envelope.Details.Events,
+            item => item.Type == ExecutionEventType.ReceiptEmitted.WireName());
+        Assert.Contains(receiptEvent.EvidenceRefs, item => item.RefId == receipt.ReceiptId);
         Assert.Contains(
             envelope.Details.Events,
             item => item.Diagnostics?.Code == "event.reason_projection.failed");

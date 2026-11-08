@@ -15,6 +15,9 @@ public sealed record LlmRequest(
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public LlmMessageMode MessageMode { get; init; }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public LlmInstructionRolePolicy InstructionRolePolicy { get; init; }
+
     /// <summary>In Ordered mode, Messages are new items appended after the carrier's entire
     /// retained input/output prefix. Never pass the complete frame again with this flag.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
@@ -46,9 +49,9 @@ public sealed record LlmRequest(
 
 internal static class LlmHistoryModeGuard
 {
-    internal static void RequireNativeMode(LlmRequest request, string provider)
+    internal static void RequireNativeMode(LlmRequest request, string provider, bool supportsOrdered = false)
     {
-        LlmMessageMapping.Validate(request, provider);
+        LlmMessageMapping.Validate(request, provider, supportsOrdered);
         if (request.OpenAiHistoryMode != OpenAiHistoryMode.NativeContinuation)
             throw new LlmClientException(provider, "OpenAI transcript history mode is unsupported by this route.",
                 errorKind: LlmClientErrorKind.BadRequest, errorClass: "unsupported_history_mode");

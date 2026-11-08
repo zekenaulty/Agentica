@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Agentica.Clients.Llm;
+using Agentica.Clients.Xai;
 
 namespace Agentica.Clients.OpenAI;
 
@@ -79,6 +80,9 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
         var modelId = string.IsNullOrWhiteSpace(request.ModelId)
             ? _options.DefaultModelId : request.ModelId;
         var body = BuildRequestBody(request, modelId);
+        var nativeConfiguration = LlmOrderedProjection.CaptureConfiguration(request, () => _providerName == ProviderName
+            ? LlmConfigurationReports.Describe(request, _options)
+            : LlmConfigurationReports.Describe(request, new XaiResponsesClientOptions(_options.ApiKey, _options.DefaultModelId, _options.Endpoint)));
         var search = request.WebSearch is { } searchOptions ? new OpenAiWebSearchState(searchOptions, recorder) : null;
         using var message = new HttpRequestMessage(HttpMethod.Post,
             _options.Endpoint ?? OpenAiResponsesClientOptions.DefaultEndpoint)
@@ -212,7 +216,8 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
                                 var usage = GetObject(terminal, "usage");
                                 var inputDetails = GetObject(usage, "input_tokens_details");
                                 var outputDetails = GetObject(usage, "output_tokens_details");
-                                var native = CreateContinuation(request, modelId, output);
+                                var native = CreateContinuation(request, modelId, output, body);
+                                LlmOrderedProjection.BindOutcome(native, nativeConfiguration);
                                 completed = true;
                                 yield return new LlmStreamEvent(LlmStreamEventKind.Completed,
                                     Response: new LlmResponse(_providerName, modelId, finalText,
@@ -259,7 +264,7 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
 
     internal Dictionary<string, object?> BuildRequestBody(LlmRequest request, string modelId)
     {
-        LlmMessageMapping.Validate(request, _providerName, supportsOrdered: _providerName == ProviderName);
+        LlmMessageMapping.Validate(request, _providerName, supportsOrdered: _providerName is ProviderName or XaiResponsesLlmClient.ProviderName);
         var ordered = request.MessageMode == LlmMessageMode.Ordered;
         if (!Enum.IsDefined(request.OpenAiHistoryMode))
             throw Failure("unsupported_history_mode", LlmClientErrorKind.BadRequest);
@@ -296,7 +301,7 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
             using var history = JsonDocument.Parse(continuation.HistoryStepsJson);
             input.AddRange(history.RootElement.EnumerateArray().Select(item => (object)item.Clone()));
         }
-        if (ordered) input = OpenAiOrderedMessages.Input(request, modelId);
+        if (ordered) input = OpenAiOrderedMessages.Input(request, modelId, _providerName);
         else if (transcriptOnly)
             input.AddRange(request.Messages.Where(message => message.Role is LlmMessageRole.User or LlmMessageRole.Assistant)
                 .Select(message => (object)new { role = message.Role == LlmMessageRole.User ? "user" : "assistant", content = message.Content }));
@@ -381,9 +386,9 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
     }
 
     private LlmNativeContinuation? CreateContinuation(
-        LlmRequest request, string modelId, JsonElement output)
+        LlmRequest request, string modelId, JsonElement output, Dictionary<string, object?> requestBody)
     {
-        if (request.MessageMode == LlmMessageMode.Ordered) return OpenAiOrderedMessages.Continue(request, modelId, output);
+        if (request.MessageMode == LlmMessageMode.Ordered) return OpenAiOrderedMessages.Continue(requestBody["input"]!, modelId, output, _providerName);
         if (request.OpenAiHistoryMode == OpenAiHistoryMode.TranscriptOnly || output.GetArrayLength() == 0) return null;
         foreach (var item in output.EnumerateArray())
         {

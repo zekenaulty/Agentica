@@ -58,6 +58,7 @@ public sealed class GeminiGenerateContentLlmClient : ILlmStreamingClient
             throw Failure("missing_api_key", LlmClientErrorKind.Authentication);
         var model = string.IsNullOrWhiteSpace(request.ModelId) ? _options.DefaultModelId : request.ModelId;
         var body = BuildRequest(request, model, out var instruction);
+        var nativeConfiguration = LlmOrderedProjection.CaptureConfiguration(request, () => LlmConfigurationReports.Describe(request, _options));
         using var message = new HttpRequestMessage(HttpMethod.Post, _options.Endpoint ?? Endpoint(model))
         {
             Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json")
@@ -108,8 +109,9 @@ public sealed class GeminiGenerateContentLlmClient : ILlmStreamingClient
             history.Add(new JsonObject { ["role"] = "model", ["parts"] = state.Parts });
             var serialized = history.ToJsonString();
             if (serialized.Length <= LlmNativeContinuation.MaxPayloadCharacters)
-                continuation = new LlmNativeContinuation(ProviderName, model, instruction, serialized);
+                continuation = new LlmNativeContinuation(ProviderName, model, instruction, serialized, messageMode: request.MessageMode);
         }
+        LlmOrderedProjection.BindOutcome(continuation, nativeConfiguration);
         var text = state.Text.ToString();
         yield return new LlmStreamEvent(LlmStreamEventKind.Completed, Response: new LlmResponse(
             ProviderName, model, text,
@@ -142,17 +144,18 @@ public sealed class GeminiGenerateContentLlmClient : ILlmStreamingClient
 
     internal static JsonObject BuildRequest(LlmRequest request, string model, out string instruction)
     {
-        LlmHistoryModeGuard.RequireNativeMode(request, ProviderName);
-        if (request.Messages.Any(item => item.Role is not (LlmMessageRole.System or LlmMessageRole.Developer or LlmMessageRole.User)))
+        LlmHistoryModeGuard.RequireNativeMode(request, ProviderName, supportsOrdered: true);
+        var ordered = request.MessageMode == LlmMessageMode.Ordered;
+        if (!ordered && request.Messages.Any(item => item.Role is not (LlmMessageRole.System or LlmMessageRole.Developer or LlmMessageRole.User)))
             throw Failure("native_history_required", LlmClientErrorKind.BadRequest);
         instruction = string.Join("\n\n", request.Messages
             .Where(item => item.Role is LlmMessageRole.System or LlmMessageRole.Developer)
             .Select(item => item.Content).Where(item => !string.IsNullOrWhiteSpace(item)));
         var input = string.Join("\n\n", request.Messages.Where(item => item.Role == LlmMessageRole.User)
             .Select(item => item.Content).Where(item => !string.IsNullOrWhiteSpace(item)));
-        if (string.IsNullOrWhiteSpace(input)) throw Failure("empty_input", LlmClientErrorKind.BadRequest);
+        if (!ordered && string.IsNullOrWhiteSpace(input)) throw Failure("empty_input", LlmClientErrorKind.BadRequest);
         var contents = new JsonArray();
-        if (request.NativeContinuation is { } previous)
+        if (!ordered && request.NativeContinuation is { } previous)
         {
             if (previous.ProviderName != ProviderName || previous.ModelId != model ||
                 previous.SystemInstruction != instruction ||
@@ -165,6 +168,12 @@ public sealed class GeminiGenerateContentLlmClient : ILlmStreamingClient
             ["role"] = "user",
             ["parts"] = new JsonArray(new JsonObject { ["text"] = input })
         });
+        if (ordered)
+        {
+            var projection = LlmOrderedProjection.Dialogue(request, ProviderName, model, generateContent: true);
+            instruction = projection.Instructions;
+            contents = JsonSerializer.SerializeToNode(projection.Dialogue)!.AsArray();
+        }
         if (contents.ToJsonString().Length > LlmNativeContinuation.MaxPayloadCharacters)
             throw Failure("input_too_large", LlmClientErrorKind.BadRequest);
         var config = new JsonObject { ["candidateCount"] = 1 };

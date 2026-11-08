@@ -33,11 +33,11 @@ public sealed class GeminiLlmClient : ILlmClient
         var recorder = LlmAttemptRecorder.Start(request, ProviderName, modelId);
         try
         {
-            LlmHistoryModeGuard.RequireNativeMode(request, ProviderName);
+            LlmHistoryModeGuard.RequireNativeMode(request, ProviderName, supportsOrdered: true);
             if (request.WebSearch is not null)
                 throw new LlmClientException(ProviderName, "Provider-native search is not implemented for this route.",
                     errorKind: LlmClientErrorKind.BadRequest, errorClass: "unsupported_web_search");
-            if (request.NativeContinuation is not null || request.Messages.Any(message =>
+            if (request.NativeContinuation is not null || request.MessageMode != LlmMessageMode.Ordered && request.Messages.Any(message =>
                     message.Role is LlmMessageRole.Assistant or LlmMessageRole.Tool))
             {
                 throw new LlmClientException(ProviderName,
@@ -51,9 +51,9 @@ public sealed class GeminiLlmClient : ILlmClient
             var config = CreateConfig(request);
             var prompt = BuildPrompt(request.Messages);
 
-            var response = await client.Models
-                .GenerateContentAsync(model: modelId, contents: prompt, config: config, cancellationToken)
-                .ConfigureAwait(false);
+            var response = request.MessageMode == LlmMessageMode.Ordered
+                ? await client.Models.GenerateContentAsync(model: modelId, contents: BuildOrderedContents(request), config: config, cancellationToken).ConfigureAwait(false)
+                : await client.Models.GenerateContentAsync(model: modelId, contents: prompt, config: config, cancellationToken).ConfigureAwait(false);
 
             var mapped = GeminiResponseMapper.Map(modelId, response);
             recorder.Observe(providerReportedModelId: response.ModelVersion,
@@ -175,8 +175,9 @@ public sealed class GeminiLlmClient : ILlmClient
 
     internal static GenerateContentConfig CreateConfig(LlmRequest request)
     {
-        LlmHistoryModeGuard.RequireNativeMode(request, ProviderName);
-        var systemInstruction = BuildSystemInstruction(request.Messages);
+        LlmHistoryModeGuard.RequireNativeMode(request, ProviderName, supportsOrdered: true);
+        var systemInstruction = request.MessageMode == LlmMessageMode.Ordered
+            ? LlmOrderedProjection.Split(request, ProviderName).Instructions : BuildSystemInstruction(request.Messages);
         var config = new GenerateContentConfig
         {
             SystemInstruction = string.IsNullOrWhiteSpace(systemInstruction)
@@ -238,5 +239,13 @@ public sealed class GeminiLlmClient : ILlmClient
             .Where(content => !string.IsNullOrWhiteSpace(content));
 
         return string.Join(System.Environment.NewLine + System.Environment.NewLine, promptMessages);
+    }
+
+    internal static List<Content> BuildOrderedContents(LlmRequest request)
+    {
+        var projection = LlmOrderedProjection.Split(request, ProviderName);
+        return projection.Dialogue.Select(message => message.Role is LlmMessageRole.User or LlmMessageRole.Assistant
+            ? new Content { Role = message.Role == LlmMessageRole.Assistant ? "model" : "user", Parts = [new Part { Text = message.Content }] }
+            : throw LlmMessageMapping.Failure(ProviderName, "native_tool_linkage_required")).ToList();
     }
 }

@@ -56,6 +56,7 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
         var modelId = string.IsNullOrWhiteSpace(request.ModelId)
             ? _options.DefaultModelId : request.ModelId;
         var body = BuildRequestBody(request, modelId);
+        var nativeConfiguration = LlmOrderedProjection.CaptureConfiguration(request, () => LlmConfigurationReports.Describe(request, _options));
         using var message = new HttpRequestMessage(HttpMethod.Post,
             _options.Endpoint ?? AnthropicMessagesClientOptions.DefaultEndpoint)
         {
@@ -195,7 +196,8 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
                                 if (output.Length > 0 && output.ToString() != finalText)
                                     throw Failure("output_mismatch", LlmClientErrorKind.Transient);
                                 var continuation = stopReason == "end_turn"
-                                    ? CreateContinuation(request, modelId, nativeBlocks) : null;
+                                    ? CreateContinuation(request, modelId, nativeBlocks, body) : null;
+                                LlmOrderedProjection.BindOutcome(continuation, nativeConfiguration);
                                 completed = true;
                                 yield return new LlmStreamEvent(LlmStreamEventKind.Completed,
                                     Response: new LlmResponse(ProviderName, modelId, finalText,
@@ -238,8 +240,9 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
 
     internal static Dictionary<string, object?> BuildRequestBody(LlmRequest request, string modelId)
     {
-        LlmHistoryModeGuard.RequireNativeMode(request, ProviderName);
-        if (request.Messages.Any(message => message.Role is LlmMessageRole.Assistant or LlmMessageRole.Tool))
+        LlmHistoryModeGuard.RequireNativeMode(request, ProviderName, supportsOrdered: true);
+        var ordered = request.MessageMode == LlmMessageMode.Ordered;
+        if (!ordered && request.Messages.Any(message => message.Role is LlmMessageRole.Assistant or LlmMessageRole.Tool))
             throw Failure("native_history_required", LlmClientErrorKind.BadRequest);
         if (request.GenerationOptions?.Temperature is not null)
             throw Failure("unsupported_temperature", LlmClientErrorKind.BadRequest);
@@ -248,9 +251,9 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
             .Select(message => message.Content).Where(value => !string.IsNullOrWhiteSpace(value)));
         var userMessages = request.Messages.Where(message => message.Role == LlmMessageRole.User &&
             !string.IsNullOrWhiteSpace(message.Content)).ToArray();
-        if (userMessages.Length == 0) throw Failure("empty_input", LlmClientErrorKind.BadRequest);
+        if (!ordered && userMessages.Length == 0) throw Failure("empty_input", LlmClientErrorKind.BadRequest);
         var messages = new List<object>();
-        if (request.NativeContinuation is { } continuation)
+        if (!ordered && request.NativeContinuation is { } continuation)
         {
             if (continuation.ProviderName != ProviderName || continuation.ModelId != modelId ||
                 continuation.SystemInstruction != system || userMessages.Length != 1)
@@ -264,6 +267,7 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
             role = "user",
             content = item.Content
         }));
+        if (ordered) (system, messages) = LlmOrderedProjection.Dialogue(request, ProviderName, modelId);
         if (JsonSerializer.Serialize(messages).Length > LlmNativeContinuation.MaxPayloadCharacters)
             throw Failure("continuation_too_large", LlmClientErrorKind.BadRequest);
 
@@ -345,7 +349,7 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
     }
 
     private static LlmNativeContinuation? CreateContinuation(
-        LlmRequest request, string modelId, IReadOnlyList<JsonObject> blocks)
+        LlmRequest request, string modelId, IReadOnlyList<JsonObject> blocks, Dictionary<string, object?> requestBody)
     {
         foreach (var block in blocks)
         {
@@ -356,6 +360,14 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
             if (type == "redacted_thinking" &&
                 string.IsNullOrWhiteSpace(block["data"]?.GetValue<string>()))
                 return null;
+        }
+        if (request.MessageMode == LlmMessageMode.Ordered)
+        {
+            var messages = JsonSerializer.SerializeToElement(requestBody["messages"]).EnumerateArray().Select(item => (object)item.Clone()).ToList();
+            messages.Add(new { role = "assistant", content = blocks });
+            var payload = JsonSerializer.Serialize(messages);
+            return payload.Length <= LlmNativeContinuation.MaxPayloadCharacters
+                ? new(ProviderName, modelId, requestBody.GetValueOrDefault("system") as string ?? "", payload, messageMode: LlmMessageMode.Ordered) : null;
         }
         var system = string.Join("\n\n", request.Messages
             .Where(message => message.Role is LlmMessageRole.System or LlmMessageRole.Developer)

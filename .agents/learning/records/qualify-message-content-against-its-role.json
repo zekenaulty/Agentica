@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "id": "qualify-message-content-against-its-role",
+  "scope": "agentica",
+  "kind": "technical",
+  "status": "accepted",
+  "title": "Qualify message content by role at count and generation boundaries",
+  "trigger": "OpenAI ordered assistant input_text output_text input count HTTP400 fixture schema blind spot",
+  "guidance": "For manually authored OpenAI Assistant text history, use the documented EasyInputMessage plain-string content form. Do not serialize every role with an input_text block. Preserve actual returned native output_text items separately. A fixture that accepts any JSON or only initial user/host frames can miss role-specific server validation. Include a genuine prior assistant reply in packed host qualification and assert its schema on both input counting and generation, while keeping the exact input identity equal. Unqualified assistant cache breakpoints must reject rather than disappearing. Retain a failed count as known rejected and preserve its not-dispatched inference; recovery uses a new explicit successor after correction, not a blind retry or a new conversation that hides the failure.",
+  "evidence": [
+    {
+      "kind": "source_review",
+      "reference": "https://developers.openai.com/api/docs/guides/conversation-state; Bridge Provider Migration chat 01a1b2c9-e207-75f2-8962-51a7a756c3f9",
+      "revision": "a6d6f9a",
+      "note": "Official manual Responses history examples use assistant string content. Bridge reported a retained live count400 at input[12].content[0] rejecting input_text in favor of output_text/refusal. This producer record does not claim independent access to Bridge's retained private artifact or a successful live corrected call."
+    },
+    {
+      "kind": "offline_test",
+      "reference": "Agentica.Clients.Tests/OpenAiOrderedMessageTests.cs; eng/provider-consumer/OrderedMessageCases.cs",
+      "revision": "a6d6f9a",
+      "note": "Role-specific schema assertion failed before correction.565 client cases passed after correction, including frozen count/send identity. Packed fixture now includes prior published assistant history; its resulting package acceptance is recorded separately. No paid producer calls."
+    }
+  ],
+  "recheck": "Recheck when the Responses message/count schema or supported cache metadata changes. Offline fixtures establish adapter serialization and linkage, not provider behavior or successful installed-host recovery.",
+  "tags": [
+    "providers",
+    "roles",
+    "schema",
+    "count",
+    "continuation",
+    "qualification"
+  ],
+  "recorded_on": "2026-11-08"
+}

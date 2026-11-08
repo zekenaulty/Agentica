@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "id": "native-prefix-uses-the-frozen-wire-input",
+  "scope": "agentica",
+  "kind": "technical",
+  "status": "accepted",
+  "title": "Build ordered native continuation from the sent body, not caller collections",
+  "trigger": "native prefix direct client mutable message list streaming completion exact wire snapshot",
+  "guidance": "Capture the already compiled outgoing input when creating an Ordered native carrier. Re-reading a caller's mutable message collection after provider completion can save a prefix the model never saw, even when the actual POST was correct. Prepared calls already protect their owned snapshot; ordinary streaming clients need the same prefix fidelity. Prove this by changing the caller's list inside the terminal HTTP fixture after body capture, then compare retained native input with actual wire input.",
+  "evidence": [
+    {
+      "kind": "source_review",
+      "reference": "OpenAiResponsesLlmClient.CreateContinuation; AnthropicMessagesLlmClient.CreateContinuation; GeminiInteractionsLlmClient.CreateContinuation",
+      "revision": "91cb0e2",
+      "note": "Ordered response capture reads compiled body input. GenerateContent and Ollama already retained their built wire sequence."
+    },
+    {
+      "kind": "offline_test",
+      "reference": "Agentica.Clients.Tests/OrderedProviderMappingTests.cs Direct_ordered_native_prefix_comes_from_actual_sent_input_even_if_caller_mutates_its_list",
+      "revision": "91cb0e2",
+      "note": "Four protocols failed before correction and all six passed after; full focused client suite558 passed. Terminal offline transports only, no live model interpretation claim."
+    }
+  ],
+  "recheck": "Recheck after serializers, direct-client buffering, ownership/disposal or native capture paths change. Keep exact prepared/body/count identity tests separate; this demonstrates captured-input fidelity, not provider replay acceptance or installed-host behavior.",
+  "tags": [
+    "providers",
+    "continuation",
+    "streaming",
+    "snapshot",
+    "wire",
+    "ownership"
+  ],
+  "recorded_on": "2026-11-08"
+}
