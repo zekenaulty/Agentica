@@ -212,7 +212,7 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
                                 var usage = GetObject(terminal, "usage");
                                 var inputDetails = GetObject(usage, "input_tokens_details");
                                 var outputDetails = GetObject(usage, "output_tokens_details");
-                                var native = CreateContinuation(request, modelId, output);
+                                var native = CreateContinuation(request, modelId, output, body);
                                 completed = true;
                                 yield return new LlmStreamEvent(LlmStreamEventKind.Completed,
                                     Response: new LlmResponse(_providerName, modelId, finalText,
@@ -381,9 +381,9 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
     }
 
     private LlmNativeContinuation? CreateContinuation(
-        LlmRequest request, string modelId, JsonElement output)
+        LlmRequest request, string modelId, JsonElement output, Dictionary<string, object?> requestBody)
     {
-        if (request.MessageMode == LlmMessageMode.Ordered) return OpenAiOrderedMessages.Continue(request, modelId, output, _providerName);
+        if (request.MessageMode == LlmMessageMode.Ordered) return OpenAiOrderedMessages.Continue(requestBody["input"]!, modelId, output, _providerName);
         if (request.OpenAiHistoryMode == OpenAiHistoryMode.TranscriptOnly || output.GetArrayLength() == 0) return null;
         foreach (var item in output.EnumerateArray())
         {

@@ -65,13 +65,13 @@ internal static class OpenAiOrderedMessages
         return input;
     }
 
-    internal static LlmNativeContinuation? Continue(LlmRequest request, string model, JsonElement output, string provider)
+    internal static LlmNativeContinuation? Continue(object sentInput, string model, JsonElement output, string provider)
     {
         if (output.GetArrayLength() == 0 || output.EnumerateArray().Any(item =>
             item.TryGetProperty("type", out var type) && type.GetString() == "reasoning" &&
             (!item.TryGetProperty("encrypted_content", out var encrypted) ||
              encrypted.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(encrypted.GetString())))) return null;
-        var history = Input(request, model, provider);
+        var history = JsonSerializer.SerializeToElement(sentInput).EnumerateArray().Select(item => (object)item.Clone()).ToList();
         history.AddRange(output.EnumerateArray().Select(item => (object)item.Clone()));
         var json = JsonSerializer.Serialize(history);
         return json.Length <= LlmNativeContinuation.MaxPayloadCharacters

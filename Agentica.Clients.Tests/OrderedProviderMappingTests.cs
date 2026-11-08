@@ -84,6 +84,32 @@ public sealed class OrderedProviderMappingTests
     }
 
     [Theory]
+    [MemberData(nameof(Protocols))]
+    public async Task Direct_ordered_native_prefix_comes_from_actual_sent_input_even_if_caller_mutates_its_list(string protocol)
+    {
+        var messages = Request().Messages.ToList();
+        var request = Request() with { Messages = messages };
+        using var handler = new LlmPreparedCallTests.CaptureHandler((_, _) =>
+        {
+            messages.Clear();
+            messages.Add(new(LlmMessageRole.User, "changed-after-dispatch"));
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            { Content = new StringContent(ProviderAttemptRetentionTests.Success(protocol), Encoding.UTF8, "text/event-stream") });
+        });
+        using var http = new HttpClient(handler);
+        var response = await ProviderAttemptRetentionTests.Client(protocol, http).GenerateAsync(request);
+        using var native = response.NativeContinuation;
+        Assert.NotNull(native);
+        Assert.DoesNotContain("changed-after-dispatch", native.HistoryStepsJson, StringComparison.Ordinal);
+        Assert.Contains("published", native.HistoryStepsJson, StringComparison.Ordinal);
+        using var original = JsonDocument.Parse(handler.Bodies.Single());
+        using var retained = JsonDocument.Parse(native.HistoryStepsJson);
+        var sent = Input(protocol, original.RootElement);
+        for (var index = 0; index < sent.GetArrayLength(); index++)
+            Assert.True(JsonElement.DeepEquals(sent[index], retained.RootElement[index]));
+    }
+
+    [Theory]
     [InlineData("xai")]
     [InlineData("anthropic")]
     [InlineData("interactions")]

@@ -282,7 +282,7 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
                                     resultText = nativeText;
                                 }
                                 var nativeContinuation = status == "completed"
-                                    ? CreateContinuation(request, modelId,
+                                    ? CreateContinuation(request, modelId, body,
                                         completedSteps,
                                         signedStepIndexes)
                                     : null;
@@ -490,7 +490,7 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
     }
 
     private static LlmNativeContinuation? CreateContinuation(
-        LlmRequest request, string modelId, JsonElement modelSteps,
+        LlmRequest request, string modelId, Dictionary<string, object?> requestBody, JsonElement modelSteps,
         IReadOnlySet<int> signedStepIndexes)
     {
         if (modelSteps.ValueKind != JsonValueKind.Array ||
@@ -520,11 +520,11 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
 
         if (request.MessageMode == LlmMessageMode.Ordered)
         {
-            var projection = LlmOrderedProjection.Dialogue(request, GeminiLlmClient.ProviderName, modelId, interactions: true);
-            projection.Dialogue.AddRange(steps.Select(step => (object)step.Clone()));
-            var json = JsonSerializer.Serialize(projection.Dialogue);
+            var historyItems = JsonSerializer.SerializeToElement(requestBody["input"]).EnumerateArray().Select(item => (object)item.Clone()).ToList();
+            historyItems.AddRange(steps.Select(step => (object)step.Clone()));
+            var json = JsonSerializer.Serialize(historyItems);
             return json.Length <= LlmNativeContinuation.MaxPayloadCharacters
-                ? new(GeminiLlmClient.ProviderName, modelId, projection.Instructions, json, messageMode: LlmMessageMode.Ordered) : null;
+                ? new(GeminiLlmClient.ProviderName, modelId, requestBody.GetValueOrDefault("system_instruction") as string ?? "", json, messageMode: LlmMessageMode.Ordered) : null;
         }
         var instruction = string.Join("\n\n", request.Messages
             .Where(message => message.Role is LlmMessageRole.System or LlmMessageRole.Developer)

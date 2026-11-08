@@ -238,7 +238,7 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
         {
             throw Failure("unsupported_thinking_budget", LlmClientErrorKind.BadRequest);
         }
-        var system = string.Join("\n\n", request.Messages
+        var system = request.MessageMode == LlmMessageMode.Ordered ? "" : string.Join("\n\n", request.Messages
             .Where(message => message.Role == LlmMessageRole.System)
             .Select(message => message.Content));
         var userMessages = request.Messages
@@ -356,7 +356,7 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
         var json = JsonSerializer.Serialize(messages);
         if (json.Length > LlmNativeContinuation.MaxPayloadCharacters)
             return null;
-        var system = string.Join("\n\n", request.Messages
+        var system = request.MessageMode == LlmMessageMode.Ordered ? "" : string.Join("\n\n", request.Messages
             .Where(message => message.Role == LlmMessageRole.System)
             .Select(message => message.Content));
         return new LlmNativeContinuation(ProviderName, model, system, json, messageMode: request.MessageMode);

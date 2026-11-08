@@ -195,7 +195,7 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
                                 if (output.Length > 0 && output.ToString() != finalText)
                                     throw Failure("output_mismatch", LlmClientErrorKind.Transient);
                                 var continuation = stopReason == "end_turn"
-                                    ? CreateContinuation(request, modelId, nativeBlocks) : null;
+                                    ? CreateContinuation(request, modelId, nativeBlocks, body) : null;
                                 completed = true;
                                 yield return new LlmStreamEvent(LlmStreamEventKind.Completed,
                                     Response: new LlmResponse(ProviderName, modelId, finalText,
@@ -347,7 +347,7 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
     }
 
     private static LlmNativeContinuation? CreateContinuation(
-        LlmRequest request, string modelId, IReadOnlyList<JsonObject> blocks)
+        LlmRequest request, string modelId, IReadOnlyList<JsonObject> blocks, Dictionary<string, object?> requestBody)
     {
         foreach (var block in blocks)
         {
@@ -361,11 +361,11 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
         }
         if (request.MessageMode == LlmMessageMode.Ordered)
         {
-            var projection = LlmOrderedProjection.Dialogue(request, ProviderName, modelId);
-            projection.Dialogue.Add(new { role = "assistant", content = blocks });
-            var payload = JsonSerializer.Serialize(projection.Dialogue);
+            var messages = JsonSerializer.SerializeToElement(requestBody["messages"]).EnumerateArray().Select(item => (object)item.Clone()).ToList();
+            messages.Add(new { role = "assistant", content = blocks });
+            var payload = JsonSerializer.Serialize(messages);
             return payload.Length <= LlmNativeContinuation.MaxPayloadCharacters
-                ? new(ProviderName, modelId, projection.Instructions, payload, messageMode: LlmMessageMode.Ordered) : null;
+                ? new(ProviderName, modelId, requestBody.GetValueOrDefault("system") as string ?? "", payload, messageMode: LlmMessageMode.Ordered) : null;
         }
         var system = string.Join("\n\n", request.Messages
             .Where(message => message.Role is LlmMessageRole.System or LlmMessageRole.Developer)
