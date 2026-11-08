@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "id": "canonical-proof-is-independent-of-observer-delivery",
+  "scope": "agentica",
+  "kind": "technical",
+  "status": "accepted",
+  "title": "Assert canonical proof independently from bounded observer delivery",
+  "trigger": "Windows CI thread pool observer timeout event sink canonical events receipt projection flaky equality",
+  "guidance": "When testing canonical evidence preservation, verify the canonical receipt event and its receipt reference even if optional observer delivery times out under load. Compare observer and canonical event counts only when EventDeliveryFailure is absent. The runtime intentionally fences later observer delivery after a timeout; unconditional count equality mistakes that declared best-effort behavior for lost authoritative proof. Preserve the actual timeout/failure evidence rather than rerunning until the assertion happens to pass. A full locked restore is also required before reusing aggregate output from an older worktree; stale assets can load an older transitive SDK despite a current client build.",
+  "evidence": [
+    {
+      "kind": "source_review",
+      "reference": "Agentica/Execution/AgenticaRunner.cs event delivery fence; Agentica.Tests/ProofObserverFailureTests.cs",
+      "revision": "cb644c5"
+    },
+    {
+      "kind": "offline_test",
+      "reference": "https://github.com/zekenaulty/Agentica/actions/runs/42475445766/job/128715620397; focused core observer/mapping run",
+      "revision": "cb644c5",
+      "note": "Windows retained8 canonical events but delivered4 before the1-second bound. Corrected assertion keeps receipt/event linkage unconditional.51 focused core cases passed after locked restore; no production change."
+    }
+  ],
+  "recheck": "Recheck when the observer timeout/fence contract or canonical event capture changes. This preserves the current documented evidence boundary; it does not justify missing canonical receipts or ignoring an absent delivery-failure record.",
+  "tags": [
+    "events",
+    "proof",
+    "observer",
+    "timeout",
+    "testing",
+    "windows"
+  ],
+  "recorded_on": "2026-11-08"
+}

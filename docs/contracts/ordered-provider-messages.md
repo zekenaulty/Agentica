@@ -73,6 +73,11 @@ base Ordered request without carrier/append flag
 If import is unavailable/incompatible, the host must select the complete fresh
 frame, not send only its planned delta. Model/API/configuration binding remains.
 The append flag is a composition choice, not a model configuration change.
+Ordered direct calls also bind newly returned carriers to their captured controls;
+a later changed model configuration or instruction-role policy rejects before
+another POST. Prepared calls reuse their already captured descriptor. The saved
+prefix comes from the actual sent body, not a caller collection reread after the
+response arrives.
 
 Routes with top-level instruction channels retain their original compiled
 instruction prefix privately. Their current Ordered append accepts new dialogue;
