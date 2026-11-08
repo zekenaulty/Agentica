@@ -49,6 +49,11 @@ internal static class OpenAiOrderedMessages
                 ["content"] = provider == "xai" ? message.Role == LlmMessageRole.Developer
                     ? LlmOrderedProjection.InstructionPrefix([message]) : message.Content : new[] { text }
             };
+            // Manually authored assistant history uses EasyInputMessage's plain-text
+            // content form, not an input_text block (the live count endpoint rejects it).
+            // Returned native output items retain their original output_text shape.
+            if (provider == "openai" && message.Role == LlmMessageRole.Assistant)
+                item["content"] = message.Content;
             if (message.Phase is { } phase)
                 item["phase"] = phase == LlmAssistantPhase.Commentary ? "commentary" : "final_answer";
             input.Add(item);

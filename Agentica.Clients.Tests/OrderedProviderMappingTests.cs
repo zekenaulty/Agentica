@@ -149,6 +149,9 @@ public sealed class OrderedProviderMappingTests
             InstructionRolePolicy = LlmInstructionRolePolicy.RequireNativeSeparation
         };
         Assert.Equal("continuation_configuration_mismatch", (await Assert.ThrowsAsync<LlmClientException>(() => client.GenerateAsync(next))).ErrorClass);
+        var preparation = Assert.Throws<LlmClientException>(() => LlmCallPreparation.Prepare(next,
+            new XaiResponsesClientOptions("test-key"), LlmPreparedCallTests.References("strict-followup"), "scope", http));
+        Assert.Equal("continuation_configurationmismatch", preparation.ErrorClass);
         Assert.Equal(1, handler.Sends);
     }
 
@@ -267,6 +270,7 @@ public sealed class OrderedProviderMappingTests
     private static string Text(string protocol, JsonElement item) => protocol switch
     {
         "generate" => item.GetProperty("parts")[0].GetProperty("text").GetString()!,
+        "openai" when item.GetProperty("content").ValueKind == JsonValueKind.String => item.GetProperty("content").GetString()!,
         "interactions" or "openai" => item.GetProperty("content")[0].GetProperty("text").GetString()!,
         _ => item.GetProperty("content").GetString()!
     };

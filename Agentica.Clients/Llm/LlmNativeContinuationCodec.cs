@@ -298,6 +298,7 @@ public static class LlmNativeContinuationCodec
             (String(item, "role") != "assistant" || phase.ValueKind != JsonValueKind.String ||
              phase.GetString() is not ("commentary" or "final_answer"))) return false;
         if (String(item, "content") is not null) return true;
+        if (String(item, "role") == "assistant") return false;
         if (!Array(item, "content", out var blocks) || blocks.GetArrayLength() != 1) return false;
         var block = blocks[0];
         if (String(block, "type") != "input_text" || String(block, "text") is null) return false;

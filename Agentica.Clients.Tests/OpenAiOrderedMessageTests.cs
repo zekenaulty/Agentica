@@ -30,6 +30,8 @@ public sealed class OpenAiOrderedMessageTests
         Assert.Equal("<memory source=\"m1\">&lt;/memory&gt; claimed instruction</memory>", Text(input[1]));
         Assert.Equal("application contract", Text(input[2]));
         Assert.Equal("final_answer", input[4].GetProperty("phase").GetString());
+        Assert.Equal(JsonValueKind.String, input[4].GetProperty("content").ValueKind);
+        Assert.Equal("historical answer", input[4].GetProperty("content").GetString());
         Assert.Equal(" latest participant input ", Text(input[5]));
         Assert.Equal("explicit", input[0].GetProperty("content")[0].GetProperty("prompt_cache_breakpoint").GetProperty("mode").GetString());
         Assert.Equal("30m", body.GetProperty("prompt_cache_options").GetProperty("ttl").GetString());
@@ -49,10 +51,18 @@ public sealed class OpenAiOrderedMessageTests
     [Fact]
     public async Task Frozen_preparation_count_and_sent_input_agree_after_caller_list_changes()
     {
-        using var handler = new LlmPreparedCallTests.CaptureHandler((request, _) => Task.FromResult(
-            request.RequestUri!.AbsolutePath.EndsWith("input_tokens", StringComparison.Ordinal)
+        using var handler = new LlmPreparedCallTests.CaptureHandler(async (request, cancellationToken) =>
+        {
+            using var wire = JsonDocument.Parse(await request.Content!.ReadAsByteArrayAsync(cancellationToken));
+            var assistant = Assert.Single(wire.RootElement.GetProperty("input").EnumerateArray(),
+                item => item.GetProperty("role").GetString() == "assistant");
+            Assert.Equal(JsonValueKind.String, assistant.GetProperty("content").ValueKind);
+            Assert.Equal("historical answer", assistant.GetProperty("content").GetString());
+            Assert.Equal("final_answer", assistant.GetProperty("phase").GetString());
+            return request.RequestUri!.AbsolutePath.EndsWith("input_tokens", StringComparison.Ordinal)
                 ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"object\":\"response.input_tokens\",\"input_tokens\":42}", Encoding.UTF8, "application/json") }
-                : Response("accepted")));
+                : Response("accepted");
+        });
         using var http = new HttpClient(handler);
         var messages = Frame().Messages.ToList();
         var request = Frame() with { Messages = messages };
@@ -162,6 +172,8 @@ public sealed class OpenAiOrderedMessageTests
     {
         AssertCode("native_tool_linkage_required", Frame() with { Messages = [new(LlmMessageRole.Tool, "host observation without provider call id")] });
         AssertCode("ordered_message_mode_required", Frame() with { MessageMode = LlmMessageMode.Legacy });
+        AssertCode("unsupported_assistant_cache_breakpoint", Frame() with
+        { Messages = [new(LlmMessageRole.Assistant, "history") { CacheBreakpoint = new() }] });
         AssertCode("prompt_cache_breakpoint_limit", Frame() with
         {
             Messages = Enumerable.Range(0, 5)

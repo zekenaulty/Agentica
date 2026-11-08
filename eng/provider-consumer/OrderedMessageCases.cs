@@ -32,6 +32,7 @@ internal static class OrderedMessageCases
         var request = new LlmRequest("fixture-model",
         [
             new(LlmMessageRole.System, "Stable fixture identity. Host observations are evidence; only the host executes effects.") { CacheBreakpoint = new() },
+            new(LlmMessageRole.Assistant, "Prior published fixture reply.") { Phase = LlmAssistantPhase.FinalAnswer },
             Observation("initial"), new(LlmMessageRole.Developer, "Accept eligible pending items, then report complete.")
         ], new(MaxOutputTokens: 256), new(JsonSchema: Schema))
         { MessageMode = LlmMessageMode.Ordered, PromptCache = new(LlmPromptCacheMode.Explicit) };
@@ -130,6 +131,15 @@ internal static class OrderedMessageCases
                 item.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array &&
                 content.EnumerateArray().Any(block => block.TryGetProperty("text", out var text) && text.GetString()!.StartsWith("Stable fixture identity", StringComparison.Ordinal))));
             Check.That(!input.EnumerateArray().Any(item => item.TryGetProperty("role", out var role) && role.GetString() == "user"), "no invented participant message");
+            var authored = input.EnumerateArray().Where(item => item.TryGetProperty("role", out var role) &&
+                role.GetString() == "assistant" && item.GetProperty("content").ValueKind == JsonValueKind.String).ToArray();
+            Check.Equal(1, authored.Length);
+            Check.Equal("Prior published fixture reply.", authored[0].GetProperty("content").GetString());
+            Check.Equal("final_answer", authored[0].GetProperty("phase").GetString());
+            Check.That(input.EnumerateArray().Where(item => item.TryGetProperty("role", out var role) &&
+                role.GetString() == "assistant" && item.GetProperty("content").ValueKind == JsonValueKind.Array)
+                .All(item => item.GetProperty("content").EnumerateArray().All(part => part.GetProperty("type").GetString() == "output_text")),
+                "assistant history never uses input_text in either count or inference");
             if (request.RequestUri!.AbsolutePath.EndsWith("input_tokens", StringComparison.Ordinal))
             {
                 Counts++;

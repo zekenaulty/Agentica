@@ -36,12 +36,21 @@ var request = new LlmRequest(model,
 Supply an actually known phase; operation/stage names are not assistant phases.
 Absent phase remains absent. Native output items preserve their original phase
 privately; this API does not reconstruct historical reasoning or classify speech.
+Authored OpenAI Assistant history uses the documented plain-string message
+content form. It is not an `input_text` block; the live count endpoint rejected
+that role/block combination during Bridge's disposable qualification. Actual
+retained provider output stays in its original `output_text` representation.
+See the [manual conversation example](https://developers.openai.com/api/docs/guides/conversation-state).
 
 `CacheBreakpoint` marks this text block's end. Its optional `Lifetime` and the
 request's `LlmPromptCacheOptions.Lifetime` use `ThirtyMinutes` or `TwelveHours`.
 At most four breakpoints can be present in the composed request. Metadata records
 the requested/applied wire policy; model/account support, cache hits and savings
 require separate evidence. No extra prewarming or cache-service call is made.
+An Assistant cache breakpoint is explicitly unsupported: this adapter qualifies
+those markers on input text blocks only and never silently drops one. Existing
+unqualified Ordered envelopes containing Assistant `input_text` blocks reject on
+import; hosts choose an explicit fresh frame rather than rewriting private state.
 
 ## Current native continuation
 

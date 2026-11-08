@@ -31,6 +31,9 @@ internal static class LlmMessageMapping
             if (provider != "openai" && (request.PromptCache is not null || request.Messages.Any(message =>
                     message.Phase is not null || message.CacheBreakpoint is not null)))
                 throw Failure(provider, "unsupported_message_metadata");
+            if (provider == "openai" && request.Messages.Any(message =>
+                    message.Role == LlmMessageRole.Assistant && message.CacheBreakpoint is not null))
+                throw Failure(provider, "unsupported_assistant_cache_breakpoint");
             if (provider != "openai" && request.InstructionRolePolicy == LlmInstructionRolePolicy.RequireNativeSeparation &&
                 request.Messages.Any(message => message.Role == LlmMessageRole.Developer))
                 throw Failure(provider, "native_developer_role_required");
