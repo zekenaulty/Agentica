@@ -7,6 +7,8 @@ Provider-only consumers can use the additive
 without constructing a runner or planning request.
 Optional [exact prepared calls](contracts/prepared-provider-calls.md) add required
 host admission and separate native input counting at the provider boundary.
+Opt-in [ordered provider messages](contracts/ordered-provider-messages.md) preserve
+native roles and qualified text boundaries without changing host ownership.
 
 Agentica is the bounded proof engine:
 

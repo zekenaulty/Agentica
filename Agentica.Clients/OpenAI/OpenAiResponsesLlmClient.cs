@@ -259,6 +259,8 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
 
     internal Dictionary<string, object?> BuildRequestBody(LlmRequest request, string modelId)
     {
+        LlmMessageMapping.Validate(request, _providerName, supportsOrdered: _providerName == ProviderName);
+        var ordered = request.MessageMode == LlmMessageMode.Ordered;
         if (!Enum.IsDefined(request.OpenAiHistoryMode))
             throw Failure("unsupported_history_mode", LlmClientErrorKind.BadRequest);
         var transcriptOnly = request.OpenAiHistoryMode == OpenAiHistoryMode.TranscriptOnly;
@@ -266,8 +268,8 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
             throw Failure("unsupported_history_mode", LlmClientErrorKind.BadRequest);
         if (transcriptOnly && request.NativeContinuation is not null)
             throw Failure("transcript_continuation_conflict", LlmClientErrorKind.BadRequest);
-        if (request.Messages.Any(message => message.Role == LlmMessageRole.Tool) ||
-            !transcriptOnly && request.Messages.Any(message => message.Role == LlmMessageRole.Assistant))
+        if (!ordered && (request.Messages.Any(message => message.Role == LlmMessageRole.Tool) ||
+            !transcriptOnly && request.Messages.Any(message => message.Role == LlmMessageRole.Assistant)))
             throw Failure("native_history_required", LlmClientErrorKind.BadRequest);
         if (request.GenerationOptions?.Temperature is not null)
             throw Failure("unsupported_temperature", LlmClientErrorKind.BadRequest);
@@ -282,18 +284,20 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
             .Select(message => message.Content).Where(content => transcriptOnly ? content.Length != 0 : !string.IsNullOrWhiteSpace(content)));
         var userMessages = request.Messages.Where(message => message.Role == LlmMessageRole.User)
             .Where(message => !string.IsNullOrWhiteSpace(message.Content)).ToArray();
-        if (userMessages.Length == 0) throw Failure("empty_input", LlmClientErrorKind.BadRequest);
+        if (!ordered && userMessages.Length == 0) throw Failure("empty_input", LlmClientErrorKind.BadRequest);
 
         var input = new List<object>();
-        if (request.NativeContinuation is { } continuation)
+        if (!ordered && request.NativeContinuation is { } continuation)
         {
             if (continuation.ProviderName != _providerName || continuation.ModelId != modelId ||
+                continuation.MessageMode != LlmMessageMode.Legacy ||
                 continuation.SystemInstruction != instruction || userMessages.Length != 1)
                 throw Failure("continuation_binding_mismatch", LlmClientErrorKind.BadRequest);
             using var history = JsonDocument.Parse(continuation.HistoryStepsJson);
             input.AddRange(history.RootElement.EnumerateArray().Select(item => (object)item.Clone()));
         }
-        if (transcriptOnly)
+        if (ordered) input = OpenAiOrderedMessages.Input(request, modelId);
+        else if (transcriptOnly)
             input.AddRange(request.Messages.Where(message => message.Role is LlmMessageRole.User or LlmMessageRole.Assistant)
                 .Select(message => (object)new { role = message.Role == LlmMessageRole.User ? "user" : "assistant", content = message.Content }));
         else
@@ -317,7 +321,13 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
             body["max_tool_calls"] = search.MaxToolCalls;
             body["include"] = new[] { "web_search_call.action.sources" };
         }
-        if (instruction.Length > 0) body["instructions"] = instruction;
+        if (!ordered && instruction.Length > 0) body["instructions"] = instruction;
+        if (request.PromptCache is { } cache)
+            body["prompt_cache_options"] = new
+            {
+                mode = cache.Mode.ToString().ToLowerInvariant(),
+                ttl = LlmMessageMapping.Lifetime(cache.Lifetime)
+            };
         if (_includeEncryptedReasoning && !transcriptOnly)
             body["include"] = request.WebSearch is null
                 ? new[] { "reasoning.encrypted_content" }
@@ -373,6 +383,7 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
     private LlmNativeContinuation? CreateContinuation(
         LlmRequest request, string modelId, JsonElement output)
     {
+        if (request.MessageMode == LlmMessageMode.Ordered) return OpenAiOrderedMessages.Continue(request, modelId, output);
         if (request.OpenAiHistoryMode == OpenAiHistoryMode.TranscriptOnly || output.GetArrayLength() == 0) return null;
         foreach (var item in output.EnumerateArray())
         {

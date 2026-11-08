@@ -47,7 +47,7 @@ try {
     # Copy a standalone consumer: no project reference and no shared mutable output/cache.
     foreach ($file in @('ProviderConsumer.csproj', 'Program.cs', 'EmbeddingAttempt.cs',
         'BridgeContractFixtures.cs', 'RecoveryHost.cs', 'RecoveryTransport.cs', 'RecoveryCases.cs',
-        'EmbeddingRecoveryCases.cs')) {
+        'EmbeddingRecoveryCases.cs', 'OrderedMessageCases.cs')) {
         Copy-Item -LiteralPath (Join-Path $sourceRoot $file) -Destination $consumer
     }
     Copy-Item -LiteralPath (Join-Path $repositoryRoot 'global.json') -Destination $consumer

@@ -49,6 +49,8 @@ Console.WriteLine(JsonSerializer.Serialize(new
 Console.WriteLine("agentica-provider-consumer-a5-ok");
 await RecoveryCases.RunAll();
 Console.WriteLine("agentica-provider-consumer-p08-ok");
+await OrderedMessageCases.Run();
+Console.WriteLine("agentica-provider-consumer-ordered-ok");
 
 internal static class Cases
 {
