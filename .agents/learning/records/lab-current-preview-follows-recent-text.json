@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "id": "lab-current-preview-follows-recent-text",
+  "scope": "agentica",
+  "kind": "technical",
+  "status": "accepted",
+  "title": "Advance bounded live excerpts and recheck snapshot comparison units",
+  "trigger": "current summary preview frozen prefix recent tail Unicode snapshot mismatch equal length pages",
+  "guidance": "A compact current-summary excerpt must advance after the full part exceeds its display limit. Show a bounded recent-text tail with an omission marker while leaving the complete source and raw fragments unchanged. Lab budgets its excerpt body in220 Unicode code points, preserves surrogate pairs and uses grapheme boundaries where supported. Preserve reader-selected text instead of forcing display updates. When transferring a snapshot-integrity fix, first identify the local comparison unit: Lab currently compares available captured text against a complete snapshot and already detects equal-length disagreements; it has no Bridge-style paged-block slice reader to patch. Test that existing invariant without inventing a second paging system or copying another host's limits. A changing excerpt remains text presentation, not proof of semantic progress.",
+  "evidence": [
+    {
+      "kind": "source_review",
+      "reference": "Agentica.Lab.Web/wwwroot/chat-work.mjs recentWorkExcerpt/readableWork; Bridge scoped lesson bridge-compare-snapshot-pages-and-preview-recent-text",
+      "revision": "44e4a5596cc41f69723bb5dcff24f1baf1fbc0e9",
+      "note": "Transferred the conditional method from Bridge's f159b7b review. Rechecked Lab units and goal, retaining its own220-code-point display budget and whole-available-snapshot comparison. No provider API, schema or capture policy changes."
+    },
+    {
+      "kind": "offline_test",
+      "reference": "Agentica.Lab.Web.Tests/chat-ui.test.mjs; browser-tests/ui-readable-work.mjs; .agentica/readable-preview-before.log; .agentica/readable-preview-after.log",
+      "revision": "44e4a5596cc41f69723bb5dcff24f1baf1fbc0e9",
+      "note": "Browser regression failed before the fix with the old frozen prefix and passes afterward.44 UI/Markdown cases and both intercepted Edge reading/Markdown journeys pass. Added equal-length disagreement coverage; that path was already correct. No live-provider or installed UX claim."
+    }
+  ],
+  "recheck": "Recheck excerpt units, Unicode support, retention, selection behavior and snapshot provenance if a durable semantic-block cursor or a new renderer replaces the current loaded-window projection.",
+  "tags": [
+    "lab",
+    "reasoning",
+    "preview",
+    "unicode",
+    "snapshots",
+    "cross-host-learning"
+  ],
+  "recorded_on": "2026-11-08"
+}
