@@ -34,7 +34,7 @@ internal static class OrderedMessageCases
             new(LlmMessageRole.System, "Stable fixture identity. Host observations are evidence; only the host executes effects.") { CacheBreakpoint = new() },
             new(LlmMessageRole.Assistant, "Prior published fixture reply.") { Phase = LlmAssistantPhase.FinalAnswer },
             Observation("initial"), new(LlmMessageRole.Developer, "Accept eligible pending items, then report complete.")
-        ], new(MaxOutputTokens: 256), new(JsonSchema: Schema))
+        ], new(MaxOutputTokens: 256, Thinking: new(IncludeThoughts: true)), new(JsonSchema: Schema))
         { MessageMode = LlmMessageMode.Ordered, PromptCache = new(LlmPromptCacheMode.Explicit) };
         byte[]? retained = null;
         var completed = false;
