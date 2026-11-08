@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "id": "ordered-continuation-keeps-the-original-prefix",
+  "scope": "agentica",
+  "kind": "technical",
+  "status": "accepted",
+  "title": "Ordered context and opaque continuation need explicit fresh or append composition",
+  "trigger": "ordered roles developer system native continuation flattened instructions duplicate history prefix cache phase",
+  "guidance": "Keep one ordered text representation and map it before exact preparation, counting and admission. A role enum alone does not preserve role semantics when serializers and continuation bindings flatten instruction channels. Ordered continuation must retain its original native input/output prefix and explicitly append only new items; rebuilding earlier context requires a fresh complete frame, not a promise of preserved reasoning. Preserve supplied phase and cache boundaries, reject unsupported routes explicitly, and keep source interpretation host-owned. Immutable text records avoid introducing nested mutable projection state.",
+  "evidence": [
+    {
+      "kind": "source_review",
+      "reference": "Agentica.Clients/OpenAI/OpenAiOrderedMessages.cs; Agentica.Clients/Llm/LlmNativeContinuationCodec.cs; docs/contracts/ordered-provider-messages.md",
+      "revision": "f5071bf",
+      "note": "Ordered v2 carriers are mode-bound; legacy v1 remains distinct. New fields are opt-in and unsupported route mappings reject explicitly."
+    },
+    {
+      "kind": "offline_test",
+      "reference": "Agentica.Clients.Tests/OpenAiOrderedMessageTests.cs; eng/provider-consumer/OrderedMessageCases.cs",
+      "revision": "f5071bf",
+      "note": "524 focused client cases and40 relevant Lab cases passed. Initial fresh packed consumer passed35 existing cases plus an ordered three-decision host loop with2 effects. No paid calls or installed consumer acceptance."
+    }
+  ],
+  "recheck": "Recheck when message roles, cache controls, native codec shapes, configuration identity, exact transport or host compiler selection changes. Offline wire/custody fixtures do not prove model interpretation, injection resistance, cache savings or installed Bridge behavior.",
+  "tags": [
+    "providers",
+    "roles",
+    "continuation",
+    "prefix",
+    "admission",
+    "phase",
+    "cache",
+    "authorship"
+  ],
+  "recorded_on": "2026-11-08"
+}
