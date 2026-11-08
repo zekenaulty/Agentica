@@ -58,6 +58,7 @@ public sealed class GeminiGenerateContentLlmClient : ILlmStreamingClient
             throw Failure("missing_api_key", LlmClientErrorKind.Authentication);
         var model = string.IsNullOrWhiteSpace(request.ModelId) ? _options.DefaultModelId : request.ModelId;
         var body = BuildRequest(request, model, out var instruction);
+        var nativeConfiguration = LlmOrderedProjection.CaptureConfiguration(request, () => LlmConfigurationReports.Describe(request, _options));
         using var message = new HttpRequestMessage(HttpMethod.Post, _options.Endpoint ?? Endpoint(model))
         {
             Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json")
@@ -110,6 +111,7 @@ public sealed class GeminiGenerateContentLlmClient : ILlmStreamingClient
             if (serialized.Length <= LlmNativeContinuation.MaxPayloadCharacters)
                 continuation = new LlmNativeContinuation(ProviderName, model, instruction, serialized, messageMode: request.MessageMode);
         }
+        LlmOrderedProjection.BindOutcome(continuation, nativeConfiguration);
         var text = state.Text.ToString();
         yield return new LlmStreamEvent(LlmStreamEventKind.Completed, Response: new LlmResponse(
             ProviderName, model, text,

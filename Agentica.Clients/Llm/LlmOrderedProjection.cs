@@ -5,6 +5,25 @@ namespace Agentica.Clients.Llm;
 
 internal static class LlmOrderedProjection
 {
+    internal static LlmContinuationConfigurationBinding? CaptureConfiguration(LlmRequest request,
+        Func<LlmConfigurationReport> describe)
+    {
+        if (request.MessageMode != LlmMessageMode.Ordered) return null;
+        var prepared = request.PreparedDispatch?.Descriptor;
+        var report = prepared is null ? describe() : null;
+        var binding = prepared is not null ? new LlmContinuationConfigurationBinding(prepared.ApiMode, prepared.ConfigurationIdentity)
+            : new LlmContinuationConfigurationBinding(report!.ApiMode, report.ConfigurationIdentity);
+        if (request.NativeContinuation?.SnapshotOwned().Binding is { } stored && stored != binding)
+            throw LlmMessageMapping.Failure(request.NativeContinuation.ProviderName, "continuation_configuration_mismatch");
+        return binding;
+    }
+
+    internal static void BindOutcome(LlmNativeContinuation? continuation, LlmContinuationConfigurationBinding? configuration)
+    {
+        if (continuation is not null && configuration is not null && !continuation.TryBindConfiguration(configuration))
+            throw LlmMessageMapping.Failure(continuation.ProviderName, "continuation_configuration_mismatch");
+    }
+
     // A known instruction-channel limitation gets an explicit interpreted projection.
     // Source role boundaries survive escaping; no second native priority is claimed.
     internal static string InstructionBlock(LlmMessage message) =>

@@ -66,6 +66,7 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
             throw Failure("missing_model", LlmClientErrorKind.BadRequest);
         }
         var body = BuildRequestBody(request, model);
+        var nativeConfiguration = LlmOrderedProjection.CaptureConfiguration(request, () => LlmConfigurationReports.Describe(request, _options));
         using var message = new HttpRequestMessage(
             HttpMethod.Post, _options.Endpoint ?? OllamaClientOptions.DefaultEndpoint)
         {
@@ -190,6 +191,7 @@ public sealed class OllamaLlmClient : ILlmStreamingClient
                             ? CreateContinuation(request, model, body, output.ToString(),
                                 nativeThinking.ToString())
                             : null;
+                        LlmOrderedProjection.BindOutcome(continuation, nativeConfiguration);
                         var result = new LlmResponse(
                             ProviderName, model, output.ToString(),
                             request.StructuredOutput is null ? null : output.ToString(),

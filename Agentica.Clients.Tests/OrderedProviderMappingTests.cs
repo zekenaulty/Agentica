@@ -110,6 +110,49 @@ public sealed class OrderedProviderMappingTests
     }
 
     [Theory]
+    [MemberData(nameof(Protocols))]
+    public async Task Direct_followup_cannot_silently_rebind_a_carrier_to_changed_controls(string protocol)
+    {
+        using var handler = new LlmPreparedCallTests.CaptureHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        { Content = new StringContent(ProviderAttemptRetentionTests.Success(protocol), Encoding.UTF8, "text/event-stream") }));
+        using var http = new HttpClient(handler);
+        var client = ProviderAttemptRetentionTests.Client(protocol, http);
+        var request = Request();
+        var response = await client.GenerateAsync(request);
+        using var native = response.NativeContinuation;
+        var next = request with
+        {
+            Messages = [new(LlmMessageRole.User, "next")],
+            NativeContinuation = native,
+            AppendToNativeContinuation = true,
+            GenerationOptions = new(MaxOutputTokens: 128)
+        };
+        var error = await Assert.ThrowsAsync<LlmClientException>(() => client.GenerateAsync(next));
+        Assert.Equal("continuation_configuration_mismatch", error.ErrorClass);
+        Assert.Equal(1, handler.Sends);
+    }
+
+    [Fact]
+    public async Task Strict_native_policy_does_not_inherit_an_older_xai_developer_fallback_via_private_state()
+    {
+        using var handler = new LlmPreparedCallTests.CaptureHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        { Content = new StringContent(ProviderAttemptRetentionTests.Success("xai"), Encoding.UTF8, "text/event-stream") }));
+        using var http = new HttpClient(handler);
+        var client = ProviderAttemptRetentionTests.Client("xai", http);
+        var response = await client.GenerateAsync(Request());
+        using var native = response.NativeContinuation;
+        var next = Request() with
+        {
+            Messages = [new(LlmMessageRole.User, "next")],
+            NativeContinuation = native,
+            AppendToNativeContinuation = true,
+            InstructionRolePolicy = LlmInstructionRolePolicy.RequireNativeSeparation
+        };
+        Assert.Equal("continuation_configuration_mismatch", (await Assert.ThrowsAsync<LlmClientException>(() => client.GenerateAsync(next))).ErrorClass);
+        Assert.Equal(1, handler.Sends);
+    }
+
+    [Theory]
     [InlineData("xai")]
     [InlineData("anthropic")]
     [InlineData("interactions")]

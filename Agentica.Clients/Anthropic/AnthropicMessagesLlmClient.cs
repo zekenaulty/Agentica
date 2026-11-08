@@ -56,6 +56,7 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
         var modelId = string.IsNullOrWhiteSpace(request.ModelId)
             ? _options.DefaultModelId : request.ModelId;
         var body = BuildRequestBody(request, modelId);
+        var nativeConfiguration = LlmOrderedProjection.CaptureConfiguration(request, () => LlmConfigurationReports.Describe(request, _options));
         using var message = new HttpRequestMessage(HttpMethod.Post,
             _options.Endpoint ?? AnthropicMessagesClientOptions.DefaultEndpoint)
         {
@@ -196,6 +197,7 @@ public sealed class AnthropicMessagesLlmClient : ILlmStreamingClient
                                     throw Failure("output_mismatch", LlmClientErrorKind.Transient);
                                 var continuation = stopReason == "end_turn"
                                     ? CreateContinuation(request, modelId, nativeBlocks, body) : null;
+                                LlmOrderedProjection.BindOutcome(continuation, nativeConfiguration);
                                 completed = true;
                                 yield return new LlmStreamEvent(LlmStreamEventKind.Completed,
                                     Response: new LlmResponse(ProviderName, modelId, finalText,

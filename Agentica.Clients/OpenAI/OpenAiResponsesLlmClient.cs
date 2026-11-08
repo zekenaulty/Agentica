@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Agentica.Clients.Llm;
+using Agentica.Clients.Xai;
 
 namespace Agentica.Clients.OpenAI;
 
@@ -79,6 +80,9 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
         var modelId = string.IsNullOrWhiteSpace(request.ModelId)
             ? _options.DefaultModelId : request.ModelId;
         var body = BuildRequestBody(request, modelId);
+        var nativeConfiguration = LlmOrderedProjection.CaptureConfiguration(request, () => _providerName == ProviderName
+            ? LlmConfigurationReports.Describe(request, _options)
+            : LlmConfigurationReports.Describe(request, new XaiResponsesClientOptions(_options.ApiKey, _options.DefaultModelId, _options.Endpoint)));
         var search = request.WebSearch is { } searchOptions ? new OpenAiWebSearchState(searchOptions, recorder) : null;
         using var message = new HttpRequestMessage(HttpMethod.Post,
             _options.Endpoint ?? OpenAiResponsesClientOptions.DefaultEndpoint)
@@ -213,6 +217,7 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
                                 var inputDetails = GetObject(usage, "input_tokens_details");
                                 var outputDetails = GetObject(usage, "output_tokens_details");
                                 var native = CreateContinuation(request, modelId, output, body);
+                                LlmOrderedProjection.BindOutcome(native, nativeConfiguration);
                                 completed = true;
                                 yield return new LlmStreamEvent(LlmStreamEventKind.Completed,
                                     Response: new LlmResponse(_providerName, modelId, finalText,
@@ -259,7 +264,7 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
 
     internal Dictionary<string, object?> BuildRequestBody(LlmRequest request, string modelId)
     {
-        LlmMessageMapping.Validate(request, _providerName, supportsOrdered: true);
+        LlmMessageMapping.Validate(request, _providerName, supportsOrdered: _providerName is ProviderName or XaiResponsesLlmClient.ProviderName);
         var ordered = request.MessageMode == LlmMessageMode.Ordered;
         if (!Enum.IsDefined(request.OpenAiHistoryMode))
             throw Failure("unsupported_history_mode", LlmClientErrorKind.BadRequest);

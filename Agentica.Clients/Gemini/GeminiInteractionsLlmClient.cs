@@ -70,6 +70,7 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
             ? _options.DefaultModelId
             : request.ModelId;
         var body = BuildRequestBody(request, modelId);
+        var nativeConfiguration = LlmOrderedProjection.CaptureConfiguration(request, () => LlmConfigurationReports.Describe(request, _options));
         using var message = new HttpRequestMessage(
             HttpMethod.Post,
             _options.Endpoint ?? GeminiInteractionsClientOptions.DefaultEndpoint)
@@ -286,6 +287,7 @@ public sealed class GeminiInteractionsLlmClient : ILlmStreamingClient
                                         completedSteps,
                                         signedStepIndexes)
                                     : null;
+                                LlmOrderedProjection.BindOutcome(nativeContinuation, nativeConfiguration);
                                 var result = new LlmResponse(
                                     GeminiLlmClient.ProviderName,
                                     modelId,

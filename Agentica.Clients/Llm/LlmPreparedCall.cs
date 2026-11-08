@@ -119,6 +119,7 @@ internal sealed class LlmPreparedDispatch(
     string protocol, ILlmCallAdmission admission, LlmPreparedTransportBinding? transportBinding = null)
 {
     private int _admitted;
+    internal LlmPreparedRequestDescriptor Descriptor => descriptor;
 
     internal async ValueTask AdmitAsync(HttpRequestMessage message, LlmAttemptRecorder recorder,
         CancellationToken cancellationToken)
