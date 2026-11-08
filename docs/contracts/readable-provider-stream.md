@@ -119,6 +119,15 @@ Selected summary/answer text is preserved when more text arrives; an explicit
 show-latest control reveals pending display updates. Canonical output and raw
 capture continue while a display update is deferred.
 
+The compact current excerpt shows recent text, bounded to 220 Unicode code
+points plus an omission marker. It preserves surrogate pairs and uses native
+grapheme segmentation when available to avoid beginning inside a cluster. It
+does not freeze at the beginning of a long growing part. Full retained text is
+unchanged. Snapshot comparisons check content, including equal-length
+disagreements. Lab currently compares loaded captured text with a complete
+available snapshot; it has no separate semantic-block page/snapshot-slice
+contract to change.
+
 **Bounded first slice:** the reading view covers the currently loaded trace
 window and clearly labels omitted pages, incomplete blocks, snapshot mismatch,
 and service drops. The existing 4,000-event/8 MiB per-turn retention policy and

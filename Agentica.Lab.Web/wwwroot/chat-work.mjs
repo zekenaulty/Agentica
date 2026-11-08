@@ -3,6 +3,28 @@
 const field = (value, name) => value?.[name] ?? value?.[name[0].toUpperCase() + name.slice(1)];
 const validIndex = value => Number.isSafeInteger(value) && value >= 0;
 const terminal = status => !['queued', 'pending', 'running', 'active', 'starting', 'cancelling'].includes(String(status ?? '').toLowerCase());
+const graphemes = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
+
+// Budget the excerpt body in Unicode code points, with a separate omission cue.
+// Find the tail without allocating every character of a growing summary.
+export function recentWorkExcerpt(value, maximumCodePoints = 220) {
+  if (!Number.isSafeInteger(maximumCodePoints) || maximumCodePoints < 1 || maximumCodePoints > 1000) throw new RangeError('Excerpt budget must be 1–1000 code points.');
+  const text = typeof value === 'string' ? value : ''; let start = text.length;
+  for (let count = 0; count < maximumCodePoints && start > 0; count++) {
+    const low = text.charCodeAt(--start);
+    if (low >= 0xdc00 && low <= 0xdfff && start > 0) {
+      const high = text.charCodeAt(start - 1);
+      if (high >= 0xd800 && high <= 0xdbff) start--;
+    }
+  }
+  if (!start) return text;
+  // If a bounded tail begins inside a grapheme (combining/ZWJ sequence), omit
+  // that incomplete cluster. Older engines still preserve surrogate pairs.
+  const segment = graphemes?.segment(text).containing(start);
+  if (segment && segment.index < start) start = segment.index + segment.segment.length;
+  return '… ' + text.slice(start);
+}
+
 export function readableWork(events, turnStatus = 'running') {
   const ordered = [...new Map(events.map(event => [event.sequence, event])).values()].sort((a, b) => a.sequence - b.sequence);
   const blocks = new Map(); const operations = new Map();

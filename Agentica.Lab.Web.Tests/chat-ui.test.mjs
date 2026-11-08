@@ -275,7 +275,36 @@ test('retained attempts expose known failed-call usage without inventing unknown
   assert.match(rejected, /not dispatched/); assert.doesNotMatch(rejected, /usage unknown/);
   assert.match(usageLabel({ provider: { input_tokens: 12, output_tokens: 8 } }), /12 input tokens/);
 });
-import { readableWork } from '../Agentica.Lab.Web/wwwroot/chat-work.mjs';
+import { readableWork, recentWorkExcerpt } from '../Agentica.Lab.Web/wwwroot/chat-work.mjs';
+
+test('compact current summary advances past its old prefix without changing the retained text', () => {
+  const earlier = 'Old approach. '.repeat(40);
+  const current = earlier + 'The new source check is complete.';
+  assert.equal(recentWorkExcerpt('Short exact text.'), 'Short exact text.');
+  assert.notEqual(recentWorkExcerpt(earlier), recentWorkExcerpt(current));
+  assert.match(recentWorkExcerpt(current), /^… /);
+  assert.ok(recentWorkExcerpt(current).endsWith('The new source check is complete.'));
+  assert.equal(Array.from(recentWorkExcerpt(current).slice(2)).length, 220);
+  assert.equal(current, earlier + 'The new source check is complete.');
+});
+
+test('recent excerpts preserve Unicode pairs and start at a complete grapheme boundary', () => {
+  const text = 'Earlier material. ' + '🧭👩‍🔬e\u0301'.repeat(100) + ' latest';
+  const result = recentWorkExcerpt(text, 13); const tail = result.slice(2);
+  assert.match(result, /^… /); assert.ok(text.endsWith(tail));
+  assert.ok(Array.from(tail).length <= 13); assert.equal(tail.isWellFormed(), true);
+  const start = text.length - tail.length;
+  assert.equal(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text).containing(start).index, start);
+});
+
+test('equal-length snapshot disagreements are visible even when raw capture length matches', () => {
+  const work = readableWork([
+    { sequence: 1, type: 'provider.summary.delta', callId: 'c', data: { text: 'ABXD', source: { version: 1, itemId: 'r', summaryIndex: 0 } } },
+    { sequence: 2, type: 'provider.item', callId: 'c', data: { type: 'response.reasoning_summary_part.done', item_id: 'r', summary_index: 0, part: { text: 'ABCD' } } }
+  ], 'completed');
+  assert.equal(work.blocks[0].capturedText.length, work.blocks[0].text.length);
+  assert.equal(work.blocks[0].gap, true); assert.equal(work.blocks[0].capturedText, 'ABXD'); assert.equal(work.blocks[0].text, 'ABCD');
+});
 
 test('readable work preserves forty exact fragments in one real summary block across replayed pages', () => {
   const fragments = Array.from({ length: 40 }, (_, index) => index % 3 === 0 ? ' ' : index % 3 === 1 ? 'same' : '\r\n');

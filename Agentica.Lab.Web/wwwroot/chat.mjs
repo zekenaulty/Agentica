@@ -1,7 +1,7 @@
 // Conversation state belongs to Lab. This page never stores provider credentials or
 // promotes diagnostic events into the conversation's input history.
 import { renderMarkdown } from './chat-markdown.mjs';
-import { readableWork } from './chat-work.mjs';
+import { readableWork, recentWorkExcerpt } from './chat-work.mjs';
 export const isTerminal = status => !['queued', 'pending', 'running', 'active', 'starting', 'cancelling'].includes(String(status ?? '').toLowerCase());
 export const depthPresets = Object.freeze({
   minimal: { maxHistoryMessages: 4, maxInputCharacters: 12000 },
@@ -572,7 +572,7 @@ function startChat() {
     const status = turn.assistantText ? 'Writing the answer' : current?.status === 'running' ? `Running ${current.title}` : work.blocks.length ? 'Working through the request' : 'Waiting for provider response';
     if (elements.workStatus.textContent !== status) elements.workStatus.textContent = status;
     elements.workStatus.hidden = finished;
-    const excerpt = Array.from(work.blocks.at(-1)?.text ?? '').slice(0, 220).join('');
+    const excerpt = recentWorkExcerpt(work.blocks.at(-1)?.text);
     if (elements.workExcerpt.textContent !== excerpt && !selectionIn(elements.workExcerpt)) elements.workExcerpt.textContent = excerpt;
     elements.workExcerpt.hidden = finished || !excerpt || elements.work.open;
     elements.work.hidden = !events.length && !turn.traceCount;

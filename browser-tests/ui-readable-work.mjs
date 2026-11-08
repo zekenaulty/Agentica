@@ -54,6 +54,8 @@ try {
   const characters = Array.from(summary);
   const fragments = Array.from({ length: 40 }, (_, index) => characters.slice(Math.floor(index * characters.length / 40), Math.floor((index + 1) * characters.length / 40)).join(''));
   for (const text of fragments) await emit(event('provider.summary.delta', { text, source: { version: 1, itemId: 'reason-a', outputIndex: 0, summaryIndex: 0 } }));
+  assert.match(await page.locator('.work-excerpt').textContent(), /^… /, 'A bounded recent excerpt marks omitted earlier text.');
+  assert.match(await page.locator('.work-excerpt').textContent(), /A successful lookup still needs a useful result\.$/);
   await work.locator(':scope > summary').click();
   await page.waitForFunction(() => document.querySelectorAll('.work-block').length === 1);
   assert.equal(await page.locator('.work-block h4').count(), 1);
@@ -65,6 +67,7 @@ try {
   const selected = await page.evaluate(() => document.getSelection().toString());
   const more = '\n\nThe source check is complete.';
   await emit(event('provider.summary.delta', { text: more, source: { version: 1, itemId: 'reason-a', outputIndex: 0, summaryIndex: 0 } }));
+  assert.match(await page.locator('.work-excerpt').textContent(), /The source check is complete\.$/, 'Recent text keeps advancing beyond the original preview limit.');
   assert.equal(await page.evaluate(() => document.getSelection().toString()), selected);
   await page.getByRole('button', { name: 'New summary text · show latest' }).click();
   assert.match(await page.locator('.work-block .markdown-body').textContent(), /source check is complete/);
