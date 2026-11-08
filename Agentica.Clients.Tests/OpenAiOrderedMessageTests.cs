@@ -107,7 +107,8 @@ public sealed class OpenAiOrderedMessageTests
         {
             Messages = [new(LlmMessageRole.System, "<host_observation receipt=\"r1\">accepted tool result</host_observation>"),
                 new(LlmMessageRole.Developer, "respond from the accepted result")],
-            NativeContinuation = imported, AppendToNativeContinuation = true
+            NativeContinuation = imported,
+            AppendToNativeContinuation = true
         };
         var input = Body(next).GetProperty("input");
         Assert.Equal(9, input.GetArrayLength());
@@ -161,8 +162,11 @@ public sealed class OpenAiOrderedMessageTests
     {
         AssertCode("native_tool_linkage_required", Frame() with { Messages = [new(LlmMessageRole.Tool, "host observation without provider call id")] });
         AssertCode("ordered_message_mode_required", Frame() with { MessageMode = LlmMessageMode.Legacy });
-        AssertCode("prompt_cache_breakpoint_limit", Frame() with { Messages = Enumerable.Range(0, 5)
-            .Select(_ => new LlmMessage(LlmMessageRole.System, "stable") { CacheBreakpoint = new() }).ToArray() });
+        AssertCode("prompt_cache_breakpoint_limit", Frame() with
+        {
+            Messages = Enumerable.Range(0, 5)
+            .Select(_ => new LlmMessage(LlmMessageRole.System, "stable") { CacheBreakpoint = new() }).ToArray()
+        });
     }
 
     [Theory]
@@ -196,7 +200,8 @@ public sealed class OpenAiOrderedMessageTests
         new(LlmMessageRole.Developer, "application contract"), new(LlmMessageRole.User, "earlier"),
         new(LlmMessageRole.Assistant, "historical answer") { Phase = LlmAssistantPhase.FinalAnswer },
         new(LlmMessageRole.User, " latest participant input ")
-    ]) { MessageMode = LlmMessageMode.Ordered, PromptCache = new(LlmPromptCacheMode.Explicit) };
+    ])
+    { MessageMode = LlmMessageMode.Ordered, PromptCache = new(LlmPromptCacheMode.Explicit) };
 
     private static JsonElement Body(LlmRequest request) => JsonSerializer.SerializeToElement(new OpenAiResponsesLlmClient(Options).BuildRequestBody(request, request.ModelId));
     private static string Text(JsonElement item) => item.GetProperty("content")[0].GetProperty("text").GetString()!;
@@ -205,9 +210,15 @@ public sealed class OpenAiOrderedMessageTests
     {
         Content = new StringContent("data: " + JsonSerializer.Serialize(new
         {
-            type = "response.completed", response = new { id = "response-fixture", status = "completed", model = "fixture-model",
+            type = "response.completed",
+            response = new
+            {
+                id = "response-fixture",
+                status = "completed",
+                model = "fixture-model",
                 output = new[] { new { type = "message", role = "assistant", phase = "commentary", content = new[] { new { type = "output_text", text } } } },
-                usage = new { input_tokens = 42, output_tokens = 7 } }
+                usage = new { input_tokens = 42, output_tokens = 7 }
+            }
         }) + "\n\n", Encoding.UTF8, "text/event-stream")
     };
 }
