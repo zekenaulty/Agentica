@@ -1,6 +1,7 @@
 // Conversation state belongs to Lab. This page never stores provider credentials or
 // promotes diagnostic events into the conversation's input history.
 import { renderMarkdown } from './chat-markdown.mjs';
+import { readableWork } from './chat-work.mjs';
 export const isTerminal = status => !['queued', 'pending', 'running', 'active', 'starting', 'cancelling'].includes(String(status ?? '').toLowerCase());
 export const depthPresets = Object.freeze({
   minimal: { maxHistoryMessages: 4, maxInputCharacters: 12000 },
@@ -370,8 +371,15 @@ function startChat() {
     user.append(node('div', 'message-label', 'You'), userContent); article.append(user);
     const assistant = node('div', 'assistant-message'); const assistantLabel = node('div', 'message-label', 'Agentica Lab');
     const content = node('div', 'message-content markdown-body'); const placeholder = node('div', 'assistant-placeholder');
+    const answerPending = node('button', 'work-inspect', 'New answer text · show latest'); answerPending.type = 'button'; answerPending.hidden = true;
+    const workStatus = node('p', 'work-status'); workStatus.setAttribute('role', 'status');
+    const workExcerpt = node('p', 'work-excerpt');
+    const work = node('details', 'turn-work'); const workLabel = node('summary', '', 'Work');
+    const workBody = node('div', 'work-body'); const workBlocks = node('div', 'work-blocks'); const workOperations = node('div', 'work-operations');
+    const workCoverage = node('p', 'trace-coverage'); const workRead = node('button', 'button secondary', 'Read retained work'); workRead.type = 'button';
+    workBody.append(workOperations, workBlocks, workCoverage, workRead); work.append(workLabel, workBody);
     const meta = node('div', 'turn-meta'); const error = node('div', 'turn-error'); const continuity = node('div', 'continuity-label'); const answerSources = node('div', 'answer-sources');
-    assistant.append(assistantLabel, content, placeholder, answerSources, meta, error, continuity); article.append(assistant);
+    assistant.append(assistantLabel, workStatus, workExcerpt, work, content, answerPending, placeholder, answerSources, meta, error, continuity); article.append(assistant);
     const trace = node('details', 'turn-trace'); const traceLabel = node('summary'); trace.append(traceLabel);
     const traceContent = node('div', 'trace-content'); const activity = node('div', 'trace-activity');
     const summary = node('section', 'trace-summary'); summary.append(node('h4', '', 'Provider reasoning summary')); const summaryText = node('pre'); summary.append(summaryText);
@@ -388,9 +396,16 @@ function startChat() {
     const resumeLive = node('button', 'button secondary', 'Resume live'); resumeLive.type = 'button'; resumeLive.title = 'Show the latest bounded trace tail. Retained inspection remains available. Makes no provider call.';
     const pageInfo = node('span'); pageControls.append(load, restart, resumeLive, pageInfo);
     traceContent.append(activity, summary, absence, coverage, attemptInspector.section, requestInspector.section, contextInspector.section, recallInspector.section, searchInspector.section, nativeInspector.section, sourceInspector.section, settingsInspector.section, timelineSection, pageControls); trace.append(traceContent); article.append(trace);
-    const entry = { article, content, placeholder, answerSources, meta, error, continuity, trace, traceLabel, activity, summary, summaryText, absence, coverage, timeline, timelineSection, timelineLabel, attemptInspector, requestInspector, contextInspector, nativeInspector, sourceInspector, searchInspector, recallInspector, load, resumeLive, pageInfo };
+    const entry = { article, content, placeholder, answerSources, meta, error, continuity, trace, traceLabel, activity, summary, summaryText, absence, coverage, timeline, timelineSection, timelineLabel, attemptInspector, requestInspector, contextInspector, nativeInspector, sourceInspector, searchInspector, recallInspector, load, resumeLive, pageInfo,
+      work, workLabel, workStatus, workExcerpt, workBlocks, workOperations, workCoverage, workRead, workNodes: new Map(), answerPending };
     state.nodes.set(turn.id, entry); state.traces.set(turn.id, newTrace(turn));
     trace.addEventListener('toggle', () => { if (trace.open && !state.traces.get(turn.id)?.loaded) loadTrace(turn.id); });
+    work.addEventListener('toggle', () => {
+      if (work.open && !state.traces.get(turn.id)?.loaded) loadTraceTail(turn.id);
+      renderTrace(turn.id);
+    });
+    workRead.addEventListener('click', () => { if (state.traces.get(turn.id)?.after) restart.click(); else loadTrace(turn.id); });
+    answerPending.addEventListener('click', () => { document.getSelection()?.removeAllRanges(); renderAnswer(turn, entry); });
     for (const inspector of [timelineSection, attemptInspector.section, requestInspector.section, contextInspector.section, nativeInspector.section, sourceInspector.section, searchInspector.section, recallInspector.section]) inspector.addEventListener('toggle', () => { if (inspector.open) renderTrace(turn.id); });
     load.addEventListener('click', () => loadTrace(turn.id));
     restart.addEventListener('click', () => {
@@ -415,8 +430,12 @@ function startChat() {
     const text = turn.assistantText ?? ''; const presentation = citationPresentation(text, events);
     const signature = JSON.stringify(presentation.inline);
     if (elements.renderedText !== text || elements.renderedCitations !== signature) {
+      if (selectionIn(elements.content)) elements.answerPending.hidden = false;
+      else {
       elements.markdown = renderMarkdown(elements.content, text, { citations: presentation.inline, createCitation: citation => sourceLink(citation, true) });
       elements.renderedText = text; elements.renderedCitations = signature;
+      elements.answerPending.hidden = true;
+      }
     }
     elements.content.hidden = !text; elements.answerSources.replaceChildren(); elements.answerSources.hidden = !presentation.sources.length && !retained?.citationCoverage;
     if (retained?.citationCoverage) elements.answerSources.append(node('p', 'micro', retained.citationCoverage));
@@ -450,7 +469,7 @@ function startChat() {
       requestAnimationFrame(() => {
         if (state.traces.get(id) !== trace) return;
         trace.renderPending = false; const turn = turnById(id); if (turn) updateTurn(turn); renderTrace(id);
-        if (trace.followOutput) { trace.followOutput = false; scrollLatest(true); }
+        if (trace.followOutput) { trace.followOutput = false; if (!selectionIn($('transcript'))) scrollLatest(true); }
       });
     }
   }
@@ -489,6 +508,7 @@ function startChat() {
     const events = trace.inspecting ? trace.inspectionEvents : trace.events;
     const omitted = trace.inspecting ? trace.inspectionOmitted : trace.windowOmitted;
     const fullCoverage = events.length === (turn.traceCount ?? 0) && (!events.length || (events[0].sequence === 1 && events.at(-1).sequence === turn.traceCount));
+    renderWork(turn, elements, events, fullCoverage, trace);
     const summary = summarizeTrace(events); elements.summary.hidden = !summary; elements.summaryText.textContent = summary;
     elements.absence.hidden = Boolean(summary);
     elements.absence.textContent = !turn.settings?.reasoningSummary ? 'Provider reasoning summary was not requested. Private reasoning is not exposed.' : !isTerminal(turn.status) ? 'Summary requested; none emitted in the loaded trace yet.' : !fullCoverage ? 'Summary status is incomplete in this trace window; inspect retained pages before inferring absence.' : 'Provider reasoning summary was not emitted or is unsupported. Private reasoning is not exposed.';
@@ -545,6 +565,60 @@ function startChat() {
     elements.load.textContent = trace.loading ? 'Loading…' : fullCoverage ? 'Retained trace loaded' : !trace.loaded ? 'Load retained trace' : trace.hasMore ? 'Load next 100 events' : 'Retained trace loaded';
     const range = events.length ? ` · sequences ${events[0].sequence}–${events.at(-1).sequence}` : '';
     elements.pageInfo.textContent = `${trace.inspecting ? 'Retained inspection' : 'Live tail'} · ${events.length.toLocaleString()} visible${range} · ${fullCoverage ? 'full retained sequence loaded' : `page cursor ${trace.after}`}`;
+  }
+  function renderWork(turn, elements, events, fullCoverage, trace) {
+    const work = readableWork(events, turn.status); const finished = isTerminal(turn.status);
+    const current = work.operations.at(-1);
+    const status = turn.assistantText ? 'Writing the answer' : current?.status === 'running' ? `Running ${current.title}` : work.blocks.length ? 'Working through the request' : 'Waiting for provider response';
+    if (elements.workStatus.textContent !== status) elements.workStatus.textContent = status;
+    elements.workStatus.hidden = finished;
+    const excerpt = Array.from(work.blocks.at(-1)?.text ?? '').slice(0, 220).join('');
+    if (elements.workExcerpt.textContent !== excerpt && !selectionIn(elements.workExcerpt)) elements.workExcerpt.textContent = excerpt;
+    elements.workExcerpt.hidden = finished || !excerpt || elements.work.open;
+    elements.work.hidden = !events.length && !turn.traceCount;
+    elements.workLabel.textContent = `Work${work.blocks.length ? ` · ${work.blocks.length} summary section${work.blocks.length === 1 ? '' : 's'}` : ''}${work.operations.length ? ` · ${work.operations.length} observed operation${work.operations.length === 1 ? '' : 's'}` : ''}`;
+    if (!elements.work.open) return;
+    const keys = new Set(); let blockPosition = 0;
+    for (const block of work.blocks) {
+      keys.add(block.key); let view = elements.workNodes.get(block.key);
+      if (!view) {
+        const article = node('section', 'work-block'); const heading = node('h4', '', 'Reasoning summary'); const state = node('p', 'work-block-state'); const body = node('div', 'markdown-body');
+        const inspect = node('button', 'work-inspect', 'Inspect fragments'); inspect.type = 'button';
+        const latest = node('button', 'work-inspect', 'New summary text · show latest'); latest.type = 'button'; latest.hidden = true;
+        latest.addEventListener('click', () => { document.getSelection()?.removeAllRanges(); renderTrace(turn.id); });
+        inspect.addEventListener('click', () => { elements.trace.open = true; elements.timelineSection.open = true; renderTrace(turn.id); });
+        article.append(heading, state, body, latest, inspect); view = { article, state, body, latest }; elements.workNodes.set(block.key, view);
+      }
+      const notes = [block.reconstructed ? 'Reconstructed grouping' : '', block.gap ? 'Provider snapshot · fragment coverage differs' : '',
+        block.status === 'incomplete' ? 'Incomplete' : block.status === 'end-not-observed' ? 'End boundary not observed' : ''].filter(Boolean).join(' · ');
+      if (view.state.textContent !== notes) view.state.textContent = notes;
+      view.state.hidden = !notes;
+      if (view.text !== block.text) {
+        if (selectionIn(view.body)) view.latest.hidden = false;
+        else { renderMarkdown(view.body, block.text); view.text = block.text; view.latest.hidden = true; }
+      }
+      if (elements.workBlocks.children[blockPosition] !== view.article)
+        elements.workBlocks.insertBefore(view.article, elements.workBlocks.children[blockPosition] ?? null);
+      blockPosition++;
+    }
+    for (const [key, view] of elements.workNodes) if (!keys.has(key)) { view.article.remove(); elements.workNodes.delete(key); }
+    const operationSignature = JSON.stringify(work.operations);
+    if (elements.operationSignature !== operationSignature) {
+      elements.workOperations.replaceChildren(...work.operations.map(operation => {
+        const row = node('section', 'work-operation'); row.append(node('strong', '', operation.title), node('span', 'work-operation-status', operation.status));
+        if (operation.preview) row.append(node('p', '', Array.from(operation.preview).slice(0, 700).join('')));
+        return row;
+      }));
+      elements.operationSignature = operationSignature;
+    }
+    const coverage = [!fullCoverage ? 'Showing work from the loaded trace window. Read retained work for earlier evidence.' : '', trace.gap, trace.streamError,
+      turn.droppedTraceCount ? `${turn.droppedTraceCount} events exceeded service retention; this view has a capture gap.` : ''].filter(Boolean).join(' ');
+    elements.workCoverage.textContent = coverage; elements.workCoverage.hidden = !coverage;
+    elements.workRead.hidden = fullCoverage; elements.workRead.disabled = trace.loading;
+  }
+  function selectionIn(element) {
+    const selection = document.getSelection();
+    return selection && !selection.isCollapsed && (element.contains(selection.anchorNode) || element.contains(selection.focusNode));
   }
   async function loadTrace(id) {
     const trace = state.traces.get(id); if (!trace || trace.loading || (trace.loaded && !trace.hasMore)) return;
@@ -606,7 +680,7 @@ function startChat() {
       if (generation !== state.generation) return;
       let value; try { value = JSON.parse(event.data); } catch { trace.streamError = 'An invalid stream event was received; refresh the retained trace.'; renderTrace(turn.id); return; }
       if (!Number.isSafeInteger(value.sequence) || value.sequence <= trace.liveLast) return;
-      const stick = nearBottom();
+      const stick = nearBottom() && !selectionIn($('transcript'));
       if (trace.liveLast && value.sequence > trace.liveLast + 1) trace.gap = `Stream sequence gap: expected ${trace.liveLast + 1}, received ${value.sequence}. Inspect the retained trace.`;
       trace.liveLast = value.sequence; turn.traceCount = Math.max(turn.traceCount ?? 0, value.sequence);
       appendEvents(turn.id, [value]);

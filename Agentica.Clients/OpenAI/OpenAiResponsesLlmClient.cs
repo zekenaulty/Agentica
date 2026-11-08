@@ -142,18 +142,21 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
                         var root = parsed.RootElement;
                         var kind = GetString(root, "type") ?? eventName;
                         LlmProviderObservations.Responses(recorder, root);
+                        var source = kind is null ? null : OpenAiReadableStream.Source(root, _providerName, kind);
                         if (search?.Observe(root, kind) == true)
                             yield return new LlmStreamEvent(LlmStreamEventKind.Activity, "web_search." + kind)
-                            { WebSearch = recorder.WebSearch };
+                            { WebSearch = recorder.WebSearch, Source = source };
                         if (completed && kind is not null)
                         {
                             throw Failure("data_after_completion", LlmClientErrorKind.Transient);
                         }
+                        if (OpenAiReadableStream.Boundary(root, _providerName, kind) is { } boundary)
+                            yield return boundary;
                         switch (kind)
                         {
                             case "response.created":
                             case "response.in_progress":
-                                yield return new LlmStreamEvent(LlmStreamEventKind.Activity, kind);
+                                yield return new LlmStreamEvent(LlmStreamEventKind.Activity, kind) { Source = source };
                                 break;
                             case "response.output_text.delta":
                                 var chunk = GetString(root, "delta");
@@ -162,7 +165,8 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
                                     if (chunk.Length > MaxOutputCharacters - text.Length)
                                         throw Failure("output_too_large", LlmClientErrorKind.BadRequest);
                                     text.Append(chunk);
-                                    yield return new LlmStreamEvent(LlmStreamEventKind.TextDelta, chunk);
+                                    yield return new LlmStreamEvent(LlmStreamEventKind.TextDelta, chunk)
+                                    { Source = source, Block = new(LlmStreamBlockKind.OutputText, LlmStreamBlockLifecycle.Delta) };
                                 }
                                 break;
                             case "response.reasoning_summary_text.delta":
@@ -174,7 +178,8 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
                                     summarySize += summary.Length;
                                     summaries.Add(new LlmThoughtSummary(summary, _providerName));
                                     yield return new LlmStreamEvent(
-                                        LlmStreamEventKind.ThoughtSummaryDelta, summary);
+                                        LlmStreamEventKind.ThoughtSummaryDelta, summary)
+                                    { Source = source, Block = new(LlmStreamBlockKind.ReasoningSummary, LlmStreamBlockLifecycle.Delta) };
                                 }
                                 break;
                             case "response.reasoning_text.delta":
@@ -182,7 +187,8 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
                                 {
                                     reasoningActivitySent = true;
                                     yield return new LlmStreamEvent(
-                                        LlmStreamEventKind.Activity, "reasoning.streaming");
+                                        LlmStreamEventKind.Activity, "reasoning.streaming")
+                                    { Source = source };
                                 }
                                 break;
                             case "response.output_item.done":
@@ -237,7 +243,8 @@ public class OpenAiResponsesLlmClient : ILlmStreamingClient
                                             [$"{_metadataPrefix}.response.store"] = "false",
                                             [$"{_metadataPrefix}.continuation.available"] =
                                                 (native is not null).ToString()
-                                        }, native));
+                                        }, native))
+                                { Source = source };
                                 break;
                             case "response.failed":
                             case "response.incomplete":

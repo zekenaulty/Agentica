@@ -126,6 +126,11 @@ public sealed class ExperimentExecutorTests
         var summary = Assert.Single(probe.Events, item => item.Type == "provider.summary.delta");
         Assert.Equal("reasoning-1", summary.ItemId);
         Assert.Equal("Checking evidence", Payload(summary).GetProperty("text").GetString());
+        var readableSource = JsonSerializer.SerializeToElement(summary.Data, HostProtocol.Json).GetProperty("source");
+        Assert.Equal(1, readableSource.GetProperty("version").GetInt32());
+        Assert.Equal("reasoning-1", readableSource.GetProperty("itemId").GetString());
+        Assert.Equal(0, readableSource.GetProperty("outputIndex").GetInt32());
+        Assert.Equal(1, readableSource.GetProperty("summaryIndex").GetInt32());
         Assert.Contains(probe.Events, item => item.Type == "provider.item" && item.ItemId == "reasoning-1");
         var source = Assert.Single(probe.Events, item => item.Type == "provider.record" &&
             Payload(item).GetProperty("type").GetString() == "response.reasoning_summary_text.delta");

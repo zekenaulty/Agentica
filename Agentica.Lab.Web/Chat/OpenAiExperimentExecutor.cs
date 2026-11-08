@@ -163,6 +163,8 @@ public sealed class OpenAiExperimentExecutor : IExperimentExecutor, IExperimentI
         {
             kind = item.Kind.ToString(),
             text = transport.RedactText(item.Text),
+            source = item.Source is null ? null : item.Source with { ItemId = transport.RedactText(item.Source.ItemId) },
+            block = item.Block is null ? null : item.Block with { TextSnapshot = transport.RedactText(item.Block.TextSnapshot) },
             usage = item.Response?.Usage
         }, transport.LatestCallId)).GetAwaiter().GetResult();
         if (_plannerFactory is not null)

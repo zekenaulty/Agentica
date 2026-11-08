@@ -68,7 +68,7 @@ const records = [
 running.traceCount = records.length;
 const posted = []; const traceReads = []; const payloadReads = []; const externalRequests = []; const unexpectedRequests = [];
 const pageErrors = []; const screenshots = [];
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, channel: process.env.AGENTICA_BROWSER_CHANNEL || undefined });
 try {
   const page = await browser.newPage({ viewport: { width: 1500, height: 1040 }, reducedMotion: 'reduce' });
   page.setDefaultTimeout(10000);
@@ -268,7 +268,8 @@ try {
   await turnNode(running).locator('.answer-sources a[href="https://example.test/code-source"]').waitFor();
   assert.equal(await turnNode(running).locator('.assistant-message .message-content .answer-citation').count(), 2);
   assert.equal(running.assistantText, citationSource);
-  await assertClosed(); assert.equal(traceReads.length, 1); assert.equal(payloadReads.length, 1);
+  await assertClosed(); assert.equal(traceReads.length, 2, 'One retained read and one explicitly requested Resume live read. Reload adds neither.'); assert.equal(payloadReads.length, 1);
+  assert.equal(traceReads.filter(url => new URL(url).searchParams.get('tail') === 'true').length, 1);
   assert.equal(await page.evaluate(() => globalThis.__markdownInjected), undefined);
   const fallback = await page.evaluate(async () => {
     const { renderMarkdown } = await import('/chat-markdown.mjs');
